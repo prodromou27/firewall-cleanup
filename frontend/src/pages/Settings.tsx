@@ -21,6 +21,7 @@ interface SettingsData {
   webhook_events?: string[]
   webhook_events_available?: string[]
   nvd_api_key_set?: boolean
+  syslog_listener?: { active: boolean; port: number; protocol?: string; cooldown_seconds?: number; reason?: string }
 }
 
 type Tab = 'overview' | 'thresholds' | 'services' | 'integrations' | 'api'
@@ -402,6 +403,38 @@ export function Settings() {
                   </p>
                 </div>
               </div>
+            </div>
+
+            {/* Syslog Listener status */}
+            <div className="card">
+              <SectionTitle icon={Bell} title="Real-Time Syslog Monitoring"
+                subtitle="Receives device syslogs and triggers immediate re-sync on policy-change events" />
+              {settings?.syslog_listener ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-700">Listener Status</p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        UDP port {settings.syslog_listener.port}
+                        {settings.syslog_listener.cooldown_seconds ? ` · ${settings.syslog_listener.cooldown_seconds}s cooldown` : ''}
+                      </p>
+                    </div>
+                    <span className={`badge ${settings.syslog_listener.active ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' : 'bg-amber-50 text-amber-700 ring-1 ring-amber-200'}`}>
+                      {settings.syslog_listener.active ? '● Active' : '○ Inactive'}
+                    </span>
+                  </div>
+                  {!settings.syslog_listener.active && (
+                    <p className="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
+                      Listener inactive. Configure your firewall to forward syslogs to this server on UDP port {settings.syslog_listener.port}.
+                      When a policy-change event is detected, an immediate sync is triggered automatically.
+                      <br /><span className="font-medium">Note:</span> Port 514 requires elevated privileges; default is 5140.
+                      Set <code className="bg-amber-100 px-1 rounded">SYSLOG_PORT=514</code> in <code className="bg-amber-100 px-1 rounded">.env</code> if running as root/admin.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400">Syslog status unavailable.</p>
+              )}
             </div>
 
             <div className="flex items-center gap-3">

@@ -61,10 +61,11 @@ interface FrameworkSummary {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const FRAMEWORK_META: Record<string, { color: string; bg: string; description: string }> = {
-  'pci-dss':  { color: 'text-red-700',    bg: 'bg-red-50 border-red-200',    description: 'Payment Card Industry Data Security Standard v4.0' },
-  'cis':      { color: 'text-blue-700',   bg: 'bg-blue-50 border-blue-200',  description: 'Center for Internet Security Controls v8' },
+  'pci-dss':  { color: 'text-red-700',    bg: 'bg-red-50 border-red-200',       description: 'Payment Card Industry Data Security Standard v4.0' },
+  'cis':      { color: 'text-blue-700',   bg: 'bg-blue-50 border-blue-200',     description: 'Center for Internet Security Controls v8' },
   'nist':     { color: 'text-purple-700', bg: 'bg-purple-50 border-purple-200', description: 'NIST Cybersecurity Framework 2.0' },
-  'iso27001': { color: 'text-green-700',  bg: 'bg-green-50 border-green-200', description: 'ISO/IEC 27001:2022 Information Security' },
+  'iso27001': { color: 'text-green-700',  bg: 'bg-green-50 border-green-200',   description: 'ISO/IEC 27001:2022 Information Security' },
+  'hipaa':    { color: 'text-teal-700',   bg: 'bg-teal-50 border-teal-200',     description: 'HIPAA Security Rule — Technical Safeguards (45 CFR § 164.312)' },
 }
 
 const STATUS_CFG = {
@@ -278,7 +279,7 @@ export function Compliance() {
             <Shield className="w-6 h-6 text-blue-600" /> Compliance
           </h1>
           <p className="text-sm text-gray-500 mt-1">
-            Automated checks against PCI-DSS, CIS, NIST CSF, and ISO 27001 frameworks
+            Automated checks against PCI-DSS, CIS, NIST CSF, ISO 27001, and HIPAA Security Rule
           </p>
         </div>
 

@@ -39,14 +39,26 @@ interface FormValues {
   sync_interval_hours: string  // empty string = disabled
 }
 
+interface TestPhase {
+  phase: string
+  ok: boolean
+  detail: string
+}
+
 interface TestInfo {
   // FortiGate
-  version?: string; serial?: string; hostname?: string; vdoms?: string[]; rule_count?: number
+  version?: string; serial?: string; hostname?: string
+  vdoms?: string[]; rule_count?: number; interface_count?: number; zone_count?: number
   // CheckPoint
   api_server_version?: string; is_mds?: boolean; management_type?: string
   domains?: { name: string; uid: string }[]
   packages?: { name: string; access_layers: string[] }[]
   gateways?: { name: string; type: string; version?: string }[]
+  // Palo Alto
+  model?: string; sw_version?: string; vsys_list?: string[]
+  object_count?: number; app_count?: number
+  // Cisco ASA
+  software_version?: string; interfaces?: { name: string; ip: string }[]
 }
 
 function DeviceModal({
@@ -66,6 +78,8 @@ function DeviceModal({
   const [testing, setTesting] = useState(false)
   const [testSuccess, setTestSuccess] = useState<boolean | null>(null)
   const [testError, setTestError] = useState<string | null>(null)
+  const [testHint, setTestHint] = useState<string | null>(null)
+  const [testPhases, setTestPhases] = useState<TestPhase[]>([])
   const [testInfo, setTestInfo] = useState<TestInfo | null>(null)
 
   const { register, handleSubmit, watch, formState: { errors } } = useForm<FormValues>({
@@ -125,15 +139,18 @@ function DeviceModal({
 
   const handleTest = async () => {
     if (!device) return
-    setTesting(true); setTestSuccess(null); setTestError(null); setTestInfo(null)
+    setTesting(true); setTestSuccess(null); setTestError(null); setTestHint(null)
+    setTestPhases([]); setTestInfo(null)
     try {
       const res = await testDevice(device.id)
+      setTestPhases(res.phases || [])
       if (res.success) {
         setTestSuccess(true)
         setTestInfo(res.info || null)
       } else {
         setTestSuccess(false)
         setTestError(res.error || 'Connection failed')
+        setTestHint(res.hint || null)
       }
     } catch (e) {
       setTestSuccess(false)
@@ -311,40 +328,71 @@ function DeviceModal({
             )}
           </div>
 
-          {/* Test result panel */}
-          {testSuccess === false && testError && (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 flex items-start gap-2">
-              <XCircle className="w-4 h-4 mt-0.5 shrink-0" />
-              <span>{testError}</span>
+          {/* ── Diagnostic phases ── */}
+          {testPhases.length > 0 && (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-1.5">
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Connection Diagnostics</p>
+              {testPhases.map((ph, i) => (
+                <div key={i} className="flex items-start gap-2 text-xs">
+                  {ph.ok
+                    ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500 mt-0.5 shrink-0" />
+                    : <XCircle className="w-3.5 h-3.5 text-red-500 mt-0.5 shrink-0" />}
+                  <div>
+                    <span className={clsx('font-semibold', ph.ok ? 'text-gray-700' : 'text-red-700')}>{ph.phase}</span>
+                    <span className="text-gray-400 ml-1">— {ph.detail}</span>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
 
+          {/* ── Failure panel ── */}
+          {testSuccess === false && testError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3 space-y-2">
+              <div className="flex items-start gap-2 text-sm text-red-700">
+                <XCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                <span className="font-medium">{testError}</span>
+              </div>
+              {testHint && (
+                <div className="text-xs text-red-600 bg-white border border-red-100 rounded p-2 whitespace-pre-line leading-relaxed">
+                  {testHint}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Success panel ── */}
           {testSuccess === true && testInfo && (
             <div className="rounded-lg border border-green-200 bg-green-50 p-3 space-y-2">
               <div className="flex items-center gap-2 text-green-700 text-sm font-medium">
                 <CheckCircle2 className="w-4 h-4" /> Connected successfully
               </div>
 
-              {/* FortiGate info */}
+              {/* FortiGate */}
               {testInfo.hostname && (
                 <div className="text-xs text-gray-600 space-y-0.5">
-                  <p><span className="font-medium">Hostname:</span> {testInfo.hostname}</p>
-                  <p><span className="font-medium">Version:</span> {testInfo.version}</p>
-                  <p><span className="font-medium">Serial:</span> {testInfo.serial}</p>
-                  {testInfo.rule_count != null && <p><span className="font-medium">Rules:</span> {testInfo.rule_count}</p>}
+                  {[
+                    ['Hostname', testInfo.hostname],
+                    ['Version',  testInfo.version],
+                    ['Serial',   testInfo.serial],
+                    ['Rules',    testInfo.rule_count != null ? String(testInfo.rule_count) : null],
+                    ['Interfaces', testInfo.interface_count != null ? String(testInfo.interface_count) : null],
+                    ['Zones',    testInfo.zone_count != null ? String(testInfo.zone_count) : null],
+                  ].filter(([, v]) => v).map(([k, v]) => (
+                    <p key={k as string}><span className="font-medium">{k}:</span> {v}</p>
+                  ))}
                   {testInfo.vdoms && testInfo.vdoms.length > 1 && (
                     <p><span className="font-medium">VDOMs:</span> {testInfo.vdoms.join(', ')}</p>
                   )}
                 </div>
               )}
 
-              {/* CheckPoint info */}
+              {/* CheckPoint */}
               {testInfo.api_server_version && (
                 <div className="text-xs text-gray-600 space-y-1">
                   <p><span className="font-medium">API Version:</span> {testInfo.api_server_version}</p>
-                  <p><span className="font-medium">Type:</span> {testInfo.is_mds ? '🏢 Multi-Domain Server (MDS)' : testInfo.management_type || 'SmartCenter'}</p>
+                  <p><span className="font-medium">Type:</span> {testInfo.is_mds ? '🏢 Multi-Domain (MDS)' : testInfo.management_type || 'SmartCenter'}</p>
 
-                  {/* Domains (MDS) */}
                   {testInfo.is_mds && testInfo.domains && testInfo.domains.length > 0 && (
                     <div>
                       <p className="font-medium text-gray-700">Domains ({testInfo.domains.length}):</p>
@@ -356,7 +404,6 @@ function DeviceModal({
                     </div>
                   )}
 
-                  {/* Policy packages */}
                   {testInfo.packages && testInfo.packages.length > 0 && (
                     <div>
                       <p className="font-medium text-gray-700">Policy Packages ({testInfo.packages.length}):</p>
@@ -373,20 +420,49 @@ function DeviceModal({
                     </div>
                   )}
 
-                  {/* Gateways */}
                   {testInfo.gateways && testInfo.gateways.length > 0 && (
                     <div>
-                      <p className="font-medium text-gray-700">Gateways / Clusters ({testInfo.gateways.length}):</p>
+                      <p className="font-medium text-gray-700">Gateways ({testInfo.gateways.length}):</p>
                       <div className="flex flex-wrap gap-1 mt-0.5">
                         {testInfo.gateways.slice(0, 8).map(gw => (
                           <span key={gw.name} className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs">{gw.name}</span>
                         ))}
-                        {testInfo.gateways.length > 8 && (
-                          <span className="text-gray-400 text-xs">+{testInfo.gateways.length - 8} more</span>
-                        )}
+                        {testInfo.gateways.length > 8 && <span className="text-gray-400 text-xs">+{testInfo.gateways.length - 8} more</span>}
                       </div>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Palo Alto */}
+              {testInfo.model && (
+                <div className="text-xs text-gray-600 space-y-0.5">
+                  {[
+                    ['Model',      testInfo.model],
+                    ['PAN-OS',     testInfo.version || testInfo.sw_version],
+                    ['Rules',      testInfo.rule_count != null ? String(testInfo.rule_count) : null],
+                    ['Objects',    testInfo.object_count != null ? String(testInfo.object_count) : null],
+                    ['App Defs',   testInfo.app_count != null ? String(testInfo.app_count) : null],
+                  ].filter(([, v]) => v).map(([k, v]) => (
+                    <p key={k as string}><span className="font-medium">{k}:</span> {v}</p>
+                  ))}
+                  {testInfo.vsys_list && testInfo.vsys_list.length > 0 && (
+                    <p><span className="font-medium">vsys:</span> {testInfo.vsys_list.join(', ')}</p>
+                  )}
+                </div>
+              )}
+
+              {/* Cisco ASA */}
+              {(testInfo.software_version || (testInfo.rule_count != null && !testInfo.hostname && !testInfo.model && !testInfo.api_server_version)) && (
+                <div className="text-xs text-gray-600 space-y-0.5">
+                  {[
+                    ['ASA Version', testInfo.software_version || testInfo.version],
+                    ['ACL Rules',   testInfo.rule_count != null ? String(testInfo.rule_count) : null],
+                    ['Interfaces',  testInfo.interface_count != null ? String(testInfo.interface_count) : null],
+                    ['Net Objects', testInfo.object_count != null ? String(testInfo.object_count) : null],
+                  ].filter(([, v]) => v).map(([k, v]) => (
+                    <p key={k as string}><span className="font-medium">{k}:</span> {v}</p>
+                  ))}
                 </div>
               )}
             </div>

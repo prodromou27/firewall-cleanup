@@ -250,28 +250,34 @@ def bulk_update_findings(
     if body.priority and body.priority not in VALID_PRIORITIES:
         raise HTTPException(status_code=400, detail="Invalid priority.")
 
+    # Cap batch size to prevent abuse
+    finding_ids = finding_ids[:500]
+
+    findings = (
+        db.query(Finding)
+        .filter(Finding.id.in_(finding_ids))
+        .all()
+    )
     updated = 0
-    for fid in finding_ids:
-        f = db.query(Finding).filter(Finding.id == fid).first()
-        if f:
-            old_status = f.status
-            if body.status:
-                f.status = body.status
-            if body.engineer_comment is not None:
-                f.engineer_comment = body.engineer_comment
-            if body.priority is not None:
-                f.priority = body.priority
-            if body.assigned_to is not None:
-                f.assigned_to = body.assigned_to
-            if body.due_date is not None:
-                f.due_date = body.due_date
-            db.add(FindingComment(
-                finding_id=fid, author="engineer",
-                comment=body.engineer_comment or "",
-                old_status=old_status,
-                new_status=body.status or old_status,
-            ))
-            updated += 1
+    for f in findings:
+        old_status = f.status
+        if body.status:
+            f.status = body.status
+        if body.engineer_comment is not None:
+            f.engineer_comment = body.engineer_comment
+        if body.priority is not None:
+            f.priority = body.priority
+        if body.assigned_to is not None:
+            f.assigned_to = body.assigned_to
+        if body.due_date is not None:
+            f.due_date = body.due_date
+        db.add(FindingComment(
+            finding_id=f.id, author="engineer",
+            comment=body.engineer_comment or "",
+            old_status=old_status,
+            new_status=body.status or old_status,
+        ))
+        updated += 1
 
     db.commit()
     return {"updated": updated}

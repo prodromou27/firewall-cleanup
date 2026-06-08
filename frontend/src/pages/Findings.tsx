@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import {
   getFindings, updateFinding, bulkUpdateFindings, getPolicies,
-  addFindingComment, getFindingComments, getFindingsExportUrl,
+  addFindingComment, getFindingComments, getFindingsExportUrl, API_KEY,
 } from '../api/client'
 import { SeverityBadge, StatusBadge } from '../components/ui/SeverityBadge'
 import type { Finding, Policy, AffectedRuleData, FindingComment } from '../types'
@@ -856,16 +856,37 @@ export function Findings() {
 
   const hasFilters = !!(severity || findingType || status || policyId)
 
-  // Build export URL with current filters
-  const exportParams: Record<string, string> = {}
-  if (customerId) exportParams.customer_id = customerId
-  if (policyId) exportParams.policy_id = policyId
-  if (severity) exportParams.severity = severity
-  if (findingType) exportParams.finding_type = findingType
-  if (status) exportParams.status = status
-  const exportUrl = getFindingsExportUrl(exportParams)
+  // Build export — fetch with auth header then trigger blob download
+  const [exporting, setExporting] = useState(false)
+  const handleExportCsv = async () => {
+    setExporting(true)
+    try {
+      const params: Record<string, string> = {}
+      if (customerId) params.customer_id = customerId
+      if (policyId) params.policy_id = policyId
+      if (severity) params.severity = severity
+      if (findingType) params.finding_type = findingType
+      if (status) params.status = status
+      const url = getFindingsExportUrl(params)
+      const res = await fetch(url, {
+        headers: API_KEY ? { 'X-API-Key': API_KEY } : {},
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const blob = await res.blob()
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = 'findings.csv'
+      a.click()
+      URL.revokeObjectURL(a.href)
+    } catch (e) {
+      console.error('CSV export failed', e)
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const pageCount = Math.ceil(total / 50)
+
 
   return (
     <div>
@@ -876,14 +897,14 @@ export function Findings() {
             {total} finding{total !== 1 ? 's' : ''} · Click a row to review and update status
           </p>
         </div>
-        <a
-          href={exportUrl}
-          download="findings.csv"
+        <button
+          onClick={handleExportCsv}
+          disabled={exporting}
           className="btn-secondary"
         >
           <Download className="w-4 h-4" />
-          Export CSV
-        </a>
+          {exporting ? 'Exporting…' : 'Export CSV'}
+        </button>
       </div>
     <div className="page-body">
       {/* Quick preset chips */}

@@ -1,0 +1,200 @@
+{
+  "rulebase": [
+    {
+      "type": "access-section",
+      "name": "Internet Access",
+      "rulebase": [
+        {
+          "uid": "a1b2c3d4-0001",
+          "name": "Allow-Web-Outbound",
+          "rule-number": 1,
+          "source": [{"name": "Internal-Net", "uid": "obj-001"}],
+          "destination": [{"name": "Any", "uid": "any"}],
+          "service": [{"name": "HTTPS", "uid": "svc-https"}, {"name": "HTTP", "uid": "svc-http"}],
+          "action": {"name": "Accept"},
+          "track": {"type": {"name": "Log"}},
+          "enabled": true,
+          "comments": "Allow internal users to browse the web",
+          "hits": {"value": 54321, "last-date": {"iso-8601": "2026-05-15T10:30:00Z"}}
+        },
+        {
+          "uid": "a1b2c3d4-0002",
+          "name": "Allow-Any-Internet",
+          "rule-number": 2,
+          "source": [{"name": "Any", "uid": "any"}],
+          "destination": [{"name": "Any", "uid": "any"}],
+          "service": [{"name": "Any", "uid": "any"}],
+          "action": {"name": "Accept"},
+          "track": {"type": {"name": "None"}},
+          "enabled": true,
+          "comments": "Overly permissive any-any rule - no logging",
+          "hits": {"value": 892, "last-date": {"iso-8601": "2026-06-01T08:00:00Z"}}
+        }
+      ]
+    },
+    {
+      "type": "access-section",
+      "name": "DMZ Rules",
+      "rulebase": [
+        {
+          "uid": "a1b2c3d4-0003",
+          "name": "Allow-HTTPS-to-WebServers",
+          "rule-number": 3,
+          "source": [{"name": "Any", "uid": "any"}],
+          "destination": [{"name": "Web-Servers-Group", "uid": "obj-grp-001"}],
+          "service": [{"name": "HTTPS", "uid": "svc-https"}],
+          "action": {"name": "Accept"},
+          "track": {"type": {"name": "Log"}},
+          "enabled": true,
+          "comments": "External HTTPS to web servers",
+          "hits": {"value": 12340, "last-date": {"iso-8601": "2026-06-02T14:00:00Z"}}
+        },
+        {
+          "uid": "a1b2c3d4-0004",
+          "name": "Allow-HTTP-WebServer-01",
+          "rule-number": 4,
+          "source": [{"name": "Any", "uid": "any"}],
+          "destination": [{"name": "WebServer-01", "uid": "obj-002"}],
+          "service": [{"name": "HTTPS", "uid": "svc-https"}],
+          "action": {"name": "Accept"},
+          "track": {"type": {"name": "Log"}},
+          "enabled": true,
+          "comments": "Shadowed by rule 3 - WebServer-01 is in Web-Servers-Group",
+          "hits": {"value": 0}
+        },
+        {
+          "uid": "a1b2c3d4-0005",
+          "name": "Allow-RDP-Admin",
+          "rule-number": 5,
+          "source": [{"name": "Any", "uid": "any"}],
+          "destination": [{"name": "Any", "uid": "any"}],
+          "service": [{"name": "RDP", "uid": "svc-rdp"}],
+          "action": {"name": "Accept"},
+          "track": {"type": {"name": "Log"}},
+          "enabled": true,
+          "comments": "RDP access - high risk",
+          "hits": {"value": 87, "last-date": {"iso-8601": "2026-01-15T09:00:00Z"}}
+        },
+        {
+          "uid": "a1b2c3d4-0006",
+          "name": "Old-Migration-Rule",
+          "rule-number": 6,
+          "source": [{"name": "Internal-Net", "uid": "obj-001"}],
+          "destination": [{"name": "WebServer-01", "uid": "obj-002"}],
+          "service": [{"name": "HTTP", "uid": "svc-http"}],
+          "action": {"name": "Accept"},
+          "track": {"type": {"name": "Log"}},
+          "enabled": false,
+          "comments": "Disabled - was used during migration",
+          "hits": {"value": 0}
+        },
+        {
+          "uid": "a1b2c3d4-0007",
+          "name": "Allow-SSH-Temp",
+          "rule-number": 7,
+          "source": [{"name": "Internal-Net", "uid": "obj-001"}],
+          "destination": [{"name": "Web-Servers-Group", "uid": "obj-grp-001"}],
+          "service": [{"name": "SSH", "uid": "svc-ssh"}],
+          "action": {"name": "Accept"},
+          "track": {"type": {"name": "Log"}},
+          "enabled": true,
+          "comments": "Temp SSH access",
+          "hits": {"value": 3, "last-date": {"iso-8601": "2025-10-01T12:00:00Z"}}
+        },
+        {
+          "uid": "a1b2c3d4-0008",
+          "name": "Allow-HTTPS-to-WebServers-COPY",
+          "rule-number": 8,
+          "source": [{"name": "Any", "uid": "any"}],
+          "destination": [{"name": "Web-Servers-Group", "uid": "obj-grp-001"}],
+          "service": [{"name": "HTTPS", "uid": "svc-https"}],
+          "action": {"name": "Accept"},
+          "track": {"type": {"name": "Log"}},
+          "enabled": true,
+          "comments": "Duplicate of rule 3",
+          "hits": {"value": 0}
+        }
+      ]
+    }
+  ],
+  "objects": [
+    {
+      "uid": "obj-001",
+      "name": "Internal-Net",
+      "type": "network",
+      "subnet4": "192.168.0.0",
+      "mask-length4": 24,
+      "comments": "Internal network"
+    },
+    {
+      "uid": "obj-002",
+      "name": "WebServer-01",
+      "type": "host",
+      "ipv4-address": "10.10.20.10",
+      "comments": "Web Server 01"
+    },
+    {
+      "uid": "obj-003",
+      "name": "WebServer-02",
+      "type": "host",
+      "ipv4-address": "10.10.20.11",
+      "comments": "Web Server 02"
+    },
+    {
+      "uid": "obj-004",
+      "name": "DB-Server",
+      "type": "host",
+      "ipv4-address": "10.10.20.50",
+      "comments": "Database server"
+    },
+    {
+      "uid": "obj-005",
+      "name": "Unused-Host",
+      "type": "host",
+      "ipv4-address": "10.10.20.99",
+      "comments": "Not referenced by any rule"
+    },
+    {
+      "uid": "obj-dup",
+      "name": "WS-01-Duplicate",
+      "type": "host",
+      "ipv4-address": "10.10.20.10",
+      "comments": "Same IP as WebServer-01 - duplicate"
+    },
+    {
+      "uid": "obj-grp-001",
+      "name": "Web-Servers-Group",
+      "type": "group",
+      "members": [{"name": "WebServer-01"}, {"name": "WebServer-02"}],
+      "comments": "Web servers"
+    },
+    {
+      "uid": "svc-https",
+      "name": "HTTPS",
+      "type": "service-tcp",
+      "port": "443",
+      "comments": "HTTPS"
+    },
+    {
+      "uid": "svc-http",
+      "name": "HTTP",
+      "type": "service-tcp",
+      "port": "80",
+      "comments": "HTTP"
+    },
+    {
+      "uid": "svc-rdp",
+      "name": "RDP",
+      "type": "service-tcp",
+      "port": "3389",
+      "comments": "Remote Desktop"
+    },
+    {
+      "uid": "svc-ssh",
+      "name": "SSH",
+      "type": "service-tcp",
+      "port": "22",
+      "comments": "SSH"
+    }
+  ]
+}

@@ -157,6 +157,14 @@ async def lifespan(app: FastAPI):
 
     task = asyncio.create_task(_auto_sync_loop())
 
+    # Start syslog listener for real-time policy-change detection
+    try:
+        from app.services.syslog_listener import start_syslog_listener
+        syslog_port = int(getattr(settings, "syslog_port", 5140))
+        start_syslog_listener(port=syslog_port)
+    except Exception as _syslog_exc:
+        logger.warning("Syslog listener startup skipped: %s", _syslog_exc)
+
     # Warn if running in insecure dev mode
     if not settings.api_key.strip():
         logger.warning(

@@ -24,6 +24,16 @@ class SettingsUpdate(BaseModel):
     nvd_api_key: Optional[str] = None
 
 
+def _get_syslog_status() -> dict:
+    try:
+        from app.services.syslog_listener import get_listener_status
+        from app.config import settings as _s
+        port = int(getattr(_s, "syslog_port", 5140))
+        return get_listener_status(port)
+    except Exception:
+        return {"active": False, "port": 5140}
+
+
 def _get_db_setting(db: Session, key: str, default=None):
     row = db.query(AppSettings).filter(AppSettings.key == key).first()
     if row and row.value:
@@ -77,6 +87,8 @@ def get_settings(db: Session = Depends(get_db)):
         "webhook_events": webhook_events,
         "webhook_events_available": _WEBHOOK_EVENTS_ALL,
         "nvd_api_key_set": bool(_get_db_setting(db, "nvd_api_key")),
+        # Syslog listener status
+        "syslog_listener": _get_syslog_status(),
     }
 
 

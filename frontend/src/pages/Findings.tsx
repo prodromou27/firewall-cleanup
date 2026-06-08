@@ -489,7 +489,7 @@ function FindingRow({ finding, onUpdate, selected, onSelect }: {
   const [expanded, setExpanded] = useState(false)
   const [comment, setComment] = useState(finding.engineer_comment || '')
   const [status, setStatus] = useState(finding.status)
-  const [priority, setPriority] = useState(finding.priority || 'Standard')
+  const [priority, setPriority] = useState<typeof PRIORITIES[number]>((finding.priority as typeof PRIORITIES[number]) || 'Standard')
   const [assignedTo, setAssignedTo] = useState(finding.assigned_to || '')
   const [dueDate, setDueDate] = useState(finding.due_date || '')
   // Risk acceptance
@@ -658,7 +658,7 @@ function FindingRow({ finding, onUpdate, selected, onSelect }: {
                     <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Priority</label>
                     <select
                       value={priority}
-                      onChange={e => setPriority(e.target.value)}
+                      onChange={e => setPriority(e.target.value as typeof PRIORITIES[number])}
                       onClick={e => e.stopPropagation()}
                       className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >

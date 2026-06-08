@@ -5,7 +5,7 @@ import {
   Download, SlidersHorizontal, X, Shield, Zap, Eye, EyeOff,
   ArrowUpDown, ArrowUp, ArrowDown, Filter,
 } from 'lucide-react'
-import { getRules, getPolicy, getRulesExportUrl } from '../api/client'
+import { getRules, getPolicy, getRulesExportUrl, API_KEY } from '../api/client'
 import { SeverityBadge } from '../components/ui/SeverityBadge'
 import type { Rule, Policy } from '../types'
 import { clsx } from 'clsx'
@@ -29,16 +29,26 @@ function AnyBadge() {
   return <span className="px-1 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700 border border-red-200">ANY</span>
 }
 
-function ValueCell({ values, isAny }: { values: string[]; isAny?: boolean }) {
-  if (!values || values.length === 0) return <span className="text-gray-300 text-xs">—</span>
+function parseValues(v: unknown): string[] {
+  if (Array.isArray(v)) return v as string[]
+  if (typeof v === 'string' && v.trim().startsWith('[')) {
+    try { return JSON.parse(v) } catch { /* fall through */ }
+  }
+  if (typeof v === 'string' && v.length > 0) return [v]
+  return []
+}
+
+function ValueCell({ values, isAny }: { values: unknown; isAny?: boolean }) {
+  const arr = parseValues(values)
+  if (!arr || arr.length === 0) return <span className="text-gray-300 text-xs">—</span>
   if (isAny) return <AnyBadge />
-  const shown = values.slice(0, 3)
+  const shown = arr.slice(0, 3)
   return (
     <div className="flex flex-wrap gap-0.5 max-w-[140px]">
       {shown.map((v, i) => (
         <span key={i} className="px-1 py-0.5 bg-gray-50 border border-gray-200 rounded text-[10px] font-mono text-gray-700 truncate max-w-[100px]" title={v}>{v}</span>
       ))}
-      {values.length > 3 && <span className="text-[10px] text-gray-400">+{values.length - 3}</span>}
+      {arr.length > 3 && <span className="text-[10px] text-gray-400">+{arr.length - 3}</span>}
     </div>
   )
 }
@@ -269,6 +279,8 @@ export function Rulebase() {
   const [hasAny, setHasAny] = useState<boolean | null>(null)
   const [minRisk, setMinRisk] = useState<number | null>(null)
 
+  const [exporting, setExporting] = useState(false)
+
   // Sorting
   const [sortBy, setSortBy] = useState<SortField>('rule_number')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
@@ -332,9 +344,25 @@ export function Rulebase() {
 
   const pageCount = Math.ceil(total / 100)
 
-  const exportUrl = policyId
-    ? getRulesExportUrl(policyId, { ...buildParams(), page: 1, page_size: 9999 })
-    : '#'
+  const handleExportCsv = async () => {
+    if (!policyId) return
+    setExporting(true)
+    try {
+      const url = getRulesExportUrl(policyId, { ...buildParams(), page: 1, page_size: 9999 })
+      const res = await fetch(url, { headers: API_KEY ? { 'X-API-Key': API_KEY } : {} })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const blob = await res.blob()
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = 'rulebase.csv'
+      a.click()
+      URL.revokeObjectURL(a.href)
+    } catch (e) {
+      console.error('CSV export failed', e)
+    } finally {
+      setExporting(false)
+    }
+  }
 
   return (
     <div>
@@ -364,9 +392,9 @@ export function Rulebase() {
               <AlertTriangle className="w-4 h-4 text-amber-500" /> Findings
             </Link>
           )}
-          <a href={exportUrl} download="rulebase.csv" className="btn-secondary">
-            <Download className="w-4 h-4" /> Export CSV
-          </a>
+          <button onClick={handleExportCsv} disabled={exporting} className="btn-secondary">
+            <Download className="w-4 h-4" /> {exporting ? 'Exporting…' : 'Export CSV'}
+          </button>
         </div>
       </div>
     <div className="page-body">

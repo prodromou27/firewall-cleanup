@@ -1,0 +1,179 @@
+import { useEffect, useState, useCallback } from 'react'
+import { useSearchParams, useParams } from 'react-router-dom'
+import { Package, Search } from 'lucide-react'
+import { getObjects, getPolicies } from '../api/client'
+import type { FirewallObject, Policy } from '../types'
+import { clsx } from 'clsx'
+
+function ObjectTypeChip({ type }: { type: string }) {
+  const colors: Record<string, string> = {
+    host: 'bg-blue-100 text-blue-700',
+    network: 'bg-green-100 text-green-700',
+    range: 'bg-purple-100 text-purple-700',
+    group: 'bg-orange-100 text-orange-700',
+    service: 'bg-teal-100 text-teal-700',
+    'service-group': 'bg-pink-100 text-pink-700',
+    fqdn: 'bg-yellow-100 text-yellow-700',
+  }
+  return (
+    <span className={clsx('text-xs font-semibold px-2 py-0.5 rounded', colors[type] || 'bg-gray-100 text-gray-600')}>
+      {type}
+    </span>
+  )
+}
+
+export function Objects() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const params = useParams<{ customerId?: string }>()
+  const customerId = params.customerId || ''
+  const [objects, setObjects] = useState<FirewallObject[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [search, setSearch] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [policies, setPolicies] = useState<Policy[]>([])
+  const [showUnused, setShowUnused] = useState(false)
+
+  const policyId = searchParams.get('policy_id') || ''
+  const objectType = searchParams.get('object_type') || ''
+
+  const load = useCallback(() => {
+    setLoading(true)
+    const p: Record<string, string | number | boolean> = { page, page_size: 100 }
+    if (policyId) p.policy_id = policyId
+    else if (customerId) p.customer_id = customerId
+    if (objectType) p.object_type = objectType
+    if (search) p.search = search
+    if (showUnused) p.unused_only = true
+    getObjects(p as Record<string, string | number>)
+      .then(r => {
+        setObjects(r.objects)
+        setTotal(r.total)
+      })
+      .finally(() => setLoading(false))
+  }, [page, policyId, customerId, objectType, search, showUnused])
+
+  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    const pp: Record<string, string> = {}
+    if (customerId) pp.customer_id = customerId
+    getPolicies(pp).then(setPolicies)
+  }, [customerId])
+
+  const setFilter = (key: string, val: string) => {
+    const params = new URLSearchParams(searchParams)
+    if (val) params.set(key, val); else params.delete(key)
+    setSearchParams(params)
+    setPage(1)
+  }
+
+  const displayed = objects
+  const pageCount = Math.ceil(total / 100)
+
+  return (
+    <div>
+      <div className="page-header sticky top-0 z-10">
+        <div>
+          <h1 className="page-title">Object Analysis</h1>
+          <p className="page-subtitle">{total.toLocaleString()} objects · Identify unused, duplicate, or overlapping entries</p>
+        </div>
+      </div>
+    <div className="page-body">
+      {/* Filters */}
+      <div className="flex flex-wrap gap-2 mb-5 p-3 bg-white rounded-xl border border-gray-100 shadow-sm">
+        <select value={policyId} onChange={e => setFilter('policy_id', e.target.value)}
+          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-gray-50 focus:bg-white">
+          <option value="">All Policies</option>
+          {policies.map(p => (
+            <option key={p.id} value={p.id}>
+              {p.firewall_name}{!customerId && p.customer_name ? ` (${p.customer_name})` : ''}
+            </option>
+          ))}
+        </select>
+
+        <select value={objectType} onChange={e => setFilter('object_type', e.target.value)}
+          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-gray-50 focus:bg-white">
+          <option value="">All Types</option>
+          {['host', 'network', 'range', 'group', 'service', 'service-group', 'fqdn'].map(t => (
+            <option key={t} value={t}>{t}</option>
+          ))}
+        </select>
+
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            value={search} onChange={e => { setSearch(e.target.value); setPage(1) }}
+            className="pl-9 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm w-56 bg-gray-50 focus:bg-white"
+            placeholder="Search objects..." />
+        </div>
+
+        <button
+          onClick={() => { setShowUnused(u => !u); setPage(1) }}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+            showUnused ? 'bg-orange-600 text-white border-orange-600' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+          }`}
+        >
+          📦 Unused only
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-16"><div className="animate-spin w-8 h-8 border-b-2 border-blue-600 rounded-full" /></div>
+      ) : displayed.length === 0 ? (
+        <div className="card text-center py-12">
+          <Package className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+          <p className="text-gray-500">No objects match the current filters.</p>
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+          <table className="data-table">
+            <thead>
+              <tr>
+                {['Name', 'Type', 'Value / Details', 'Members', 'Comment', 'Status'].map(h => (
+                  <th key={h}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {displayed.map(obj => (
+                <tr key={obj.id} className={clsx('hover:bg-gray-50', obj.is_unused && 'bg-orange-50')}>
+                  <td className="px-4 py-2.5 font-medium text-gray-900 text-sm">{obj.object_name}</td>
+                  <td className="px-4 py-2.5"><ObjectTypeChip type={obj.object_type} /></td>
+                  <td className="px-4 py-2.5 text-gray-600 text-xs font-mono">
+                    {obj.value || (obj.object_type.includes('service') && obj.protocol
+                      ? `${obj.protocol}/${obj.port_start}-${obj.port_end}`
+                      : '—')}
+                  </td>
+                  <td className="px-4 py-2.5 text-gray-500 text-xs">
+                    {obj.members && obj.members.length > 0
+                      ? <span title={obj.members.join(', ')}>{obj.members.length} members</span>
+                      : '—'}
+                  </td>
+                  <td className="px-4 py-2.5 text-gray-400 text-xs max-w-[200px] truncate">{obj.comment || '—'}</td>
+                  <td className="px-4 py-2.5">
+                    {obj.is_unused ? (
+                      <span className="text-xs font-semibold text-orange-700 bg-orange-100 px-2 py-0.5 rounded">Unused</span>
+                    ) : (
+                      <span className="text-xs text-gray-400">In use</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {pageCount > 1 && (
+            <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 text-sm">
+              <span className="text-gray-500">Page {page} of {pageCount} ({total} objects)</span>
+              <div className="flex gap-2">
+                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="btn-secondary py-1 px-3">Prev</button>
+                <button onClick={() => setPage(p => Math.min(pageCount, p + 1))} disabled={page === pageCount} className="btn-secondary py-1 px-3">Next</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>{/* end page-body */}
+    </div>
+  )
+}

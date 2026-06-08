@@ -817,200 +817,215 @@ def _iso27001_checks(
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# HIPAA Security Rule checks
+# GDPR Article 32 checks
 # ════════════════════════════════════════════════════════════════════════════
 
-def _hipaa_checks(
+def _gdpr_checks(
     policy: FirewallPolicy,
     rules: list[FirewallRule],
     findings: list[Finding],
 ) -> list[dict]:
     """
-    HIPAA Security Rule (45 CFR Part 164) — Technical Safeguards
-    Maps firewall controls to the relevant HIPAA implementation specifications.
-    Covers: Access Control, Audit Controls, Transmission Security,
-            Person Authentication, and Integrity Controls.
+    GDPR Article 32 — Security of Processing (Regulation (EU) 2016/679)
+    Maps firewall controls to the technical and organisational measures
+    required to ensure a level of security appropriate to the risk of
+    processing personal data.
+
+    Key articles covered:
+      Art. 32(1)(a) — Pseudonymisation and encryption of personal data
+      Art. 32(1)(b) — Ongoing confidentiality, integrity, availability
+      Art. 32(1)(c) — Ability to restore availability and access
+      Art. 32(1)(d) — Regular testing, assessing, and evaluating
+      Art. 5(1)(f)  — Integrity and confidentiality principle
+      Art. 25       — Data protection by design and by default
     """
     checks = []
     enabled_rules = [r for r in rules if r.enabled]
     allow_rules   = [r for r in enabled_rules if not _is_deny(r.action)]
 
-    # ── § 164.312(a)(1) — Access Control: limit access to PHI systems ────────
-    perm = _count_by_type(findings, "overly_permissive")
-    broad = _count_by_type(findings, "broad_network")
-    access_issues = perm + broad
-    checks.append(_check(
-        check_id="HIPAA-AC-1",
-        control_ref="§ 164.312(a)(1) Access Control",
-        category="Access Control",
-        title="Restrict access to systems containing PHI",
-        status=FAIL if access_issues > 0 else PASS,
-        severity=SEV_HIGH if access_issues > 0 else SEV_INFO,
-        detail=(
-            f"{access_issues} rule(s) allow overly broad access (overly permissive: {perm}, "
-            f"broad network objects: {broad}). HIPAA requires that access to ePHI systems be "
-            "limited to authorized users/systems only."
-            if access_issues > 0 else
-            "Access control rules appear appropriately restricted. No overly-broad access detected."
-        ),
-        recommendation=(
-            "Replace any-source or broad CIDR rules with specific IP addresses or named network objects "
-            "for systems handling ePHI. Document business justification for every allowed access path."
-        ) if access_issues > 0 else "",
-        evidence={"overly_permissive": perm, "broad_network": broad},
-    ))
-
-    # ── § 164.312(a)(2)(iv) — Encryption / Decryption of ePHI ───────────────
-    risky = _count_by_type(findings, "risky_service")
+    # ── Art. 32(1)(a) — Encryption: prohibit cleartext protocols ─────────────
     risky_rules = _findings_by_type(findings, "risky_service")
+    risky = len(risky_rules)
     unencrypted_protos = [
         f.description for f in risky_rules
         if any(svc in (f.description or "").lower() for svc in ("telnet", "ftp", "http", "rsh", "rlogin"))
     ]
     checks.append(_check(
-        check_id="HIPAA-AC-2",
-        control_ref="§ 164.312(a)(2)(iv) Encryption/Decryption",
-        category="Transmission Security",
-        title="Prohibit unencrypted protocols for ePHI transmission",
+        check_id="GDPR-32-1",
+        control_ref="Art. 32(1)(a) Encryption of personal data",
+        category="Encryption & Pseudonymisation",
+        title="Prohibit cleartext protocols that expose personal data in transit",
         status=FAIL if unencrypted_protos else (WARN if risky > 0 else PASS),
         severity=SEV_HIGH if unencrypted_protos else (SEV_MEDIUM if risky > 0 else SEV_INFO),
         detail=(
-            f"Cleartext protocols detected that must not carry ePHI: "
-            f"{', '.join(set(p[:60] for p in unencrypted_protos[:5]))}. "
-            "Telnet, plain FTP, and HTTP transmit data unencrypted."
+            f"{len(unencrypted_protos)} cleartext protocol rule(s) detected "
+            f"(Telnet, plain FTP, HTTP). These protocols transmit data in the clear and "
+            "must not be used to access or transport personal data under GDPR Art. 32(1)(a)."
             if unencrypted_protos else
             f"No cleartext protocol rules detected. {risky} risky-service finding(s) present for review."
             if risky > 0 else
-            "No unencrypted-protocol rules detected."
+            "No cleartext protocol rules detected."
         ),
         recommendation=(
-            "Disable Telnet, FTP, and HTTP rules immediately. Replace with SSH, SFTP/FTPS, and HTTPS. "
-            "Enforce TLS 1.2+ for all ePHI data flows."
+            "Remove Telnet, plain FTP, and HTTP permit rules immediately. "
+            "Replace with SSH (22), SFTP/FTPS, and HTTPS (443). Enforce TLS 1.2+ minimum for all "
+            "flows that may carry personal data."
         ) if unencrypted_protos else "",
-        evidence={"unencrypted_protocol_findings": len(unencrypted_protos), "risky_service_total": risky},
+        evidence={"cleartext_protocol_findings": len(unencrypted_protos), "risky_service_total": risky},
     ))
 
-    # ── § 164.312(b) — Audit Controls: logging and monitoring ────────────────
-    no_log = _count_by_type(findings, "no_logging")
-    total_allow = len(allow_rules)
-    log_pct = int((1 - no_log / max(total_allow, 1)) * 100)
+    # ── Art. 32(1)(b) + Art. 5(1)(f) — Confidentiality: restrict access ─────
+    perm = _count_by_type(findings, "overly_permissive")
+    broad = _count_by_type(findings, "broad_network")
+    access_issues = perm + broad
     checks.append(_check(
-        check_id="HIPAA-AC-3",
-        control_ref="§ 164.312(b) Audit Controls",
-        category="Audit Controls",
-        title="Enable logging on all rules permitting access to ePHI systems",
-        status=FAIL if no_log > 0 else PASS,
-        severity=SEV_HIGH if no_log > (total_allow * 0.25) else (SEV_MEDIUM if no_log > 0 else SEV_INFO),
+        check_id="GDPR-32-2",
+        control_ref="Art. 32(1)(b) + Art. 5(1)(f) Confidentiality",
+        category="Access Control",
+        title="Ensure ongoing confidentiality — restrict access to personal data systems",
+        status=FAIL if access_issues > 0 else PASS,
+        severity=SEV_HIGH if access_issues > 0 else SEV_INFO,
         detail=(
-            f"{no_log} of {total_allow} allow rule(s) ({100 - log_pct}%) have logging disabled. "
-            "HIPAA requires hardware/software activity records for all systems containing ePHI."
-            if no_log > 0 else
-            "All permit rules appear to have logging enabled."
+            f"{access_issues} rule(s) allow overly broad network access "
+            f"(overly permissive: {perm}, broad CIDR objects: {broad}). "
+            "GDPR's integrity and confidentiality principle requires access to systems "
+            "processing personal data to be limited to authorised parties only."
+            if access_issues > 0 else
+            "Access control rules appear appropriately restricted. No overly-broad rules detected."
         ),
         recommendation=(
-            "Enable logging on every permit rule that touches ePHI network segments. "
-            "Forward logs to a centralised SIEM and retain for a minimum of 6 years (HIPAA § 164.530(j))."
-        ) if no_log > 0 else "",
-        evidence={"rules_without_logging": no_log, "total_allow_rules": total_allow, "log_coverage_pct": log_pct},
+            "Replace Any-source or /8–/16 CIDR objects with specific named hosts or subnets. "
+            "Apply the principle of least privilege: each rule should permit only the minimum "
+            "access required for the documented business purpose."
+        ) if access_issues > 0 else "",
+        evidence={"overly_permissive": perm, "broad_network": broad},
     ))
 
-    # ── § 164.312(c)(1) — Integrity: protect ePHI from improper alteration ──
+    # ── Art. 32(1)(b) — Integrity: eliminate policy inconsistencies ──────────
     shadow = _count_by_type(findings, "shadowed_rule")
     dup    = _count_by_type(findings, "duplicate_rule")
     integrity_issues = shadow + dup
     checks.append(_check(
-        check_id="HIPAA-IN-1",
-        control_ref="§ 164.312(c)(1) Integrity Controls",
+        check_id="GDPR-32-3",
+        control_ref="Art. 32(1)(b) Integrity of processing",
         category="Policy Integrity",
         title="Eliminate shadowed and duplicate rules that undermine policy integrity",
         status=FAIL if integrity_issues > 0 else PASS,
         severity=SEV_MEDIUM if integrity_issues > 0 else SEV_INFO,
         detail=(
             f"{shadow} shadowed rule(s) and {dup} duplicate rule(s) found. "
-            "Shadowed and duplicate rules indicate policy drift, make auditing unreliable, "
-            "and can mask unintended access to ePHI."
+            "Policy inconsistencies undermine integrity, make audits unreliable, and may "
+            "conceal unintended access paths to personal data — contrary to Art. 32(1)(b)."
             if integrity_issues > 0 else
-            "No shadowed or duplicate rules detected. Policy appears consistent."
+            "No shadowed or duplicate rules detected. Policy integrity appears sound."
         ),
         recommendation=(
-            "Remove or consolidate shadowed/duplicate rules during next change-management cycle. "
-            "Document why each rule exists and ensure it maps to an approved access request."
+            "Remove or consolidate shadowed/duplicate rules in the next change-management cycle. "
+            "Maintain a rule-ownership register linking each rule to its approved change ticket."
         ) if integrity_issues > 0 else "",
         evidence={"shadowed_rules": shadow, "duplicate_rules": dup},
     ))
 
-    # ── § 164.312(d) — Person/Entity Authentication ──────────────────────────
-    zero_hit = _count_by_type(findings, "zero_hit_rule")
-    stale_rules = zero_hit
-    checks.append(_check(
-        check_id="HIPAA-AU-1",
-        control_ref="§ 164.312(d) Person Authentication",
-        category="Access Control",
-        title="Remove unused rules that may represent orphaned access grants",
-        status=WARN if stale_rules > 0 else PASS,
-        severity=SEV_MEDIUM if stale_rules > 0 else SEV_INFO,
-        detail=(
-            f"{stale_rules} rule(s) with zero hit counts detected. These may represent "
-            "access grants for former employees, decommissioned systems, or vendors whose "
-            "access was never revoked — a HIPAA violation risk."
-            if stale_rules > 0 else
-            "No zero-hit rules detected. Access grants appear to be in active use."
-        ),
-        recommendation=(
-            "Review each zero-hit rule: confirm the intended user/system still requires access. "
-            "If the access is no longer needed, disable then remove after change-management approval."
-        ) if stale_rules > 0 else "",
-        evidence={"zero_hit_rules": zero_hit},
-    ))
-
-    # ── § 164.312(e)(1) — Transmission Security: encrypt data in transit ─────
+    # ── Art. 32(1)(b) — Availability: default-deny and VPN controls ──────────
     last = _last_rule(rules)
     has_default_deny = last is not None and _is_deny(last.action)
     vpn = _count_by_type(findings, "vpn_access")
     checks.append(_check(
-        check_id="HIPAA-TS-1",
-        control_ref="§ 164.312(e)(1) Transmission Security",
-        category="Transmission Security",
-        title="Enforce default-deny with explicit VPN/encrypted-channel controls",
+        check_id="GDPR-32-4",
+        control_ref="Art. 32(1)(b)+(c) Availability & resilience",
+        category="Network Security",
+        title="Enforce default-deny policy to protect availability of personal data systems",
         status=(WARN if vpn > 0 else PASS) if has_default_deny else FAIL,
         severity=SEV_HIGH if not has_default_deny else (SEV_MEDIUM if vpn > 0 else SEV_INFO),
         detail=(
-            "No implicit-deny rule found at the end of the policy. All traffic not explicitly "
-            "allowed may pass unchecked — this is a critical HIPAA transmission security violation."
+            "No implicit-deny rule at the end of the policy. Unrestricted traffic may reach "
+            "personal-data systems — a direct breach of Art. 32 confidentiality and availability obligations."
             if not has_default_deny else
-            f"Default-deny rule present. {vpn} broad VPN access rule(s) detected — VPN policies "
-            "should restrict access to specific ePHI-bearing subnets only."
+            f"Default-deny rule present. {vpn} broad VPN access rule(s) detected — "
+            "overly broad remote-access policies increase exposure of personal-data systems."
             if vpn > 0 else
-            "Default-deny rule present and no broad VPN access issues detected."
+            "Default-deny rule in place. No broad VPN access issues detected."
         ),
         recommendation=(
-            "Add a deny-all rule as the final rule. Require ePHI transmissions to use "
-            "TLS 1.2+ or IPSec with AES-256. Restrict VPN split-tunnel access to named ePHI segments only."
+            "Add an explicit deny-all rule as the last entry in every policy. "
+            "Restrict VPN tunnel access to named subnets that genuinely require it; "
+            "avoid split-tunnel configurations that grant access to all internal ranges."
         ) if not has_default_deny or vpn > 0 else "",
-        evidence={"has_default_deny": has_default_deny, "broad_vpn_findings": vpn},
+        evidence={"has_default_deny": has_default_deny, "broad_vpn_rules": vpn},
     ))
 
-    # ── § 164.308(a)(1) — Risk Analysis: track temporary/unapproved exceptions ─
+    # ── Art. 32(1)(d) — Regular testing: logging and audit trail ─────────────
+    no_log = _count_by_type(findings, "no_logging")
+    total_allow = len(allow_rules)
+    log_pct = int((1 - no_log / max(total_allow, 1)) * 100)
+    checks.append(_check(
+        check_id="GDPR-32-5",
+        control_ref="Art. 32(1)(d) Regular testing and evaluation",
+        category="Audit & Logging",
+        title="Enable logging on all rules to support ongoing security evaluation",
+        status=FAIL if no_log > 0 else PASS,
+        severity=SEV_HIGH if no_log > (total_allow * 0.25) else (SEV_MEDIUM if no_log > 0 else SEV_INFO),
+        detail=(
+            f"{no_log} of {total_allow} allow rule(s) ({100 - log_pct}%) have logging disabled. "
+            "GDPR Art. 32(1)(d) requires organisations to regularly test and evaluate the "
+            "effectiveness of security measures — impossible without complete audit logs."
+            if no_log > 0 else
+            "All permit rules appear to have logging enabled. Audit trail is intact."
+        ),
+        recommendation=(
+            "Enable logging on every permit rule. Forward firewall logs to a centralised SIEM. "
+            "Under GDPR Art. 30(1) and recital 85, retain logs sufficient to demonstrate compliance "
+            "and support breach notification within 72 hours (Art. 33)."
+        ) if no_log > 0 else "",
+        evidence={"rules_without_logging": no_log, "total_allow_rules": total_allow, "log_coverage_pct": log_pct},
+    ))
+
+    # ── Art. 25 — Data protection by design: remove stale access grants ──────
+    zero_hit = _count_by_type(findings, "zero_hit_rule")
+    checks.append(_check(
+        check_id="GDPR-25-1",
+        control_ref="Art. 25 Data protection by design and by default",
+        category="Access Control",
+        title="Remove zero-hit rules — enforce data-minimisation by default",
+        status=WARN if zero_hit > 0 else PASS,
+        severity=SEV_MEDIUM if zero_hit > 0 else SEV_INFO,
+        detail=(
+            f"{zero_hit} rule(s) with zero recorded hits. Under GDPR's data-minimisation "
+            "and privacy-by-default principles (Art. 25), access that is never used should be revoked. "
+            "These rules may represent orphaned grants from former staff, vendors, or decommissioned systems."
+            if zero_hit > 0 else
+            "No zero-hit rules detected. Access grants appear to reflect active usage."
+        ),
+        recommendation=(
+            "Review each zero-hit rule with the rule owner. If the access is no longer needed, "
+            "disable and schedule removal after a change-management review. "
+            "Conduct a formal access-recertification exercise at least annually."
+        ) if zero_hit > 0 else "",
+        evidence={"zero_hit_rules": zero_hit},
+    ))
+
+    # ── Art. 32 + Art. 33 — Risk management: temporary / expired exceptions ──
     temp = _count_by_type(findings, "temporary_rule")
     expired = _count_by_type(findings, "expired_rule")
     exception_issues = temp + expired
     checks.append(_check(
-        check_id="HIPAA-RA-1",
-        control_ref="§ 164.308(a)(1)(ii)(A) Risk Analysis",
+        check_id="GDPR-32-6",
+        control_ref="Art. 32 + Art. 33 Risk management",
         category="Risk Management",
-        title="Track and expire temporary access exceptions",
+        title="Control temporary access exceptions to prevent unreviewed exposure",
         status=FAIL if expired > 0 else (WARN if temp > 0 else PASS),
         severity=SEV_HIGH if expired > 0 else (SEV_MEDIUM if temp > 0 else SEV_INFO),
         detail=(
-            f"{expired} expired rule schedule(s) and {temp} temporary rule(s) detected. "
-            "Expired or undocumented temporary rules represent unreviewed access to potential ePHI "
-            "pathways and must be remediated as part of ongoing HIPAA risk analysis."
+            f"{expired} expired schedule(s) and {temp} temporary rule(s) detected. "
+            "Unreviewed or expired exceptions represent ongoing uncontrolled access risk. "
+            "A security incident through such a gap may trigger GDPR Art. 33 breach notification."
             if exception_issues > 0 else
             "No expired or uncontrolled temporary rules detected."
         ),
         recommendation=(
-            "Remove or renew expired schedules immediately. Ensure all temporary rules have: "
-            "ticket reference, approved expiry date, and named owner. Schedule quarterly review."
+            "Expire or remove stale temporary rules immediately. Every exception must carry a "
+            "ticket reference, approved end-date, and named owner. Review quarterly and document "
+            "risk-acceptance decisions in your Art. 30 Records of Processing Activities."
         ) if exception_issues > 0 else "",
         evidence={"temporary_rules": temp, "expired_rules": expired},
     ))
@@ -1024,8 +1039,8 @@ def _hipaa_checks(
     grade  = "A" if score >= 90 else "B" if score >= 75 else "C" if score >= 60 else "D" if score >= 50 else "F"
 
     return {
-        "framework": "hipaa",
-        "framework_name": "HIPAA Security Rule",
+        "framework": "gdpr",
+        "framework_name": "GDPR Article 32",
         "policy_id": policy.id,
         "firewall_name": policy.firewall_name,
         "vendor": policy.vendor,
@@ -1041,11 +1056,11 @@ def _hipaa_checks(
 # ════════════════════════════════════════════════════════════════════════════
 
 SUPPORTED_FRAMEWORKS = {
-    "pci-dss":  ("PCI-DSS v4.0",       _pci_dss_checks),
-    "cis":      ("CIS Controls v8",    _cis_checks),
-    "nist":     ("NIST CSF 2.0",       _nist_checks),
-    "iso27001": ("ISO 27001:2022",     _iso27001_checks),
-    "hipaa":    ("HIPAA Security Rule", _hipaa_checks),
+    "pci-dss":  ("PCI-DSS v4.0",    _pci_dss_checks),
+    "cis":      ("CIS Controls v8", _cis_checks),
+    "nist":     ("NIST CSF 2.0",    _nist_checks),
+    "iso27001": ("ISO 27001:2022",  _iso27001_checks),
+    "gdpr":     ("GDPR Art. 32",    _gdpr_checks),
 }
 
 

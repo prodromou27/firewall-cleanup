@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/devices", tags=["devices"])
 
 # Allowed vendor values
-_ALLOWED_VENDORS = {"FortiGate", "CheckPoint", "PaloAlto", "Cisco"}
+_ALLOWED_VENDORS = {"FortiGate", "CheckPoint", "PaloAlto", "CiscoASA"}
 # Allowed CP management types
 _ALLOWED_CP_TYPES = {"SmartCenter", "MDS", "Smart-1Cloud"}
 # Allowed sync intervals (hours) — None = disabled
@@ -227,7 +227,7 @@ def _build_connector_for_device(d: FirewallDevice):
     Instantiate the appropriate connector with DECRYPTED credentials.
     Used for test and sync operations only — credentials are never returned to callers.
     """
-    token   = decrypt_credential(d.api_token)
+    token    = decrypt_credential(d.api_token)
     password = decrypt_credential(d.password)
 
     if d.vendor == "FortiGate":
@@ -253,6 +253,28 @@ def _build_connector_for_device(d: FirewallDevice):
             verify_ssl=d.verify_ssl,
             domain=d.cp_domain or None,
             management_type=d.cp_management_type or "SmartCenter",
+        )
+    elif d.vendor == "PaloAlto":
+        from app.connectors.paloalto import PaloAltoConnector
+        return PaloAltoConnector(
+            host=d.host,
+            api_key=token or None,
+            username=d.username or None,
+            password=password or None,
+            port=d.port or 443,
+            use_ssl=d.use_ssl,
+            verify_ssl=d.verify_ssl,
+            vsys=d.vdom or "vsys1",
+        )
+    elif d.vendor == "CiscoASA":
+        from app.connectors.cisco_asa import CiscoASAConnector
+        return CiscoASAConnector(
+            host=d.host,
+            username=d.username or "",
+            password=password or "",
+            port=d.port or 443,
+            use_ssl=d.use_ssl,
+            verify_ssl=d.verify_ssl,
         )
     else:
         raise ValueError(f"Unsupported vendor: {d.vendor!r}")
@@ -329,15 +351,60 @@ def delete_device(device_id: str, db: Session = Depends(get_db)):
     return {"message": "Device deleted"}
 
 
+# ── Staged connectivity diagnostics ──────────────────────────────────────────
+
+def _tcp_reachable(host: str, port: int, timeout: int = 5) -> tuple[bool, str]:
+    """Check raw TCP connectivity. Returns (ok, latency_or_error)."""
+    import socket, time
+    try:
+        t0 = time.monotonic()
+        with socket.create_connection((host, port), timeout=timeout):
+            pass
+        ms = round((time.monotonic() - t0) * 1000)
+        return True, f"{ms} ms"
+    except OSError as e:
+        return False, str(e)
+
+
+def _tls_reachable(host: str, port: int, verify_ssl: bool, timeout: int = 8) -> tuple[bool, str]:
+    """Check TLS handshake. Returns (ok, info_or_error)."""
+    import ssl, socket, time
+    try:
+        ctx = ssl.create_default_context()
+        if not verify_ssl:
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+        t0 = time.monotonic()
+        with socket.create_connection((host, port), timeout=timeout) as raw:
+            with ctx.wrap_socket(raw, server_hostname=host) as tls:
+                cert = tls.getpeercert()
+                ms = round((time.monotonic() - t0) * 1000)
+                cn = ""
+                for field in cert.get("subject", []):
+                    for k, v in field:
+                        if k == "commonName":
+                            cn = v
+                return True, f"TLS OK ({ms} ms){' CN=' + cn if cn else ''}"
+    except ssl.SSLError as e:
+        return False, f"TLS error: {e}"
+    except OSError as e:
+        return False, str(e)
+
+
 # ── Test connection ───────────────────────────────────────────────────────────
 
 @router.post("/{device_id}/test")
 def test_device(device_id: str, db: Session = Depends(get_db)):
     """
-    Test connectivity and return discovery information.
-    FortiGate: version, serial, VDOM list, rule count.
-    CheckPoint: API version, management type, domains (MDS), policy packages, gateways.
-    No data is written to the DB.
+    Staged connectivity test — returns per-phase diagnostics + vendor discovery info.
+
+    Phases:
+      1. TCP reachability  (socket connect)
+      2. TLS handshake     (HTTPS only)
+      3. Authentication    (vendor login)
+      4. API discovery     (version, rules, packages/domains, …)
+
+    No policy data is written to the DB. Device model/version fields are updated on success.
     """
     d = db.query(FirewallDevice).filter(FirewallDevice.id == device_id).first()
     if not d:
@@ -345,11 +412,62 @@ def test_device(device_id: str, db: Session = Depends(get_db)):
 
     audit_log("device.test_connection", device_id=d.id, host=d.host, vendor=d.vendor)
 
+    port = d.port or 443
+    phases: list[dict] = []
+
+    def phase(name: str, ok: bool, detail: str):
+        phases.append({"phase": name, "ok": ok, "detail": detail})
+
+    # ── Phase 1: TCP ──────────────────────────────────────────────────────────
+    tcp_ok, tcp_detail = _tcp_reachable(d.host, port)
+    phase("TCP Reachability", tcp_ok, tcp_detail)
+    if not tcp_ok:
+        hint = (
+            f"Cannot reach {d.host}:{port} — check that the management interface is reachable "
+            "from this server and that any firewall/ACL allows traffic to the API port."
+        )
+        return {"success": False, "phases": phases,
+                "error": f"TCP connection failed: {tcp_detail}", "hint": hint}
+
+    # ── Phase 2: TLS ──────────────────────────────────────────────────────────
+    if d.use_ssl:
+        tls_ok, tls_detail = _tls_reachable(d.host, port, d.verify_ssl)
+        phase("TLS Handshake", tls_ok, tls_detail)
+        if not tls_ok and d.verify_ssl:
+            # Retry without verification to give a better hint
+            tls_noverify_ok, _ = _tls_reachable(d.host, port, verify_ssl=False)
+            hint = (
+                "TLS handshake failed with certificate verification enabled. "
+                "If using a self-signed certificate, disable 'Verify SSL cert' in device settings. "
+                + (f"Connection works without verification ({_}). " if tls_noverify_ok else "")
+            )
+            return {"success": False, "phases": phases,
+                    "error": f"TLS error: {tls_detail}", "hint": hint}
+        elif not tls_ok:
+            return {"success": False, "phases": phases,
+                    "error": f"TLS error: {tls_detail}",
+                    "hint": "TLS handshake failed. Ensure the management port is correct and the server is reachable over HTTPS."}
+
+    # ── Phases 3+4: Auth + Discovery (vendor-specific) ────────────────────────
     try:
         conn = _build_connector_for_device(d)
+        info: dict = {}
 
+        # ── FortiGate ─────────────────────────────────────────────────────────
         if d.vendor == "FortiGate":
-            info = conn.connect()
+            try:
+                info = conn.connect()
+                phase("Authentication", True, f"Logged in — version {info.get('version', '?')}")
+            except Exception as e:
+                phase("Authentication", False, str(e))
+                hint = (
+                    "FortiGate authentication failed. Ensure the API token is correct and the trusted host list "
+                    "includes this server's IP. Or provide a username/password if not using API tokens."
+                )
+                conn.disconnect()
+                return {"success": False, "phases": phases, "error": str(e), "hint": hint}
+
+            # Discovery
             try:
                 policies = conn.get_policies()
                 info["rule_count"] = len(policies)
@@ -360,17 +478,52 @@ def test_device(device_id: str, db: Session = Depends(get_db)):
                 info["vdoms"] = [v.get("name") for v in vdoms_data if v.get("name")]
             except Exception:
                 info["vdoms"] = [d.vdom or "root"]
+            try:
+                ifaces = conn.get_interfaces()
+                info["interface_count"] = len(ifaces)
+            except Exception:
+                info["interface_count"] = None
+            try:
+                zones = conn.get_zones()
+                info["zone_count"] = len(zones)
+            except Exception:
+                info["zone_count"] = None
             conn.disconnect()
 
+            disc_parts = []
+            if info.get("rule_count") is not None:
+                disc_parts.append(f"{info['rule_count']} rules")
+            if info.get("interface_count"):
+                disc_parts.append(f"{info['interface_count']} interfaces")
+            if info.get("zone_count"):
+                disc_parts.append(f"{info['zone_count']} zones")
+            if info.get("vdoms") and len(info["vdoms"]) > 1:
+                disc_parts.append(f"{len(info['vdoms'])} VDOMs")
+            phase("API Discovery", True, ", ".join(disc_parts) if disc_parts else "Discovery complete")
+
+        # ── Check Point ───────────────────────────────────────────────────────
         elif d.vendor == "CheckPoint":
-            info = conn.connect()
+            try:
+                info = conn.connect()
+                phase("Authentication", True, f"Logged in — API {info.get('api_server_version', '?')}")
+            except Exception as e:
+                phase("Authentication", False, str(e))
+                hint = (
+                    "Check Point authentication failed. Ensure:\n"
+                    "• The management server has API access enabled (SmartConsole → Management API)\n"
+                    "• The user has read-only permission profile\n"
+                    "• For MDS, specify the correct domain in device settings\n"
+                    "• For Smart-1 Cloud, use the API key in the 'API Token' field"
+                )
+                return {"success": False, "phases": phases, "error": str(e), "hint": hint}
+
             packages: list[dict] = []
             try:
                 raw_pkgs = conn.get_packages()
                 packages = [
                     {
-                        "name":          pkg.get("name"),
-                        "uid":           pkg.get("uid"),
+                        "name": pkg.get("name"),
+                        "uid":  pkg.get("uid"),
                         "access_layers": [
                             (l["name"] if isinstance(l, dict) else l)
                             for l in pkg.get("access-layers", [])
@@ -417,10 +570,123 @@ def test_device(device_id: str, db: Session = Depends(get_db)):
             })
             conn.disconnect()
 
+            disc_parts = []
+            if packages:
+                disc_parts.append(f"{len(packages)} policy package(s)")
+            if gateways:
+                disc_parts.append(f"{len(gateways)} gateway(s)")
+            if is_mds and domains:
+                disc_parts.append(f"{len(domains)} domain(s)")
+            phase("API Discovery", True, ", ".join(disc_parts) if disc_parts else "Discovery complete")
+
+        # ── Palo Alto ─────────────────────────────────────────────────────────
+        elif d.vendor == "PaloAlto":
+            try:
+                info = conn.connect()
+                version = info.get("version", info.get("sw-version", "?"))
+                model   = info.get("model", "")
+                phase("Authentication", True, f"Logged in — PAN-OS {version}{' ' + model if model else ''}")
+            except Exception as e:
+                phase("Authentication", False, str(e))
+                hint = (
+                    "Palo Alto authentication failed. Ensure:\n"
+                    "• The API key is correct (generate with GET /api/?type=keygen)\n"
+                    "• Or provide username + password — the connector will auto-generate the key\n"
+                    "• The management interface is accessible and the REST API is enabled\n"
+                    "• The vsys name is correct (default: vsys1)"
+                )
+                return {"success": False, "phases": phases, "error": str(e), "hint": hint}
+
+            # Fetch security rules
+            try:
+                raw = conn.get_all()
+                rules = raw.get("rules", [])
+                info["rule_count"] = len(rules)
+                info["object_count"] = (
+                    len(raw.get("addresses", [])) +
+                    len(raw.get("address_groups", [])) +
+                    len(raw.get("services", [])) +
+                    len(raw.get("service_groups", []))
+                )
+                info["app_count"] = len(raw.get("applications", []))
+                # Collect vsys list if Panorama
+                vsys_list = list({r.get("vsys") for r in rules if r.get("vsys")})
+                if vsys_list:
+                    info["vsys_list"] = vsys_list
+            except Exception as e:
+                logger.warning("PaloAlto discovery partial failure: %s", e)
+                info.setdefault("rule_count", None)
+
+            disc_parts = []
+            if info.get("rule_count") is not None:
+                disc_parts.append(f"{info['rule_count']} security rules")
+            if info.get("object_count"):
+                disc_parts.append(f"{info['object_count']} objects")
+            if info.get("app_count"):
+                disc_parts.append(f"{info['app_count']} application definitions")
+            phase("API Discovery", True, ", ".join(disc_parts) if disc_parts else "Discovery complete")
+
+        # ── Cisco ASA ─────────────────────────────────────────────────────────
+        elif d.vendor == "CiscoASA":
+            try:
+                info = conn.connect()
+                version = info.get("version", info.get("software_version", "?"))
+                model   = info.get("model", "")
+                phase("Authentication", True, f"Logged in — ASA {version}{' ' + model if model else ''}")
+            except Exception as e:
+                phase("Authentication", False, str(e))
+                hint = (
+                    "Cisco ASA authentication failed. Ensure:\n"
+                    "• Username and password are correct (privilege level 5+)\n"
+                    "• The REST API agent is running: 'rest-api agent'\n"
+                    "• The management interface allows HTTPS connections\n"
+                    "• Port 443 is used for REST API (not 80 or ASDM)"
+                )
+                return {"success": False, "phases": phases, "error": str(e), "hint": hint}
+
+            # Fetch rules across all interfaces
+            try:
+                # Get interface list first (lightweight)
+                ifaces = conn.get_interfaces()
+                info["interface_count"] = len(ifaces)
+                info["interfaces"] = [
+                    {"name": i.get("name") or i.get("nameif", ""),
+                     "ip":   i.get("ipAddress", {}).get("ip", {}).get("value", ""),
+                     "mask": i.get("ipAddress", {}).get("netMask", {}).get("value", ""),
+                     "type": "physical", "status": "up"}
+                    for i in ifaces if i.get("name") or i.get("nameif")
+                ][:20]  # limit to 20 for display
+            except Exception as e:
+                logger.warning("CiscoASA interface fetch failed: %s", e)
+                info["interface_count"] = None
+
+            try:
+                raw = conn.get_all()
+                rules = raw.get("rules", [])
+                info["rule_count"] = len(rules)
+                info["object_count"] = (
+                    len(raw.get("network_objects", [])) +
+                    len(raw.get("network_groups", []))
+                )
+            except Exception as e:
+                logger.warning("CiscoASA discovery partial failure: %s", e)
+                info.setdefault("rule_count", None)
+
+            conn.disconnect()
+
+            disc_parts = []
+            if info.get("rule_count") is not None:
+                disc_parts.append(f"{info['rule_count']} ACL rules")
+            if info.get("interface_count"):
+                disc_parts.append(f"{info['interface_count']} interfaces")
+            if info.get("object_count"):
+                disc_parts.append(f"{info['object_count']} network objects")
+            phase("API Discovery", True, ", ".join(disc_parts) if disc_parts else "Discovery complete")
+
         else:
             raise ValueError(f"Unknown vendor: {d.vendor!r}")
 
-        # ── Persist version/model info discovered during test ─────────────
+        # ── Persist version/model info discovered during test ─────────────────
         if d.vendor == "FortiGate":
             from app.connectors.live_sync import _fgt_model_from_serial
             raw_ver    = info.get("version", "")
@@ -429,6 +695,7 @@ def test_device(device_id: str, db: Session = Depends(get_db)):
                 d.os_version = raw_ver
             if raw_serial:
                 d.fw_model = _fgt_model_from_serial(raw_serial) or raw_serial
+                d.serial_number = raw_serial
         elif d.vendor == "CheckPoint":
             api_ver = info.get("api_server_version", "")
             if api_ver:
@@ -439,10 +706,12 @@ def test_device(device_id: str, db: Session = Depends(get_db)):
             if gw_versions:
                 d.fw_model = f"GW: {', '.join(sorted(gw_versions)[:3])}"
         elif d.vendor == "PaloAlto":
-            if info.get("version"):
-                d.os_version = info["version"]
+            if info.get("version") or info.get("sw-version"):
+                d.os_version = info.get("version") or info.get("sw-version")
             if info.get("model"):
                 d.fw_model = info["model"]
+            if info.get("serial"):
+                d.serial_number = info["serial"]
         elif d.vendor == "CiscoASA":
             if info.get("version") or info.get("software_version"):
                 d.os_version = info.get("version") or info.get("software_version")
@@ -450,11 +719,51 @@ def test_device(device_id: str, db: Session = Depends(get_db)):
                 d.fw_model = info["model"]
         db.commit()
 
-        return {"success": True, "info": info}
+        return {"success": True, "phases": phases, "info": info}
 
     except Exception as e:
-        logger.warning("Device test failed for %s: %s", device_id, e)
-        return {"success": False, "error": str(e)}
+        logger.warning("Device test failed for %s (%s): %s", device_id, d.vendor, e)
+        phase("API Discovery", False, str(e))
+        hint = _vendor_error_hint(d.vendor, str(e))
+        return {"success": False, "phases": phases, "error": str(e), "hint": hint}
+
+
+def _vendor_error_hint(vendor: str, error: str) -> str:
+    """Return a human-readable troubleshooting hint based on vendor + error text."""
+    err = error.lower()
+
+    # Common patterns
+    if "401" in err or "unauthorized" in err or "invalid credential" in err or "login failed" in err:
+        hints = {
+            "FortiGate":  "API token is invalid or expired. Check trusted host list and API profile permissions.",
+            "CheckPoint": "Invalid credentials or the user lacks API access. Check SmartConsole → Manage & Settings → API.",
+            "PaloAlto":   "Invalid API key. Regenerate it with GET /api/?type=keygen&user=U&password=P.",
+            "CiscoASA":   "Invalid credentials. Ensure the user has privilege level 5+.",
+        }
+        return hints.get(vendor, "Authentication failed — check credentials.")
+
+    if "403" in err or "forbidden" in err or "permission" in err:
+        return f"Access denied. The {vendor} user may lack the required read-only permissions."
+
+    if "404" in err or "not found" in err:
+        hints = {
+            "FortiGate":  "API endpoint not found — check the VDOM name and FortiOS version (6.2+ required).",
+            "CheckPoint": "API endpoint not found — ensure Management API is running and the port is correct.",
+            "PaloAlto":   "REST API endpoint not found — PAN-OS 9.0+ required for REST API.",
+            "CiscoASA":   "REST API not available — ensure the REST API agent is running ('rest-api agent').",
+        }
+        return hints.get(vendor, "API endpoint not found.")
+
+    if "timeout" in err or "timed out" in err:
+        return f"Connection timed out reaching {vendor} management interface. Check network routing and firewall ACLs."
+
+    if "ssl" in err or "certificate" in err or "cert" in err:
+        return "SSL/TLS error — try disabling 'Verify SSL cert' in device settings if using a self-signed certificate."
+
+    if "connection refused" in err:
+        return f"Connection refused on the configured port. Ensure the {vendor} management API is enabled and listening on the correct port."
+
+    return f"Unexpected error connecting to {vendor}. Check logs for details."
 
 
 # ── Live sync ─────────────────────────────────────────────────────────────────

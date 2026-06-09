@@ -7,6 +7,7 @@ import {
   TrendingUp, Package,
 } from 'lucide-react'
 import { getDashboardStats, getCustomers } from '../api/client'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import type { DashboardStats, Customer, RiskHeatmapEntry } from '../types'
 
 /* ── Helpers ─────────────────────────────────────────────── */
@@ -163,10 +164,13 @@ function RiskHeatmap({ data, showCustomer }: { data: RiskHeatmapEntry[]; showCus
 /* ── Main ────────────────────────────────────────────────── */
 
 export function Dashboard() {
+  const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [customers, setCustomers] = useState<Customer[]>([])
-  const [selectedCustomer, setSelectedCustomer] = useState('')
+  // Initialise from URL so Dashboard respects customer scope when linked with ?customer_id=
+  const [selectedCustomer, setSelectedCustomer] = useState(searchParams.get('customer_id') || '')
 
   useEffect(() => { getCustomers().then(setCustomers).catch(() => {}) }, [])
 
@@ -175,6 +179,13 @@ export function Dashboard() {
     getDashboardStats(selectedCustomer || undefined)
       .then(setStats).catch(console.error).finally(() => setLoading(false))
   }, [selectedCustomer])
+
+  const handleCustomerChange = (id: string) => {
+    setSelectedCustomer(id)
+    // Navigate into customer scope so the sidebar and all nav links become customer-scoped
+    if (id) navigate(`/customers/${id}`)
+    else navigate('/')
+  }
 
   if (loading) {
     return (
@@ -245,7 +256,7 @@ export function Dashboard() {
         <div className="flex gap-2 items-center">
           {customers.length > 1 && (
             <div className="relative">
-              <select value={selectedCustomer} onChange={e => setSelectedCustomer(e.target.value)}
+              <select value={selectedCustomer} onChange={e => handleCustomerChange(e.target.value)}
                 className="appearance-none pl-3 pr-8 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-gray-900/20 cursor-pointer">
                 <option value="">All Customers</option>
                 {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}

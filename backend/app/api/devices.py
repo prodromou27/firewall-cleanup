@@ -699,12 +699,18 @@ def test_device(device_id: str, db: Session = Depends(get_db)):
         elif d.vendor == "CheckPoint":
             api_ver = info.get("api_server_version", "")
             if api_ver:
-                d.os_version = f"API {api_ver}"
                 d.management_platform = f"Check Point Management R{api_ver.split('.')[0]}"
             gws = info.get("gateways", [])
             gw_versions = list({g.get("version") for g in gws if g.get("version")})
             if gw_versions:
                 d.fw_model = f"GW: {', '.join(sorted(gw_versions)[:3])}"
+                # Store the gateway OS version (e.g. "R81.20") for CVE mapping;
+                # fall back to the management API version string if no GW versions
+                d.os_version = sorted(gw_versions)[0]
+            elif api_ver:
+                # No gateway versions available — store API version as fallback
+                # (CVE checker will skip "API x.y" strings gracefully)
+                d.os_version = f"API {api_ver}"
         elif d.vendor == "PaloAlto":
             if info.get("version") or info.get("sw-version"):
                 d.os_version = info.get("version") or info.get("sw-version")
@@ -1073,10 +1079,23 @@ def get_device_vulnerabilities(
     customer = db.query(Customer).filter(Customer.id == d.customer_id).first()
     customer_name = customer.name if customer else d.customer_id
 
+    # For CheckPoint the sync may have stored the API version ("API 2.0.1") rather
+    # than the gateway OS version. Fall back to fw_model ("GW: R81.20") so the CPE
+    # can still be built.
+    from app.analysis.cve_checker import build_cpe_string
+    os_ver = d.os_version
+    if d.vendor == "CheckPoint" and not build_cpe_string(d.vendor, os_ver or ""):
+        # Try to extract a version from fw_model e.g. "GW: R81.20" → "R81.20"
+        import re as _re
+        if d.fw_model:
+            m = _re.search(r"[Rr]\d+(?:\.\d+)?", d.fw_model)
+            if m:
+                os_ver = m.group(0)
+
     result = get_device_cves(
         device_id=device_id,
         vendor=d.vendor,
-        os_version=d.os_version,
+        os_version=os_ver,
         db=db,
         force_refresh=refresh,
     )

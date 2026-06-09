@@ -1,10 +1,12 @@
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
 import { clsx } from 'clsx'
 import {
   LayoutDashboard, Users, Upload, List, AlertTriangle,
   Package, FileText, Settings, Shield, Server, TrendingUp,
-  Activity, ChevronRight, Eye, CheckSquare,
+  Activity, ChevronRight, Eye, CheckSquare, X, Building2,
 } from 'lucide-react'
+import { getCustomer } from '../api/client'
 
 /* ── Nav definitions ─────────────────────────────────────────── */
 
@@ -21,18 +23,19 @@ const globalNav = [
   { to: '/settings',    label: 'Settings',    icon: Settings },
 ]
 
-function customerNav(id: string) {
-  return [
-    { to: `/customers/${id}`,             label: 'Overview',    icon: LayoutDashboard, exact: true },
-    { to: `/customers/${id}/devices`,     label: 'Live Devices',icon: Server },
-    { to: `/customers/${id}/policies`,    label: 'Policies',    icon: List },
-    { to: `/customers/${id}/findings`,    label: 'Findings',    icon: AlertTriangle },
-    { to: `/customers/${id}/compliance`,  label: 'Compliance',  icon: CheckSquare },
-    { to: `/customers/${id}/objects`,     label: 'Objects',     icon: Package },
-    { to: `/customers/${id}/scorecard`,   label: 'Scorecard',   icon: TrendingUp },
-    { to: `/customers/${id}/health`,      label: 'Health',      icon: Activity },
-    { to: `/customers/${id}/reports`,     label: 'Reports',     icon: FileText },
-  ]
+/** When in customer scope, remap certain global nav links to customer-scoped equivalents. */
+function scopedTo(to: string, customerId: string): string {
+  const map: Record<string, string> = {
+    '/':           `/customers/${customerId}`,
+    '/policies':   `/customers/${customerId}/policies`,
+    '/findings':   `/customers/${customerId}/findings`,
+    '/compliance': `/customers/${customerId}/compliance`,
+    '/scorecard':  `/customers/${customerId}/scorecard`,
+    '/health':     `/customers/${customerId}/health`,
+    '/reports':    `/customers/${customerId}/reports`,
+    '/upload':     `/upload?customer_id=${customerId}`,
+  }
+  return map[to] ?? to
 }
 
 /* ── NavItem ─────────────────────────────────────────────────── */
@@ -74,15 +77,31 @@ function NavItem({ to, label, icon: Icon, active, indent }: NavItemProps) {
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation()
+  const navigate = useNavigate()
   const customerMatch = location.pathname.match(/^\/customers\/([^/]+)/)
   const activeCustomerId = customerMatch?.[1]
 
+  // Load customer name when in customer scope
+  const [customerName, setCustomerName] = useState<string | null>(null)
+  useEffect(() => {
+    if (activeCustomerId) {
+      getCustomer(activeCustomerId)
+        .then((c: { name: string }) => setCustomerName(c.name))
+        .catch(() => setCustomerName(null))
+    } else {
+      setCustomerName(null)
+    }
+  }, [activeCustomerId])
+
   const isActive = (to: string, exact?: boolean) => {
     if (exact) return location.pathname === to
-    // Don't let /customers match /customers/xxx/policies etc when customer scope is active
     if (to === '/customers' && activeCustomerId) return false
     return location.pathname.startsWith(to)
   }
+
+  /** When in customer scope, return the customer-scoped equivalent of a global nav link. */
+  const effectiveTo = (to: string) =>
+    activeCustomerId ? scopedTo(to, activeCustomerId) : to
 
   return (
     <div className="flex h-screen bg-[#f5f5f5] overflow-hidden">
@@ -103,29 +122,83 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </div>
         </div>
 
+        {/* Customer scope banner */}
+        {activeCustomerId && (
+          <div className="mx-3 mb-2 rounded-lg bg-blue-500/10 border border-blue-500/20 px-2.5 py-2">
+            <div className="flex items-start justify-between gap-1">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Building2 className="w-3 h-3 text-blue-400 flex-shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-[9px] font-bold text-blue-400 uppercase tracking-widest leading-none mb-0.5">Customer Scope</p>
+                  <p className="text-[11px] font-semibold text-white truncate leading-tight">
+                    {customerName ?? '…'}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => navigate('/customers')}
+                title="Exit customer scope"
+                className="flex-shrink-0 text-slate-500 hover:text-white transition-colors mt-0.5"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+            {/* Quick-access unique customer links */}
+            <div className="mt-2 flex flex-col gap-0.5">
+              <Link
+                to={`/customers/${activeCustomerId}`}
+                className={clsx(
+                  'flex items-center gap-1.5 text-[11px] px-1.5 py-0.5 rounded transition-colors',
+                  location.pathname === `/customers/${activeCustomerId}`
+                    ? 'text-white bg-white/10'
+                    : 'text-slate-400 hover:text-slate-200'
+                )}
+              >
+                <LayoutDashboard className="w-3 h-3" /> Overview
+              </Link>
+              <Link
+                to={`/customers/${activeCustomerId}/devices`}
+                className={clsx(
+                  'flex items-center gap-1.5 text-[11px] px-1.5 py-0.5 rounded transition-colors',
+                  location.pathname.startsWith(`/customers/${activeCustomerId}/devices`)
+                    ? 'text-white bg-white/10'
+                    : 'text-slate-400 hover:text-slate-200'
+                )}
+              >
+                <Server className="w-3 h-3" /> Live Devices
+              </Link>
+              <Link
+                to={`/customers/${activeCustomerId}/objects`}
+                className={clsx(
+                  'flex items-center gap-1.5 text-[11px] px-1.5 py-0.5 rounded transition-colors',
+                  location.pathname.startsWith(`/customers/${activeCustomerId}/objects`)
+                    ? 'text-white bg-white/10'
+                    : 'text-slate-400 hover:text-slate-200'
+                )}
+              >
+                <Package className="w-3 h-3" /> Objects
+              </Link>
+            </div>
+          </div>
+        )}
+
         {/* Divider */}
         <div className="mx-3 mb-2 border-t border-white/5" />
 
-        {/* Global nav */}
+        {/* Nav — global links, customer-scoped when in scope */}
         <nav className="flex-1 px-1 py-1 space-y-0.5 overflow-y-auto min-h-0">
-          {globalNav.map(({ to, label, icon, exact }) => (
-            <NavItem key={to} to={to} label={label} icon={icon} exact={exact}
-              active={isActive(to, exact)} />
-          ))}
-
-          {/* Customer-scoped nav */}
-          {activeCustomerId && (
-            <>
-              <div className="mx-2 my-3 border-t border-white/5" />
-              <p className="px-3 text-[9px] font-bold text-slate-600 uppercase tracking-widest mb-1">
-                Customer Scope
-              </p>
-              {customerNav(activeCustomerId).map(({ to, label, icon, exact }) => (
-                <NavItem key={to} to={to} label={label} icon={icon} exact={exact}
-                  active={isActive(to, exact)} indent />
-              ))}
-            </>
-          )}
+          {globalNav.map(({ to, label, icon, exact }) => {
+            const resolvedTo = effectiveTo(to)
+            const active = exact
+              ? location.pathname === resolvedTo || location.pathname === to
+              : location.pathname.startsWith(resolvedTo) || (!activeCustomerId && location.pathname.startsWith(to))
+            // Don't highlight /customers when in customer scope
+            const reallyActive = to === '/customers' && activeCustomerId ? false : active
+            return (
+              <NavItem key={to} to={resolvedTo} label={label} icon={icon}
+                exact={exact} active={reallyActive} />
+            )
+          })}
         </nav>
 
         {/* Footer */}

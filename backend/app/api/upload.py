@@ -24,7 +24,7 @@ _ALLOWED_EXTENSIONS = {".conf", ".txt", ".json", ".csv", ".log", ".cfg"}
 _MAX_FILENAME_LEN = 255
 
 # Allowed vendor values (must match parsers)
-_ALLOWED_VENDORS = {"FortiGate", "CheckPoint", "PaloAlto", "Cisco"}
+_ALLOWED_VENDORS = {"FortiGate", "CheckPoint", "PaloAlto", "CiscoASA", "HuaweiUSG"}
 
 
 def _safe_extension(filename: str) -> str:
@@ -82,7 +82,8 @@ async def upload_policy(
         "CheckPoint": {".csv"},
         "FortiGate":  {".conf", ".txt", ".json", ".cfg"},
         "PaloAlto":   {".xml", ".json", ".conf"},
-        "Cisco":      {".txt", ".conf", ".cfg"},
+        "CiscoASA":   {".txt", ".conf", ".cfg"},
+        "HuaweiUSG":  {".txt", ".cfg", ".conf"},
     }
     allowed_exts = vendor_extensions.get(vendor, _ALLOWED_EXTENSIONS)
     if ext not in allowed_exts:

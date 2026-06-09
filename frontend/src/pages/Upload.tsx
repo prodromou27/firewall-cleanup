@@ -99,13 +99,27 @@ export function Upload() {
   const selectedVendor = watch('vendor')
   const selectedCustomer = customers.find(c => c.id === selectedCustomerId)
   const isCheckPoint = selectedVendor === 'CheckPoint'
+  const fileHint: Record<string, string> = {
+    FortiGate:   '.conf or .json (FortiOS config export)',
+    CheckPoint:  '.csv (SmartConsole policy export)',
+    PaloAlto:    '.xml (Panorama / device config export)',
+    CiscoASA:    '.txt or .cfg (show running-config output)',
+    HuaweiUSG:   '.txt or .cfg (display current-configuration output)',
+  }
+  const fileAccept: Record<string, string> = {
+    FortiGate:   '.conf,.txt,.json,.cfg',
+    CheckPoint:  '.csv',
+    PaloAlto:    '.xml,.json',
+    CiscoASA:    '.txt,.conf,.cfg',
+    HuaweiUSG:   '.txt,.cfg,.conf',
+  }
 
   return (
     <div>
       <div className="page-header sticky top-0 z-10">
         <div>
           <h1 className="page-title">Upload Policy</h1>
-          <p className="page-subtitle">Import a FortiGate or Check Point policy export for analysis</p>
+          <p className="page-subtitle">Import a firewall policy export for analysis</p>
         </div>
       </div>
     <div className="page-body max-w-2xl">
@@ -296,6 +310,9 @@ export function Upload() {
                 >
                   <option value="FortiGate">FortiGate</option>
                   <option value="CheckPoint">Check Point</option>
+                  <option value="PaloAlto">Palo Alto Networks</option>
+                  <option value="CiscoASA">Cisco ASA</option>
+                  <option value="HuaweiUSG">Huawei USG</option>
                 </select>
               </div>
 
@@ -349,15 +366,13 @@ export function Upload() {
                 <>
                   <p className="text-sm font-medium text-gray-600">Click to select file</p>
                   <p className="text-xs text-gray-400 mt-1">
-                    {isCheckPoint
-                      ? <>Check Point: <code>.csv</code> (policy export from SmartConsole)</>
-                      : <>FortiGate: <code>.conf</code> or <code>.json</code></>}
+                    {fileHint[selectedVendor] || 'Select vendor first'}
                   </p>
                 </>
               )}
               <input
                 ref={fileRef} type="file" className="hidden"
-                accept={isCheckPoint ? '.csv' : '.conf,.txt,.json'}
+                accept={fileAccept[selectedVendor] || '.conf,.txt,.json,.xml,.cfg,.csv'}
                 onChange={e => setFile(e.target.files?.[0] || null)}
               />
             </div>

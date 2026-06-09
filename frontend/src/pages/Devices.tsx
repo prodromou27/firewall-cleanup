@@ -59,6 +59,8 @@ interface TestInfo {
   object_count?: number; app_count?: number
   // Cisco ASA
   software_version?: string; interfaces?: { name: string; ip: string }[]
+  // Huawei USG
+  zone_count?: number
 }
 
 function DeviceModal({
@@ -186,6 +188,7 @@ function DeviceModal({
                 <option value="CheckPoint">Check Point</option>
                 <option value="PaloAlto">Palo Alto Networks</option>
                 <option value="CiscoASA">Cisco ASA</option>
+                <option value="HuaweiUSG">Huawei USG</option>
               </select>
             </div>
 
@@ -453,13 +456,28 @@ function DeviceModal({
               )}
 
               {/* Cisco ASA */}
-              {(testInfo.software_version || (testInfo.rule_count != null && !testInfo.hostname && !testInfo.model && !testInfo.api_server_version)) && (
+              {(testInfo.software_version || (testInfo.rule_count != null && !testInfo.hostname && !testInfo.model && !testInfo.api_server_version && !testInfo.zone_count)) && (
                 <div className="text-xs text-gray-600 space-y-0.5">
                   {[
                     ['ASA Version', testInfo.software_version || testInfo.version],
                     ['ACL Rules',   testInfo.rule_count != null ? String(testInfo.rule_count) : null],
                     ['Interfaces',  testInfo.interface_count != null ? String(testInfo.interface_count) : null],
                     ['Net Objects', testInfo.object_count != null ? String(testInfo.object_count) : null],
+                  ].filter(([, v]) => v).map(([k, v]) => (
+                    <p key={k as string}><span className="font-medium">{k}:</span> {v}</p>
+                  ))}
+                </div>
+              )}
+
+              {/* Huawei USG */}
+              {testInfo.zone_count != null && !testInfo.hostname && !testInfo.model && !testInfo.api_server_version && (
+                <div className="text-xs text-gray-600 space-y-0.5">
+                  {[
+                    ['VRP Version', testInfo.version],
+                    ['Model',       testInfo.model],
+                    ['Security Rules', testInfo.rule_count != null ? String(testInfo.rule_count) : null],
+                    ['Zones',       testInfo.zone_count != null ? String(testInfo.zone_count) : null],
+                    ['Addr Objects', testInfo.object_count != null ? String(testInfo.object_count) : null],
                   ].filter(([, v]) => v).map(([k, v]) => (
                     <p key={k as string}><span className="font-medium">{k}:</span> {v}</p>
                   ))}
@@ -532,6 +550,17 @@ function DeviceDetailDrawer({ device, onClose, onEdit }: {
   const [cveData, setCveData]     = useState<{ cves: CVEEntry[]; error?: string; cached?: boolean } | null>(null)
   const [cveLoading, setCveLoading] = useState(false)
 
+  /** For CheckPoint, os_version may be "API 2.0.1" (management API ver).
+   *  Prefer extracting the real GW firmware version (e.g. "R81.20") from fw_model. */
+  const displayOsVersion: string | null = (() => {
+    const ov = device.os_version || null
+    if (device.vendor === 'CheckPoint' && ov && /^API\s/i.test(ov) && device.fw_model) {
+      const m = device.fw_model.match(/[Rr]\d+(?:\.\d+)?/)
+      if (m) return m[0]
+    }
+    return ov
+  })()
+
   const loadCVEs = async (refresh = false) => {
     if (!device.os_version) return
     setCveLoading(true)
@@ -593,7 +622,7 @@ function DeviceDetailDrawer({ device, onClose, onEdit }: {
             </h3>
             <div className="space-y-2">
               {[
-                { label: 'OS / Firmware', value: device.os_version },
+                { label: 'OS / Firmware', value: displayOsVersion },
                 { label: 'Model', value: device.fw_model },
                 { label: 'Serial Number', value: device.serial_number },
                 { label: 'Management Platform', value: device.management_platform },
@@ -719,7 +748,7 @@ function DeviceDetailDrawer({ device, onClose, onEdit }: {
                 className="flex items-center gap-2 text-xs px-3 py-2 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg text-blue-700 font-medium transition-colors"
               >
                 <RefreshCw className={clsx('w-3 h-3', cveLoading && 'animate-spin')} />
-                {cveLoading ? 'Querying NVD…' : `Check CVEs for ${device.os_version}`}
+                {cveLoading ? 'Querying NVD…' : `Check CVEs for ${displayOsVersion}`}
               </button>
             ) : (
               <div className="space-y-2">
@@ -728,7 +757,7 @@ function DeviceDetailDrawer({ device, onClose, onEdit }: {
                     {cveData.cves.length > 0
                       ? <span className="font-semibold text-red-600">{cveData.cves.length} CVE(s) found</span>
                       : <span className="font-semibold text-green-600">No CVEs found</span>
-                    } for {device.os_version}
+                    } for {displayOsVersion}
                     {cveData.cached && <span className="text-gray-400 ml-1">(cached)</span>}
                   </p>
                   <button onClick={() => loadCVEs(true)} className="text-[10px] text-blue-500 hover:underline">Refresh</button>
@@ -752,7 +781,7 @@ function DeviceDetailDrawer({ device, onClose, onEdit }: {
                   </div>
                 ))}
                 {cveData.cves.length > 5 && (
-                  <p className="text-xs text-gray-400 text-center">+{cveData.cves.length - 5} more — <a href={`https://nvd.nist.gov/vuln/search/results?query=${device.vendor}+${device.os_version}`} target="_blank" rel="noopener" className="text-blue-500 hover:underline">view all on NVD</a></p>
+                  <p className="text-xs text-gray-400 text-center">+{cveData.cves.length - 5} more — <a href={`https://nvd.nist.gov/vuln/search/results?query=${device.vendor}+${displayOsVersion}`} target="_blank" rel="noopener" className="text-blue-500 hover:underline">view all on NVD</a></p>
                 )}
               </div>
             )}
@@ -784,6 +813,7 @@ const VENDOR_COLOR_MAP: Record<string, { chip: string; accent: string; bar: stri
   CheckPoint: { chip: 'bg-teal-100 text-teal-700 border-teal-200',       accent: 'from-teal-500 to-teal-700',      bar: 'bg-teal-500'   },
   PaloAlto:   { chip: 'bg-purple-100 text-purple-700 border-purple-200', accent: 'from-purple-500 to-purple-700',  bar: 'bg-purple-500' },
   CiscoASA:   { chip: 'bg-blue-100 text-blue-700 border-blue-200',       accent: 'from-blue-500 to-blue-700',      bar: 'bg-blue-500'   },
+  HuaweiUSG:  { chip: 'bg-red-100 text-red-700 border-red-200',          accent: 'from-red-500 to-red-700',        bar: 'bg-red-500'    },
 }
 
 // ── Device card ───────────────────────────────────────────────────────────────
@@ -792,6 +822,7 @@ const VENDOR_COLORS: Record<string, { chip: string; accent: string; bar: string 
   CheckPoint: { chip: 'bg-teal-100 text-teal-700 border-teal-200',       accent: 'from-teal-500 to-teal-700',      bar: 'bg-teal-500'   },
   PaloAlto:   { chip: 'bg-purple-100 text-purple-700 border-purple-200', accent: 'from-purple-500 to-purple-700',  bar: 'bg-purple-500' },
   CiscoASA:   { chip: 'bg-blue-100 text-blue-700 border-blue-200',       accent: 'from-blue-500 to-blue-700',      bar: 'bg-blue-500'   },
+  HuaweiUSG:  { chip: 'bg-red-100 text-red-700 border-red-200',          accent: 'from-red-500 to-red-700',        bar: 'bg-red-500'    },
 }
 const CRITICALITY_COLORS: Record<string, string> = {
   critical: 'bg-red-100 text-red-700',
@@ -828,6 +859,15 @@ function DeviceCard({
 }) {
   const vc = VENDOR_COLOR_MAP[device.vendor] ?? { chip: 'bg-gray-100 text-gray-700 border-gray-200', accent: 'from-slate-500 to-slate-700', bar: 'bg-slate-500' }
 
+  const cardOsVersion: string | null = (() => {
+    const ov = device.os_version || null
+    if (device.vendor === 'CheckPoint' && ov && /^API\s/i.test(ov) && device.fw_model) {
+      const m = device.fw_model.match(/[Rr]\d+(?:\.\d+)?/)
+      if (m) return m[0]
+    }
+    return ov
+  })()
+
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all overflow-hidden cursor-pointer" onClick={onClick}>
       {/* Vendor accent bar */}
@@ -860,11 +900,11 @@ function DeviceCard({
         {/* ── Device details panel ── */}
         <div className="bg-slate-50 rounded-lg px-3 py-2.5 mb-3 space-y-1.5">
           {/* OS / Firmware version — primary detail */}
-          {device.os_version ? (
+          {cardOsVersion ? (
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Version</span>
               <span className="text-xs font-mono font-semibold text-slate-700 bg-white border border-slate-200 px-2 py-0.5 rounded">
-                {device.os_version}
+                {cardOsVersion}
               </span>
             </div>
           ) : (

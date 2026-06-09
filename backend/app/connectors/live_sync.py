@@ -269,6 +269,111 @@ def _fgt_svc_obj(s: dict) -> dict:
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# Huawei USG translation
+# ════════════════════════════════════════════════════════════════════════════
+
+def _huawei_translate(raw: dict) -> dict:
+    """
+    Translate HuaweiUSGConnector.get_all() output to the normalised policy dict.
+
+    Raw keys:
+      rules           — already normalised by connector._normalize_rules()
+      addresses       — list of {name, type, value, members}
+      address_groups  — list of {name, type, members}
+      services        — list of {name, protocol, port_start, port_end}
+      service_groups  — list of {name, members}
+      zones           — list of {name, priority, interfaces}
+    """
+    rules_raw      = raw.get("rules", [])
+    addresses_raw  = raw.get("addresses", [])
+    addr_groups    = raw.get("address_groups", [])
+    services_raw   = raw.get("services", [])
+    svc_groups     = raw.get("service_groups", [])
+
+    # ── Build object map ────────────────────────────────────────────────────
+    obj_map: dict[str, dict] = {}
+
+    for addr in addresses_raw:
+        name = addr.get("name", "")
+        if not name:
+            continue
+        atype = addr.get("type", "host")
+        value = addr.get("value", "")
+        members = addr.get("members", [])
+        obj_map[name] = {
+            "type":    atype,
+            "value":   value,
+            "members": members,
+            "comment": addr.get("comment", ""),
+        }
+
+    for grp in addr_groups:
+        name = grp.get("name", "")
+        if not name:
+            continue
+        obj_map[name] = {
+            "type":    "group",
+            "value":   None,
+            "members": grp.get("members", []),
+            "comment": grp.get("comment", ""),
+        }
+
+    for svc in services_raw:
+        name = svc.get("name", "")
+        if not name:
+            continue
+        proto = (svc.get("protocol") or "TCP").upper()
+        obj_map[name] = {
+            "type":       "service",
+            "protocol":   proto,
+            "port_start": svc.get("port_start", 0),
+            "port_end":   svc.get("port_end", 65535),
+            "members":    [],
+            "comment":    svc.get("comment", ""),
+        }
+
+    for sg in svc_groups:
+        name = sg.get("name", "")
+        if not name:
+            continue
+        obj_map[name] = {
+            "type":    "service-group",
+            "value":   None,
+            "members": sg.get("members", []),
+            "comment": sg.get("comment", ""),
+        }
+
+    # ── Normalise rules ─────────────────────────────────────────────────────
+    rules: list[dict] = []
+    for r in rules_raw:
+        rules.append({
+            "rule_id":                r.get("rule_id", ""),
+            "rule_name":              r.get("rule_name", ""),
+            "section":                r.get("section"),
+            "sources":                r.get("sources", []),
+            "destinations":           r.get("destinations", []),
+            "services":               r.get("services", []),
+            "source_interfaces":      [],
+            "destination_interfaces": [],
+            "applications":           r.get("applications", []),
+            "action":                 r.get("action", "deny"),
+            "enabled":                r.get("enabled", True),
+            "logging_enabled":        r.get("logging_enabled", True),
+            "nat_enabled":            False,
+            "schedule":               "always",
+            "comments":               r.get("comments", ""),
+            "hit_count":              r.get("hit_count") or 0,
+            "bytes":                  0,
+            "pkts":                   0,
+            "active_sessions":        0,
+            "first_hit":              None,
+            "last_hit":               r.get("last_hit"),
+        })
+
+    return {"rules": rules, "objects": obj_map, "warnings": raw.get("warnings", [])}
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # Check Point translation
 # ════════════════════════════════════════════════════════════════════════════
 
@@ -952,6 +1057,22 @@ def sync_device(device: FirewallDevice, db: Session) -> dict:
             parsed = asa_translate(raw)
             vendor_label = "CiscoASA"
 
+        elif device.vendor == "HuaweiUSG":
+            from app.connectors.huawei_usg import HuaweiUSGConnector
+            conn = HuaweiUSGConnector(
+                host=device.host,
+                username=device.username or "",
+                password=_password,
+                port=device.port or 443,
+                use_ssl=device.use_ssl,
+                verify_ssl=device.verify_ssl,
+            )
+            info   = conn.connect()
+            raw    = conn.get_all()
+            conn.disconnect()
+            parsed = _huawei_translate(raw)
+            vendor_label = "HuaweiUSG"
+
         else:
             raise ValueError(f"Unknown vendor: {device.vendor!r}")
 
@@ -1034,20 +1155,25 @@ def sync_device(device: FirewallDevice, db: Session) -> dict:
             # info = {"api_server_version": "1.9.1", "uid": "...", ...}
             api_ver = info.get("api_server_version", "")
             if api_ver:
-                device.os_version       = f"API {api_ver}"
                 device.management_platform = f"Check Point Management R{api_ver.split('.')[0]}" if api_ver else None
-            # gateway versions come from raw["gateways"]
+            # gateway versions come from raw["gateways"] — prefer GW OS version
             gateways = raw.get("gateways", [])
             if gateways:
                 gw_versions = list({g.get("version") for g in gateways if g.get("version")})
                 if gw_versions:
-                    device.fw_model = f"GW: {', '.join(sorted(gw_versions)[:3])}"
+                    sorted_gw = sorted(gw_versions)
+                    device.os_version = sorted_gw[0]   # e.g. "R81.20"
+                    device.fw_model   = f"GW: {', '.join(sorted_gw[:3])}"
+                elif api_ver:
+                    device.os_version = f"API {api_ver}"  # fallback when no GW version
                 # Store gateway IPs as "interfaces" for display
                 ifaces = [{"name": g.get("name",""), "ip": g.get("ipv4-address",""),
                            "type": g.get("type","gateway"), "status": "up"}
                           for g in gateways if g.get("ipv4-address")]
                 if ifaces:
                     device.device_interfaces = json.dumps(ifaces)
+            elif api_ver:
+                device.os_version = f"API {api_ver}"  # fallback when no GW data
 
         elif device.vendor == "PaloAlto":
             pa_ver = info.get("version") or info.get("sw-version", "")
@@ -1064,6 +1190,17 @@ def sync_device(device: FirewallDevice, db: Session) -> dict:
                 device.os_version = asa_ver
             if asa_model:
                 device.fw_model = asa_model
+
+        elif device.vendor == "HuaweiUSG":
+            hw_ver   = info.get("version", "")
+            hw_model = info.get("model", "")
+            hw_serial = info.get("serial", "")
+            if hw_ver:
+                device.os_version = hw_ver
+            if hw_model:
+                device.fw_model = hw_model
+            if hw_serial:
+                device.serial_number = hw_serial
 
         # ── Mark success ───────────────────────────────────────────────────
         device.sync_status  = "ok"

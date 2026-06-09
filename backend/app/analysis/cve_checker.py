@@ -62,6 +62,19 @@ def _normalise_cisco_version(raw: str) -> str:
     return cleaned
 
 
+def _normalise_huawei_version(raw: str) -> str:
+    """
+    'V500R001C30SPC200' → 'v500r001c30spc200'
+    'V600R023C00' → 'v600r023c00'
+    Huawei NVD CPE versions use lowercase VRP build strings.
+    """
+    m = re.search(r"(V\d+R\d+[A-Z0-9]*)", raw, re.IGNORECASE)
+    if m:
+        return m.group(1).lower()
+    # Fallback: just lowercase and strip whitespace
+    return raw.strip().lower()
+
+
 def build_cpe_string(vendor: str, os_version: str) -> Optional[str]:
     """
     Convert vendor + os_version string to a CPE 2.3 string suitable for NVD query.
@@ -94,6 +107,13 @@ def build_cpe_string(vendor: str, os_version: str) -> Optional[str]:
         if not ver:
             return None
         return f"cpe:2.3:o:cisco:adaptive_security_appliance_software:{ver}:*:*:*:*:*:*:*"
+
+    if v in ("huawei", "huaweiusg", "huawei_usg"):
+        ver = _normalise_huawei_version(os_version)
+        if not ver:
+            return None
+        # Huawei USG6000 series firmware CPE
+        return f"cpe:2.3:o:huawei:usg6000_firmware:{ver}:*:*:*:*:*:*:*"
 
     return None
 

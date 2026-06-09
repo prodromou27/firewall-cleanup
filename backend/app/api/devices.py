@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/devices", tags=["devices"])
 
 # Allowed vendor values
-_ALLOWED_VENDORS = {"FortiGate", "CheckPoint", "PaloAlto", "CiscoASA"}
+_ALLOWED_VENDORS = {"FortiGate", "CheckPoint", "PaloAlto", "CiscoASA", "HuaweiUSG"}
 # Allowed CP management types
 _ALLOWED_CP_TYPES = {"SmartCenter", "MDS", "Smart-1Cloud"}
 # Allowed sync intervals (hours) — None = disabled
@@ -269,6 +269,16 @@ def _build_connector_for_device(d: FirewallDevice):
     elif d.vendor == "CiscoASA":
         from app.connectors.cisco_asa import CiscoASAConnector
         return CiscoASAConnector(
+            host=d.host,
+            username=d.username or "",
+            password=password or "",
+            port=d.port or 443,
+            use_ssl=d.use_ssl,
+            verify_ssl=d.verify_ssl,
+        )
+    elif d.vendor == "HuaweiUSG":
+        from app.connectors.huawei_usg import HuaweiUSGConnector
+        return HuaweiUSGConnector(
             host=d.host,
             username=d.username or "",
             password=password or "",
@@ -683,6 +693,48 @@ def test_device(device_id: str, db: Session = Depends(get_db)):
                 disc_parts.append(f"{info['object_count']} network objects")
             phase("API Discovery", True, ", ".join(disc_parts) if disc_parts else "Discovery complete")
 
+        # ── Huawei USG ────────────────────────────────────────────────────────
+        elif d.vendor == "HuaweiUSG":
+            try:
+                info = conn.connect()
+                version = info.get("version", "?")
+                model   = info.get("model", "")
+                phase("Authentication", True, f"Logged in — VRP {version}{' ' + model if model else ''}")
+            except Exception as e:
+                phase("Authentication", False, str(e))
+                hint = (
+                    "Huawei USG authentication failed. Ensure:\n"
+                    "• Username and password are correct (admin or read-only operator)\n"
+                    "• The REST API is enabled: 'web-manager security enable' in system view\n"
+                    "• HTTPS management is enabled on the management interface\n"
+                    "• Default port is 443 (or 8443 on some models — check your deployment)"
+                )
+                return {"success": False, "phases": phases, "error": str(e), "hint": hint}
+
+            try:
+                raw = conn.get_all()
+                rules = raw.get("rules", [])
+                info["rule_count"] = len(rules)
+                info["object_count"] = (
+                    len(raw.get("addresses", [])) +
+                    len(raw.get("address_groups", []))
+                )
+                info["zone_count"] = len(raw.get("zones", []))
+            except Exception as e:
+                logger.warning("HuaweiUSG discovery partial failure: %s", e)
+                info.setdefault("rule_count", None)
+
+            conn.disconnect()
+
+            disc_parts = []
+            if info.get("rule_count") is not None:
+                disc_parts.append(f"{info['rule_count']} security rules")
+            if info.get("zone_count"):
+                disc_parts.append(f"{info['zone_count']} zones")
+            if info.get("object_count"):
+                disc_parts.append(f"{info['object_count']} address objects")
+            phase("API Discovery", True, ", ".join(disc_parts) if disc_parts else "Discovery complete")
+
         else:
             raise ValueError(f"Unknown vendor: {d.vendor!r}")
 
@@ -723,6 +775,13 @@ def test_device(device_id: str, db: Session = Depends(get_db)):
                 d.os_version = info.get("version") or info.get("software_version")
             if info.get("model"):
                 d.fw_model = info["model"]
+        elif d.vendor == "HuaweiUSG":
+            if info.get("version"):
+                d.os_version = info["version"]
+            if info.get("model"):
+                d.fw_model = info["model"]
+            if info.get("serial"):
+                d.serial_number = info["serial"]
         db.commit()
 
         return {"success": True, "phases": phases, "info": info}
@@ -745,6 +804,7 @@ def _vendor_error_hint(vendor: str, error: str) -> str:
             "CheckPoint": "Invalid credentials or the user lacks API access. Check SmartConsole → Manage & Settings → API.",
             "PaloAlto":   "Invalid API key. Regenerate it with GET /api/?type=keygen&user=U&password=P.",
             "CiscoASA":   "Invalid credentials. Ensure the user has privilege level 5+.",
+            "HuaweiUSG":  "Invalid credentials. Check the username/password and ensure the REST API is enabled (web-manager security enable).",
         }
         return hints.get(vendor, "Authentication failed — check credentials.")
 

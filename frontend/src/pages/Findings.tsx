@@ -13,6 +13,16 @@ import {
 import { SeverityBadge, StatusBadge } from '../components/ui/SeverityBadge'
 import type { Finding, Policy, AffectedRuleData, FindingComment } from '../types'
 
+/** Backend stores array fields as JSON strings in SQLite — handle both formats. */
+function parseArr(v: unknown): string[] {
+  if (Array.isArray(v)) return v as string[]
+  if (typeof v === 'string' && v.trim().startsWith('[')) {
+    try { return JSON.parse(v) } catch { /* fall through */ }
+  }
+  if (typeof v === 'string' && v.length > 0) return [v]
+  return []
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const FINDING_TYPES: Record<string, string> = {
@@ -104,12 +114,13 @@ const PRESETS = [
 
 // ── Rule Card ─────────────────────────────────────────────────────────────────
 
-function ValueList({ values, highlight }: { values: string[]; highlight?: boolean }) {
-  if (!values || values.length === 0) return <span className="text-gray-400 italic text-xs">—</span>
+function ValueList({ values, highlight }: { values: unknown; highlight?: boolean }) {
+  const arr = parseArr(values)
+  if (arr.length === 0) return <span className="text-gray-400 italic text-xs">—</span>
   return (
     <div className="flex flex-wrap gap-1">
-      {values.slice(0, 6).map((v, i) => {
-        const isAny = ['any', 'all', '*'].includes(v.toLowerCase().trim())
+      {arr.slice(0, 6).map((v, i) => {
+        const isAny = ['any', 'all', '*'].includes(String(v).toLowerCase().trim())
         return (
           <span
             key={i}
@@ -122,8 +133,8 @@ function ValueList({ values, highlight }: { values: string[]; highlight?: boolea
           </span>
         )
       })}
-      {values.length > 6 && (
-        <span className="text-xs text-gray-400 self-center">+{values.length - 6} more</span>
+      {arr.length > 6 && (
+        <span className="text-xs text-gray-400 self-center">+{arr.length - 6} more</span>
       )}
     </div>
   )
@@ -220,16 +231,16 @@ function RuleCard({
         </div>
       </div>
 
-      {(rule.comments || !rule.logging_enabled || (rule.applications && rule.applications.length > 0)) && (
+      {(rule.comments || !rule.logging_enabled || parseArr(rule.applications).length > 0) && (
         <div className="flex flex-wrap items-center gap-3 px-4 py-2 bg-gray-50 border-t border-gray-100 text-xs text-gray-500">
           {!rule.logging_enabled && (
             <span className="flex items-center gap-1 text-amber-600">
               <Eye className="w-3 h-3" /> Logging disabled
             </span>
           )}
-          {rule.applications && rule.applications.length > 0 && (
-            <span>Apps: {rule.applications.slice(0, 3).join(', ')}{rule.applications.length > 3 ? '…' : ''}</span>
-          )}
+          {(() => { const apps = parseArr(rule.applications); return apps.length > 0 && (
+            <span>Apps: {apps.slice(0, 3).join(', ')}{apps.length > 3 ? '…' : ''}</span>
+          )})()}
           {rule.comments && (
             <span className="text-gray-400 italic truncate max-w-[300px]">"{rule.comments}"</span>
           )}

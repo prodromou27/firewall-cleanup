@@ -48,7 +48,7 @@ interface TestPhase {
 interface TestInfo {
   // FortiGate
   version?: string; serial?: string; hostname?: string
-  vdoms?: string[]; rule_count?: number; interface_count?: number; zone_count?: number
+  vdoms?: string[]; rule_count?: number; interface_count?: number
   // CheckPoint
   api_server_version?: string; is_mds?: boolean; management_type?: string
   domains?: { name: string; uid: string }[]
@@ -59,7 +59,7 @@ interface TestInfo {
   object_count?: number; app_count?: number
   // Cisco ASA
   software_version?: string; interfaces?: { name: string; ip: string }[]
-  // Huawei USG
+  // Huawei USG (also used by some vendors)
   zone_count?: number
 }
 

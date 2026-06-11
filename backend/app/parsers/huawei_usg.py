@@ -127,7 +127,28 @@ class HuaweiUSGParser(BaseParser):
         # ── Deduplicate rules by rule_name ────────────────────────────────────
         # SSH output may include the same rule from multiple commands
         # (display current-configuration all AND display security-policy all).
-        # Keep the richer entry: prefer the one that has a non-zero hit_count.
+        # Strategy: ALWAYS keep the structurally richest entry (one with real
+        # src/dst/svc data), but MERGE hit-count/timestamp from whichever entry
+        # has better statistics.  Never replace a complete rule with a statistics-
+        # only stub (a stub has sources==["any"] and action=="deny" by default
+        # because it was parsed from "display security-policy statistics" output).
+        def _rule_is_stub(r: dict) -> bool:
+            """True if the rule entry was created from statistics output (no real config data)."""
+            srcs = r.get("sources") or []
+            dsts = r.get("destinations") or []
+            svcs = r.get("services") or []
+            src_zones = r.get("src_zones") or []
+            dst_zones = r.get("dst_zones") or []
+            # A real rule has at least one specific source/dest/zone or service.
+            # A stats stub has all defaults: sources=["any"], dsts=["any"], no zones.
+            return (
+                srcs in ([], ["any"])
+                and dsts in ([], ["any"])
+                and svcs in ([], ["any"])
+                and not src_zones
+                and not dst_zones
+            )
+
         seen: Dict[str, dict] = {}
         for r in sec_rules:
             name = r.get("rule_name") or r.get("rule_id", "")
@@ -135,13 +156,39 @@ class HuaweiUSGParser(BaseParser):
                 seen[name] = r
             else:
                 existing = seen[name]
-                # Prefer entry with hit count data
-                if (r.get("hit_count") or 0) > (existing.get("hit_count") or 0):
+                r_is_stub    = _rule_is_stub(r)
+                ex_is_stub   = _rule_is_stub(existing)
+
+                if r_is_stub and not ex_is_stub:
+                    # New entry is a stats stub — keep existing real rule but
+                    # absorb any hit-count data from the stub.
+                    if (r.get("hit_count") or 0) > (existing.get("hit_count") or 0):
+                        existing["hit_count"] = r["hit_count"]
+                    if r.get("last_hit") and not existing.get("last_hit"):
+                        existing["last_hit"] = r["last_hit"]
+                    if r.get("first_hit") and not existing.get("first_hit"):
+                        existing["first_hit"] = r["first_hit"]
+                elif ex_is_stub and not r_is_stub:
+                    # Existing is a stub — replace with real rule, carrying stats over.
+                    hit = max((r.get("hit_count") or 0), (existing.get("hit_count") or 0))
                     seen[name] = r
-                # Also merge any fields the new entry has that the old one lacks
+                    if hit:
+                        seen[name]["hit_count"] = hit
+                    if existing.get("last_hit") and not r.get("last_hit"):
+                        seen[name]["last_hit"] = existing["last_hit"]
+                    if existing.get("first_hit") and not r.get("first_hit"):
+                        seen[name]["first_hit"] = existing["first_hit"]
                 else:
+                    # Both real (or both stubs) — merge stats, keep existing structure.
+                    if (r.get("hit_count") or 0) > (existing.get("hit_count") or 0):
+                        existing["hit_count"] = r["hit_count"]
+                    if r.get("last_hit") and not existing.get("last_hit"):
+                        existing["last_hit"] = r["last_hit"]
+                    if r.get("first_hit") and not existing.get("first_hit"):
+                        existing["first_hit"] = r["first_hit"]
+                    # Merge any non-empty fields missing from existing
                     for k, v in r.items():
-                        if v and not existing.get(k):
+                        if k not in ("hit_count", "last_hit", "first_hit") and v and not existing.get(k):
                             existing[k] = v
         sec_rules = list(seen.values())
 
@@ -594,22 +641,31 @@ class HuaweiUSGParser(BaseParser):
         hit_map: Dict[str, dict] = {}
         current_name: Optional[str] = None
 
-        # Patterns for rule name detection
+        # Patterns for rule name detection across VRP firmware generations:
+        #   V500R001C30:  " Rule Name: trust_to_untrust"
+        #   V500R001C60:  "Rule Name : trust_to_untrust"
+        #   V600R007+:    "Rule name : trust_to_untrust"
+        #   Some builds:  " Name: trust_to_untrust"  (no "Rule" prefix)
+        #   Config style: "  rule name trust_to_untrust"
         _rule_name_pats = [
             re.compile(r'^\s*Rule\s+[Nn]ame\s*[:\s]+(.+)', re.IGNORECASE),
-            re.compile(r'^\s+rule\s+name\s+(.+)$'),         # config / display inline
+            re.compile(r'^\s*Rule-name\s*[:\s]+(.+)', re.IGNORECASE),
+            re.compile(r'^\s+rule\s+name\s+(.+)$'),          # config / display inline (indented)
+            # "  Name: trust_to_untrust"  (some VRP builds omit "Rule" prefix)
+            # Guard against matching section headers: only if indented and short value
+            re.compile(r'^\s{1,4}Name\s*:\s*(\S.{0,128})$', re.IGNORECASE),
         ]
-        # Patterns for match count — all known VRP variants
+        # Patterns for match count — all known VRP variants:
+        #   "Forward  Match count             :  12345"  (single-line, stats output)
+        #   "   Match count                   :  12345"  (next-line after Forward/Backward)
+        #   "match count: 12345 packet(s)"               (inline display output)
+        #   "Hit count : 12345"                          (some VRP variants)
+        #   "Match  12345 time(s)"                       (display rule <name> style)
         _count_pats = [
-            # "Forward  Match count  :  12345"  (display security-policy statistics)
-            re.compile(r'(?:Forward|Backward)?\s*Match\s+count\s*:\s*(\d+)', re.IGNORECASE),
-            # "match count: 12345 packet(s)"  (inline in display output)
+            re.compile(r'(?:(?:Forward|Backward)\s+)?Match\s+count\s*:\s*(\d+)', re.IGNORECASE),
             re.compile(r'match\s+count\s*:\s*(\d+)', re.IGNORECASE),
-            # "Hit count : 12345"
             re.compile(r'[Hh]it\s*(?:count|times?)?\s*:\s*(\d+)'),
-            # "Match  12345 time(s)"  (display security-policy rule <name>)
             re.compile(r'^\s*Match\s+(\d+)\s+time', re.IGNORECASE),
-            # "Matched : 12345"
             re.compile(r'[Mm]atched\s*:\s*(\d+)'),
         ]
         _last_pats = [
@@ -627,9 +683,10 @@ class HuaweiUSGParser(BaseParser):
                 m = pat.match(line)
                 if m:
                     candidate = m.group(1).strip()
-                    # Filter out noise: skip lines that are clearly not rule names
+                    # Filter out noise: skip lines that are clearly not rule names.
+                    # Use \b so "ALLOW_INTERNET" is not excluded by the "all" prefix match.
                     if candidate and not re.match(
-                        r'^(all|statistics|verbose|brief|-+|total|policy|forward|backward)',
+                        r'^(all|statistics|verbose|brief|total|policy|forward|backward)\b|-{2,}',
                         candidate, re.IGNORECASE
                     ):
                         current_name = candidate
@@ -693,8 +750,13 @@ class HuaweiUSGParser(BaseParser):
             if re.match(r'^security-policy\s*$', stripped):
                 in_sec_policy = True
                 continue
-            # display security-policy / display security-policy all
+            # display security-policy [all|rule ...] — rule definitions, enter parse mode.
+            # But NOT for "display security-policy statistics" / "rule all statistics"
+            # which contain only hit-count data, not rule definitions.  Parsing those
+            # as rules creates spurious stub entries that corrupt real rule data.
             if re.match(r'^display security-policy', stripped, re.IGNORECASE):
+                if re.search(r'\bstatistics\b', stripped, re.IGNORECASE):
+                    continue   # statistics output — skip, handled by _parse_statistics()
                 in_sec_policy = True
                 continue
 

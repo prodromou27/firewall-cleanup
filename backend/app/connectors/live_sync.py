@@ -18,6 +18,7 @@ method that modifies a firewall object or policy.
 """
 import hashlib
 import json
+import re
 import logging
 import uuid
 from datetime import datetime
@@ -153,10 +154,22 @@ def _fgt_translate(raw: dict) -> dict:
     for seq, p in enumerate(policies):
         pid   = p.get("policyid", seq + 1)
         stats = hit_counts.get(int(pid), {})
+        # Determine section: FGT uses special policies as section dividers.
+        # A policy with name matching "--- Section Name ---" is a section marker.
+        # For regular policies, section stays empty.  We'll populate it in a
+        # second pass below.
+        rule_name = p.get("name", f"policy_{pid}")
+        comments  = p.get("comments", "")
+
+        # FortiGate logtraffic: "disable"|"none" = no logging; "utm"|"all" = logging on.
+        # The CMDB default when unset is "utm" (log UTM events = logging ON).
+        # We explicitly fall back to "utm" (not "disable") when the field is absent.
+        logtraffic = p.get("logtraffic", "utm")
+
         rule = {
             "rule_id":               str(pid),
-            "rule_name":             p.get("name", f"policy_{pid}"),
-            "section":               p.get("comments", ""),   # FGT has no section; use comments
+            "rule_name":             rule_name,
+            "section":               "",         # filled in second pass if applicable
             "sources":               [s["name"] for s in p.get("srcaddr", [])],
             "destinations":          [d["name"] for d in p.get("dstaddr", [])],
             "services":              [s["name"] for s in p.get("service", [])],
@@ -165,21 +178,37 @@ def _fgt_translate(raw: dict) -> dict:
             "applications":          [a["name"] for a in p.get("application", [])],
             "action":                _fgt_action(p.get("action", "accept")),
             "enabled":               p.get("status", "enable") == "enable",
-            "logging_enabled":       p.get("logtraffic", "disable") not in ("disable", ""),
+            "logging_enabled":       logtraffic.lower() not in ("disable", "none", ""),
             "nat_enabled":           p.get("nat", "disable") == "enable",
             "schedule":              p.get("schedule", "always"),
-            "comments":              p.get("comments", ""),
-            # Live hit stats
+            "comments":              comments,
+            # Live hit stats — prefer monitor API stats, fall back to CMDB fields
             "hit_count":             stats.get("hit_count", 0) or 0,
             "bytes":                 stats.get("bytes", 0) or 0,
             "pkts":                  stats.get("pkts", 0) or 0,
             "active_sessions":       stats.get("active_sessions", 0) or 0,
-            "first_hit":             _fgt_ts(stats.get("first_used")),
-            "last_hit":              _fgt_ts(stats.get("last_used")),
+            "first_hit":             _fgt_ts(stats.get("first_used")) or _fgt_ts(p.get("first-used")),
+            "last_hit":              _fgt_ts(stats.get("last_used"))  or _fgt_ts(p.get("last-used")),
         }
         rules.append(rule)
 
-    return {"rules": rules, "objects": obj_map, "warnings": []}
+    # ── Section second pass ────────────────────────────────────────────────
+    # FortiGate marks section boundaries with policies whose names follow
+    # the pattern "--- Section Name ---".  Tag subsequent rules with that
+    # section name until the next section marker.
+    current_section = ""
+    clean_rules: list[dict] = []
+    for rule in rules:
+        name = rule.get("rule_name", "")
+        section_m = re.match(r'^-+\s*(.+?)\s*-+$', name)
+        if section_m:
+            current_section = section_m.group(1).strip()
+            # Section-marker policies are real (but implicit deny) entries in
+            # FGT; include them so rule numbering stays consistent.
+        rule["section"] = current_section
+        clean_rules.append(rule)
+
+    return {"rules": clean_rules, "objects": obj_map, "warnings": []}
 
 
 def _fgt_action(action_str: str) -> str:

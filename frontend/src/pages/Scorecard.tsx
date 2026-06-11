@@ -3,9 +3,9 @@ import { useParams, useSearchParams, Link } from 'react-router-dom'
 import { useCustomer } from '../contexts/CustomerContext'
 import {
   CheckCircle2, AlertTriangle, TrendingUp, Shield,
-  RefreshCw, FileText, BarChart2, ChevronRight, Info,
+  RefreshCw, FileText, BarChart2, ChevronRight, Info, Activity,
 } from 'lucide-react'
-import { getPolicies, getPolicyScorecard, reanalyzePolicy } from '../api/client'
+import { getPolicies, getPolicyScorecard, reanalyzePolicy, getPolicy } from '../api/client'
 import type { Policy, PolicyScorecard } from '../types'
 import { clsx } from 'clsx'
 
@@ -110,6 +110,39 @@ function ImprovementRow({ label, severity }: { label: string; severity: string }
   )
 }
 
+// ── Complexity factor bar ─────────────────────────────────────────────────────
+
+const COMPLEXITY_MAX_POINTS: Record<string, number> = {
+  rule_count: 10, object_count: 10, group_count: 8, nested_groups: 8,
+  any_rules: 8, shadowed_rules: 8, duplicate_rules: 6, disabled_rules: 6,
+  unused_objects: 6, broad_networks: 6, large_svc_groups: 4, rule_age: 4,
+}
+
+function ComplexityFactor({ factorKey, value, label, points }: {
+  factorKey: string; value: number; label: string; points: number
+}) {
+  const max = COMPLEXITY_MAX_POINTS[factorKey] ?? 10
+  const pct = max > 0 ? Math.min(100, (points / max) * 100) : 0
+  const color = pct >= 75 ? 'bg-red-500' : pct >= 40 ? 'bg-amber-400' : 'bg-emerald-500'
+  const textColor = pct >= 75 ? 'text-red-700' : pct >= 40 ? 'text-amber-700' : 'text-emerald-700'
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-xs">
+        <span className="font-medium text-gray-700">{label}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-gray-400">count: {value}</span>
+          <span className={`font-bold tabular-nums w-12 text-right ${textColor}`}>
+            {points}/{max} pts
+          </span>
+        </div>
+      </div>
+      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+        <div className={`h-full rounded-full transition-all duration-700 ${color}`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  )
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function Scorecard({ embedded }: { embedded?: boolean } = {}) {
@@ -124,6 +157,8 @@ export function Scorecard({ embedded }: { embedded?: boolean } = {}) {
   const [loading,         setLoading]         = useState(false)
   const [loadingPolicies, setLoadingPolicies] = useState(true)
   const [reanalyzing,     setReanalyzing]     = useState(false)
+  const [complexityData,  setComplexityData]  = useState<Policy['complexity_breakdown']>(null)
+  const [complexityScore, setComplexityScore] = useState<number | null>(null)
 
   // load policy list
   useEffect(() => {
@@ -140,12 +175,18 @@ export function Scorecard({ embedded }: { embedded?: boolean } = {}) {
 
   // load scorecard when policy changes
   useEffect(() => {
-    if (!selectedPolicy) { setScorecard(null); return }
+    if (!selectedPolicy) { setScorecard(null); setComplexityData(null); return }
     setLoading(true)
     setScorecard(null)
-    getPolicyScorecard(selectedPolicy)
-      .then(setScorecard)
-      .finally(() => setLoading(false))
+    setComplexityData(null)
+    Promise.all([
+      getPolicyScorecard(selectedPolicy),
+      getPolicy(selectedPolicy),
+    ]).then(([sc, pol]) => {
+      setScorecard(sc)
+      setComplexityData(pol.complexity_breakdown || null)
+      setComplexityScore(pol.complexity_score ?? null)
+    }).finally(() => setLoading(false))
 
     const next = new URLSearchParams(searchParams)
     next.set('policy_id', selectedPolicy)
@@ -365,6 +406,45 @@ export function Scorecard({ embedded }: { embedded?: boolean } = {}) {
               </div>
             </div>
 
+            {/* ── Complexity Index breakdown ── */}
+            {complexityData && (
+              <div className="card">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-6 h-6 rounded-md bg-purple-100 flex items-center justify-center">
+                    <Activity className="w-4 h-4 text-purple-600" />
+                  </div>
+                  <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">
+                    Rulebase Complexity Index
+                  </h3>
+                  {complexityScore !== null && (
+                    <span className={clsx(
+                      'ml-auto text-sm font-extrabold px-3 py-0.5 rounded-full',
+                      complexityScore >= 70 ? 'bg-red-100 text-red-700' :
+                      complexityScore >= 40 ? 'bg-amber-100 text-amber-700' :
+                      'bg-emerald-100 text-emerald-700'
+                    )}>
+                      {complexityScore}/100
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400 mb-4">
+                  12-factor weighted score — higher means more complex and harder to maintain.
+                  Each bar shows how much a factor contributes toward its cap.
+                </p>
+                <div className="grid sm:grid-cols-2 gap-x-8 gap-y-3">
+                  {Object.entries(complexityData).map(([key, factor]) => (
+                    <ComplexityFactor
+                      key={key}
+                      factorKey={key}
+                      value={factor.value}
+                      label={factor.label}
+                      points={factor.points}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Action links */}
             <div className="grid grid-cols-2 gap-4">
               <Link
@@ -399,6 +479,24 @@ export function Scorecard({ embedded }: { embedded?: boolean } = {}) {
                     Generate Report
                   </p>
                   <p className="text-xs text-gray-400">Export HTML, Excel, CSV or JSON</p>
+                </div>
+                <ChevronRight className="w-4 h-4 text-gray-300 ml-auto" />
+              </Link>
+
+              <Link
+                to={policy?.customer_id
+                  ? `/customers/${policy.customer_id}/compare?policy_id=${selectedPolicy}`
+                  : `/compare?policy_id=${selectedPolicy}`}
+                className="card flex items-center gap-3 hover:border-blue-300 hover:shadow-md transition-all group col-span-2"
+              >
+                <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center flex-shrink-0">
+                  <TrendingUp className="w-4 h-4 text-amber-600" />
+                </div>
+                <div>
+                  <p className="font-semibold text-gray-800 group-hover:text-blue-700 text-sm transition-colors">
+                    Policy Version Comparison
+                  </p>
+                  <p className="text-xs text-gray-400">Compare revisions, view risk delta and timeline</p>
                 </div>
                 <ChevronRight className="w-4 h-4 text-gray-300 ml-auto" />
               </Link>

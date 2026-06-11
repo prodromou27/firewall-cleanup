@@ -72,10 +72,17 @@ def list_objects(
 
 
 @router.get("/{object_id}")
-def get_object(object_id: str, db: Session = Depends(get_db)):
+def get_object(
+    object_id: str,
+    customer_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
     obj = db.query(FirewallObject).filter(FirewallObject.id == object_id).first()
     if not obj:
         raise HTTPException(status_code=404, detail="Object not found")
+    if customer_id:
+        from app.api.tenant import assert_policy_customer
+        assert_policy_customer(obj.policy_id, customer_id, db)
     return _obj_dict(obj, set())
 
 

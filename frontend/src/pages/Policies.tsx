@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useCustomer } from '../contexts/CustomerContext'
 import { Loader, RefreshCw, Trash2, Eye, FileText, GitCompare, Shield, BarChart2, TrendingUp } from 'lucide-react'
 import { getPolicies, deletePolicy, reanalyzePolicy, getPolicy } from '../api/client'
 import { SeverityBadge } from '../components/ui/SeverityBadge'
@@ -35,12 +36,13 @@ export function Policies() {
   const [loading, setLoading] = useState(true)
   const navigate = useNavigate()
   const params = useParams<{ customerId?: string }>()
-  const customerId = params.customerId || ''
+  const { activeCustomer } = useCustomer()
+  const customerId = params.customerId || activeCustomer?.id || ''
 
   const load = () => {
     const pp: Record<string, string> = {}
     if (customerId) pp.customer_id = customerId
-    getPolicies(pp).then(setPolicies).finally(() => setLoading(false))
+    getPolicies(pp).then(data => setPolicies(Array.isArray(data) ? data : [])).finally(() => setLoading(false))
   }
 
   useEffect(() => {

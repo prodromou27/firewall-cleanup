@@ -8,8 +8,11 @@
 // replace with per-user JWT authentication.
 const _apiKey = import.meta.env.VITE_API_KEY as string | undefined
 
-// Exported so report download helpers can attach the same header
+// Exported so report download helpers and settings page can attach the same header
 export const API_KEY = _apiKey
+
+// Base URL for direct fetch calls (downloads, etc.)
+export const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) || 'http://localhost:8000'
 
 const api = axios.create({
   baseURL: '/api',
@@ -166,7 +169,9 @@ export const getDeviceTrends = (id: string) =>
 
 // â”€â”€ Policies: get by customer scoped â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const getPoliciesForCustomer = (customerId: string) =>
-  api.get('/policies', { params: { customer_id: customerId } }).then(r => r.data)
+  api.get('/policies', { params: { customer_id: customerId } }).then(r =>
+    Array.isArray(r.data) ? r.data : (r.data.policies ?? [])
+  )
 
 // â”€â”€ Revisions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const getRevisions = (params?: { policy_id?: string; device_id?: string; limit?: number }) =>

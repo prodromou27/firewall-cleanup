@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
+import { useCustomer } from '../contexts/CustomerContext'
 import {
   Server, Plus, Trash2, RefreshCw, CheckCircle2, XCircle,
   AlertCircle, Clock, Wifi, WifiOff, Settings, X, Eye, EyeOff,
@@ -91,7 +92,7 @@ function DeviceModal({
       host:                device?.host || '',
       port:                device?.port?.toString() || '',
       api_token:           '',
-      username:            device?.username || '',
+      username:            '',  // never pre-filled — API does not return plaintext username
       password:            '',
       use_ssl:             device?.use_ssl ?? true,
       verify_ssl:          device?.verify_ssl ?? false,
@@ -202,19 +203,30 @@ function DeviceModal({
             <div>
               <label className="label-sm">Port</label>
               <input {...register('port')} className="input-sm w-full"
-                placeholder={vendor === 'CheckPoint' ? '443 or 4434' : '443'} type="number" />
+                placeholder={
+                  vendor === 'CheckPoint' ? '443 or 4434'
+                  : vendor === 'HuaweiUSG' ? '22 (SSH) or 443 (REST)'
+                  : '443'
+                } type="number" />
+              {vendor === 'HuaweiUSG' && (
+                <p className="text-[11px] text-blue-600 mt-0.5">
+                  Port 22 → SSH (recommended) · Port 443/8443 → HTTPS REST API
+                </p>
+              )}
             </div>
 
-            <div className="flex flex-col gap-2 pt-4">
-              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                <input type="checkbox" {...register('use_ssl')} className="rounded" />
-                Use HTTPS
-              </label>
-              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                <input type="checkbox" {...register('verify_ssl')} className="rounded" />
-                Verify SSL cert
-              </label>
-            </div>
+            {vendor !== 'HuaweiUSG' && (
+              <div className="flex flex-col gap-2 pt-4">
+                <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                  <input type="checkbox" {...register('use_ssl')} className="rounded" />
+                  Use HTTPS
+                </label>
+                <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                  <input type="checkbox" {...register('verify_ssl')} className="rounded" />
+                  Verify SSL cert
+                </label>
+              </div>
+            )}
           </div>
 
           {/* Auth section */}
@@ -224,8 +236,12 @@ function DeviceModal({
             {/* Shared username / password */}
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label-sm">Username</label>
-                <input {...register('username')} className="input-sm w-full" placeholder="admin" />
+                <label className="label-sm">
+                  Username
+                  {device && <span className="text-gray-400 font-normal ml-1">(leave blank to keep existing)</span>}
+                </label>
+                <input {...register('username')} className="input-sm w-full"
+                  placeholder={device?.username_hint ? `current: ${device.username_hint}` : 'admin'} />
               </div>
               <div>
                 <label className="label-sm">Password</label>
@@ -327,6 +343,25 @@ function DeviceModal({
             {vendor === 'CiscoASA' && (
               <div className="bg-blue-50 rounded-lg p-3 text-xs text-blue-700">
                 Token-based auth via REST API. Privilege level 5+ required. Hit counts parsed from CLI passthrough.
+              </div>
+            )}
+
+            {/* Huawei USG info */}
+            {vendor === 'HuaweiUSG' && (
+              <div className="space-y-2 bg-red-50 rounded-lg p-3">
+                <p className="text-xs text-red-700 font-semibold">Huawei USG — SSH (recommended) or HTTPS REST API</p>
+                <div className="text-xs text-red-700 space-y-1">
+                  <p><strong>SSH (port 22):</strong> Connects via SSH and runs read-only <code>display</code> commands to retrieve the full running configuration, security policies, address sets, service sets, zones, NAT, and statistics.</p>
+                  <p><strong>REST API (port 443 / 8443):</strong> Uses the Huawei USG HTTPS REST API. Requires the eAPI service to be enabled on the device.</p>
+                </div>
+                <div className="text-xs text-gray-500 space-y-0.5 pt-1 border-t border-red-200">
+                  <p className="font-medium text-gray-600">SSH prerequisites:</p>
+                  <p>• SSH service enabled: <code>ssh server enable</code></p>
+                  <p>• User with read-only operator role (or higher)</p>
+                  <p>• Management ACL allows this server's IP on port 22</p>
+                  <p className="font-medium text-gray-600 pt-1">Supported platforms:</p>
+                  <p>USG2000 · USG5000 · USG6000 · USG6000E · USG6000F · USG9000</p>
+                </div>
               </div>
             )}
           </div>
@@ -684,7 +719,7 @@ function DeviceDetailDrawer({ device, onClose, onEdit }: {
                 { label: 'Protocol', value: device.use_ssl ? 'HTTPS' : 'HTTP' },
                 { label: 'SSL Verify', value: device.verify_ssl ? 'Enabled' : 'Disabled (self-signed)' },
                 { label: 'Auth Method', value: device.has_token ? 'API Token' : device.has_credentials ? 'Username / Password' : 'None' },
-                { label: 'Username', value: device.username || undefined },
+                { label: 'Username', value: device.username_hint || undefined },
                 device.vendor === 'FortiGate' ? { label: 'VDOM', value: device.vdom || 'root' } : null,
                 device.vendor === 'CheckPoint' ? { label: 'Domain', value: device.cp_domain || undefined } : null,
                 device.vendor === 'CheckPoint' ? { label: 'Policy Package', value: device.cp_policy_package || undefined } : null,
@@ -1049,7 +1084,9 @@ function DeviceCard({
 
 // ── Main Devices page ─────────────────────────────────────────────────────────
 export function Devices() {
-  const { customerId } = useParams<{ customerId: string }>()
+  const params = useParams<{ customerId?: string }>()
+  const { activeCustomer } = useCustomer()
+  const customerId = params.customerId || activeCustomer?.id
   const [devices, setDevices] = useState<FirewallDeviceT[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -1058,9 +1095,8 @@ export function Devices() {
   const [detailDevice, setDetailDevice] = useState<FirewallDeviceT | null>(null)
 
   const load = useCallback(() => {
-    if (!customerId) return
     setLoading(true)
-    getDevices(customerId).then(setDevices).finally(() => setLoading(false))
+    getDevices(customerId || undefined).then(setDevices).finally(() => setLoading(false))
   }, [customerId])
 
   useEffect(() => { load() }, [load])
@@ -1105,7 +1141,7 @@ export function Devices() {
   }
 
   const handleDelete = async (d: FirewallDeviceT) => {
-    if (!confirm(`Delete "${d.name}"? This will not remove previously synced policy data.`)) return
+    if (!confirm(`Delete "${d.name}"? This will permanently delete all associated policies, rules, findings, and objects.`)) return
     await deleteDevice(d.id)
     load()
   }
@@ -1117,8 +1153,6 @@ export function Devices() {
     } catch { /* ignore */ }
   }
 
-  if (!customerId) return null
-
   return (
     <div className="p-8">
       <div className="flex items-center justify-between mb-8">
@@ -1128,10 +1162,12 @@ export function Devices() {
             Connect directly to firewalls to sync policies and monitor rule hit counts in real time.
           </p>
         </div>
-        <button onClick={() => { setEditing(undefined); setShowModal(true) }}
-          className="btn-primary flex items-center gap-2">
-          <Plus className="w-4 h-4" /> Add Device
-        </button>
+        {customerId && (
+          <button onClick={() => { setEditing(undefined); setShowModal(true) }}
+            className="btn-primary flex items-center gap-2">
+            <Plus className="w-4 h-4" /> Add Device
+          </button>
+        )}
       </div>
 
       {/* Info banner */}
@@ -1153,13 +1189,17 @@ export function Devices() {
           <WifiOff className="w-16 h-16 text-gray-200 mx-auto mb-4" />
           <h2 className="text-lg font-semibold text-gray-600 mb-2">No devices connected</h2>
           <p className="text-gray-400 text-sm mb-6">
-            Add a FortiGate or Check Point device to start live monitoring.<br />
-            You can also <Link to={`/upload?customer_id=${customerId}`} className="text-blue-600 hover:underline">upload a policy file</Link> for offline analysis.
+            {customerId
+              ? <>Add a FortiGate or Check Point device to start live monitoring.<br />
+                You can also <Link to={`/upload?customer_id=${customerId}`} className="text-blue-600 hover:underline">upload a policy file</Link> for offline analysis.</>
+              : 'Navigate to a customer to add devices and start live monitoring.'}
           </p>
-          <button onClick={() => { setEditing(undefined); setShowModal(true) }}
-            className="btn-primary mx-auto flex items-center gap-2 w-fit">
-            <Plus className="w-4 h-4" /> Add First Device
-          </button>
+          {customerId && (
+            <button onClick={() => { setEditing(undefined); setShowModal(true) }}
+              className="btn-primary mx-auto flex items-center gap-2 w-fit">
+              <Plus className="w-4 h-4" /> Add First Device
+            </button>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
@@ -1167,7 +1207,7 @@ export function Devices() {
             <DeviceCard
               key={d.id}
               device={d}
-              customerId={customerId!}
+              customerId={customerId || d.customer_id}
               syncing={syncingId === d.id}
               onEdit={() => { setEditing(d); setShowModal(true) }}
               onDelete={() => handleDelete(d)}
@@ -1187,9 +1227,9 @@ export function Devices() {
         />
       )}
 
-      {showModal && customerId && (
+      {showModal && (customerId || editing?.customer_id) && (
         <DeviceModal
-          customerId={customerId}
+          customerId={(customerId || editing?.customer_id)!}
           device={editing}
           onClose={() => setShowModal(false)}
           onSaved={load}

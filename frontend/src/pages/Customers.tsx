@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useCustomer } from '../contexts/CustomerContext'
 import { useForm } from 'react-hook-form'
 import {
   Users, Plus, Search, Trash2, Eye, Edit2, X,
@@ -315,6 +316,7 @@ function DeleteConfirmDialog({
 // ── Main Customers page ─────────────────────────────────────
 export function Customers() {
   const navigate = useNavigate()
+  const { setActiveCustomer } = useCustomer()
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -409,7 +411,10 @@ export function Customers() {
             <CustomerCard
               key={c.id}
               customer={c}
-              onView={() => navigate(`/customers/${c.id}`)}
+              onView={() => {
+                setActiveCustomer({ id: c.id, name: c.name })
+                navigate('/')
+              }}
               onEdit={() => { setEditingCustomer(c); setShowModal(true) }}
               onDelete={() => handleDelete(c)}
             />

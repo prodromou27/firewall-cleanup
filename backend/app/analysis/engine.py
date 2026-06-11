@@ -160,6 +160,7 @@ def run_analysis(policy_id: str, db: Session) -> str:
         policy.finding_count = finding_count
         policy.high_finding_count = high_count
         policy.analysis_status = "completed"
+        policy.analysis_error = None
 
         # --- Compute extended scores ---
         enabled_rules = [r for r in rules if r.get("enabled", True)]
@@ -932,14 +933,98 @@ def _analyze_negated_objects(rules: List[dict]) -> List[dict]:
     return findings
 
 
+# CheckPoint ships hundreds of predefined service-group objects that are
+# intentionally empty (they serve as placeholders or are populated on-device
+# by the OS).  Flagging them as findings produces noise with no actionable
+# value, so we suppress them by name.  The list covers the most common ones
+# visible in CheckPoint R80/R81/R82 default object databases.
+_CHECKPOINT_PREDEFINED_GROUPS: frozenset = frozenset({
+    # ── P2P / file-sharing (CP predefined) ──────────────────────────────────
+    "AOL", "AOL_Messenger", "Gnutella", "GNUtella", "irc", "Kazaa2",
+    "Napster", "eDonkey", "Direct_Connect", "Hotline", "FreeTel-outgoing",
+    "P2P_File_Sharing_Applications", "RealPlayer",
+    # ── Microsoft services ────────────────────────────────────────────────
+    "MS-SQL", "MS_SQL", "MSExchange", "MSExchange-2000", "MSExchange-2003",
+    "MSExchange-2007", "MSExchange-2010", "MSExchange-RemoteAdmin",
+    "MSExchange-SiteConnector", "MSExchange_2007",
+    "Microsoft-DS", "NetBIOS-dgm", "NetBIOS-ns", "NetBIOS-ssn",
+    "NetMeeting", "sqlnet2",
+    # ── Messaging ─────────────────────────────────────────────────────────
+    "Messenger_Applications", "MSN_Messenger", "Yahoo_Messenger",
+    "ICQ", "Jabber", "XMPP", "Skype",
+    # ── Auth / directory ──────────────────────────────────────────────────
+    "kerberos", "Kerberos", "LDAP", "RADIUS", "TACACS", "TACACS+",
+    "SecurID", "securid", "NIS", "Entrust-CA",
+    # ── CP-specific product groups ────────────────────────────────────────
+    "FW1_clntauth",           # Check Point FireWall-1 client auth
+    "Integrity_Server",       # Check Point Integrity product
+    "RainWall-Control",       # StoneGate/Forcepoint OEM
+    "StoneBeat",              # Stonesoft HA
+    "DAIP_Control_services",  # Dynamic Address IP (CP)
+    "Trojan_Services",        # CP predefined malware group
+    "OAS",                    # Oracle Application Server (CP predefined)
+    "Orbix",                  # IONA Orbix (CP predefined)
+    "Citrix_metaFrame",       # Citrix (CP predefined)
+    "pcANYWHERE", "PC_Anywhere", "pcTELECOMMUTE",
+    # ── Well-known protocols as CP predefined service groups ──────────────
+    "NBT", "PPTP", "PPTP_Encryption", "PPTP_Tunnel", "IPSEC",
+    "IKE", "IKEv2", "IPsec", "ESP", "AH", "GRE", "L2TP",
+    "VNC", "icmp-requests",
+    # ── Network / routing protocol groups ────────────────────────────────
+    "IGMP", "OSPF", "RIP", "BGP", "IS-IS", "PIM-SM", "PIM-DM",
+    "EIGRP", "VRRP", "HSRP", "CDP", "STP", "RSTP", "MSTP", "LACP", "LLDP",
+    # ── Standard service groups that CP pre-populates ─────────────────────
+    "dns", "ntp", "time", "daytime", "discard", "echo",
+    "SNMP", "SNMP_ALL", "Syslog", "NTP", "TFTP",
+    "H323_all", "SIP_all", "MGCP", "SCCP", "RTP", "RTSP", "MMS",
+    "SMB_all", "CIFS", "NFS", "LPR", "CUPS",
+    # ── IPv6 / miscellaneous CP predefined ───────────────────────────────
+    "IPv6_group", "IPv6_Link_Local_Hosts",
+    # ── CP time / schedule objects ────────────────────────────────────────
+    "Weekend", "Every_Day", "Weekdays", "Off_Work",
+    # ── CP network / host objects ─────────────────────────────────────────
+    "LocalMachine_Loopback", "MyIntranet",
+    # ── CP service / protocol groups ─────────────────────────────────────
+    "AD_Dcerpc_services", "HTTPS default services",
+    # ── CP user / auth groups ─────────────────────────────────────────────
+    "Authenticated", "All Users", "All Blocked",
+})
+
+# Additional heuristic: CP predefined groups often follow these naming patterns
+import re as _re
+_CP_PREDEFINED_PATTERNS = (
+    _re.compile(r'^MSExchange', _re.IGNORECASE),
+    _re.compile(r'^MS-', _re.IGNORECASE),
+    _re.compile(r'^Microsoft-', _re.IGNORECASE),
+    _re.compile(r'^H323_', _re.IGNORECASE),
+    _re.compile(r'^SIP_', _re.IGNORECASE),
+    _re.compile(r'^SMB_', _re.IGNORECASE),
+    _re.compile(r'^SNMP', _re.IGNORECASE),
+)
+
+
+def _is_checkpoint_predefined(name: str) -> bool:
+    """Return True if the group name matches a known CheckPoint predefined object."""
+    if name in _CHECKPOINT_PREDEFINED_GROUPS:
+        return True
+    return any(p.match(name) for p in _CP_PREDEFINED_PATTERNS)
+
+
 def _analyze_empty_groups(objects: List[dict]) -> List[dict]:
-    """Detect group objects with no members."""
+    """Detect group objects with no members.
+
+    CheckPoint predefined service groups are intentionally empty and are
+    suppressed to avoid false-positive noise.
+    """
     findings = []
     for obj in objects:
         if obj.get("object_type") not in ("group", "service-group"):
             continue
         members = obj.get("members") or []
         if len(members) == 0:
+            # Suppress known CheckPoint predefined empty groups
+            if _is_checkpoint_predefined(obj.get("object_name", "")):
+                continue
             findings.append({
                 "finding_type": "empty_group",
                 "severity": "Low",

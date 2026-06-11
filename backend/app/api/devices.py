@@ -29,6 +29,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.device import FirewallDevice
 from app.models.customer import Customer
+from app.models.policy import FirewallPolicy
+from app.models.revision import PolicyRevision
 from app.security.crypto import encrypt_credential, decrypt_credential
 from app.security.audit import audit_log
 
@@ -178,6 +180,16 @@ class DeviceUpdate(BaseModel):
         return v
 
 
+def _mask_username(username: Optional[str]) -> Optional[str]:
+    """Return a masked version of the username for display (e.g. 'ad***' for 'admin').
+    Never returns the full plaintext username in API responses."""
+    if not username:
+        return None
+    if len(username) <= 2:
+        return "*" * len(username)
+    return username[:2] + "***"
+
+
 def _device_dict(d: FirewallDevice) -> dict:
     """
     Safe device serialization — NEVER includes raw credentials.
@@ -195,9 +207,12 @@ def _device_dict(d: FirewallDevice) -> dict:
         "vdom": d.vdom,
         "cp_domain": d.cp_domain,
         "cp_policy_package": d.cp_policy_package,
-        # Presence flags only — never expose raw/decrypted values
-        "has_token": bool(d.api_token),
+        # Credential presence flags — NEVER expose raw values
+        "has_token":       bool(d.api_token),
         "has_credentials": bool(d.username and d.password),
+        # Username is returned masked (first 2 chars + ***) so the UI can confirm
+        # which account is configured without exposing the full value.
+        "username_hint":   _mask_username(d.username),
         "cp_management_type": d.cp_management_type or "SmartCenter",
         "sync_interval_hours": d.sync_interval_hours,
         "sync_status": d.sync_status,
@@ -217,7 +232,6 @@ def _device_dict(d: FirewallDevice) -> dict:
         "ha_mode": d.ha_mode,
         "ha_peer": d.ha_peer,
         "device_interfaces": d.device_interfaces,  # JSON string — decoded on frontend
-        "username": d.username,  # shown in detail view (not sensitive)
         "created_at": d.created_at.isoformat() if d.created_at else None,
     }
 
@@ -277,15 +291,25 @@ def _build_connector_for_device(d: FirewallDevice):
             verify_ssl=d.verify_ssl,
         )
     elif d.vendor == "HuaweiUSG":
-        from app.connectors.huawei_usg import HuaweiUSGConnector
-        return HuaweiUSGConnector(
-            host=d.host,
-            username=d.username or "",
-            password=password or "",
-            port=d.port or 443,
-            use_ssl=d.use_ssl,
-            verify_ssl=d.verify_ssl,
-        )
+        _hw_port = d.port or 22
+        if _hw_port == 22:
+            from app.connectors.huawei_ssh import HuaweiSSHConnector
+            return HuaweiSSHConnector(
+                host=d.host,
+                username=d.username or "",
+                password=password or "",
+                port=_hw_port,
+            )
+        else:
+            from app.connectors.huawei_usg import HuaweiUSGConnector
+            return HuaweiUSGConnector(
+                host=d.host,
+                username=d.username or "",
+                password=password or "",
+                port=_hw_port,
+                use_ssl=d.use_ssl,
+                verify_ssl=d.verify_ssl,
+            )
     else:
         raise ValueError(f"Unsupported vendor: {d.vendor!r}")
 
@@ -355,10 +379,55 @@ def delete_device(device_id: str, db: Session = Depends(get_db)):
     d = db.query(FirewallDevice).filter(FirewallDevice.id == device_id).first()
     if not d:
         raise HTTPException(status_code=404, detail="Device not found")
+
     audit_log("device.delete", device_id=d.id, name=d.name, customer_id=d.customer_id)
+
+    # ── Cascade-delete all policies created by this device ───────────────────
+    # This covers rules, objects, findings, finding comments, analysis runs,
+    # and policy revisions — all via ORM or DB-level CASCADE.
+    #
+    # Strategy: find policies either stamped with device_id (new FK) OR
+    # referenced by last_policy_id (legacy, before device_id column existed).
+    policy_ids_to_delete: set[str] = set()
+
+    # 1. All policies stamped with this device_id
+    stamped = (
+        db.query(FirewallPolicy.id)
+        .filter(FirewallPolicy.device_id == d.id)
+        .all()
+    )
+    policy_ids_to_delete.update(row[0] for row in stamped)
+
+    # 2. The last synced policy (covers legacy rows without device_id stamped)
+    if d.last_policy_id:
+        policy_ids_to_delete.add(d.last_policy_id)
+
+    deleted_policy_count = 0
+    for pid in policy_ids_to_delete:
+        policy = db.query(FirewallPolicy).filter(FirewallPolicy.id == pid).first()
+        if policy:
+            db.delete(policy)   # ORM cascade: rules, objects, findings, comments, analysis_runs
+            deleted_policy_count += 1
+
+    if deleted_policy_count:
+        db.flush()  # apply policy deletes before device delete to respect FK order
+
+    # ── Orphan revisions: device_id is a plain string (no FK) ─────────────────
+    # Policy-cascade deletes most revisions via policy_id FK, but any revision
+    # whose policy was already deleted separately will remain. Clean them up.
+    db.query(PolicyRevision).filter(
+        PolicyRevision.device_id == d.id
+    ).delete(synchronize_session=False)
+
+    # ── Delete the device (DeviceCVE deleted by DB-level CASCADE) ─────────────
     db.delete(d)
     db.commit()
-    return {"message": "Device deleted"}
+
+    logger.info(
+        "Device %s (%s) deleted — %d associated polic%s cleaned up.",
+        d.id, d.name, deleted_policy_count, "ies" if deleted_policy_count != 1 else "y",
+    )
+    return {"message": "Device deleted", "policies_removed": deleted_policy_count}
 
 
 # ── Staged connectivity diagnostics ──────────────────────────────────────────
@@ -422,7 +491,10 @@ def test_device(device_id: str, db: Session = Depends(get_db)):
 
     audit_log("device.test_connection", device_id=d.id, host=d.host, vendor=d.vendor)
 
-    port = d.port or 443
+    # Determine effective port and whether this is an SSH-based connection
+    port = d.port or (22 if d.vendor == "HuaweiUSG" else 443)
+    _is_ssh = (d.vendor == "HuaweiUSG" and port == 22)
+
     phases: list[dict] = []
 
     def phase(name: str, ok: bool, detail: str):
@@ -432,15 +504,16 @@ def test_device(device_id: str, db: Session = Depends(get_db)):
     tcp_ok, tcp_detail = _tcp_reachable(d.host, port)
     phase("TCP Reachability", tcp_ok, tcp_detail)
     if not tcp_ok:
+        proto = "SSH (port 22)" if _is_ssh else f"management API port {port}"
         hint = (
-            f"Cannot reach {d.host}:{port} — check that the management interface is reachable "
-            "from this server and that any firewall/ACL allows traffic to the API port."
+            f"Cannot reach {d.host}:{port} — check that the {proto} is reachable "
+            "from this server and that any firewall/ACL allows the connection."
         )
         return {"success": False, "phases": phases,
                 "error": f"TCP connection failed: {tcp_detail}", "hint": hint}
 
-    # ── Phase 2: TLS ──────────────────────────────────────────────────────────
-    if d.use_ssl:
+    # ── Phase 2: TLS (HTTPS only — skipped for SSH) ───────────────────────────
+    if not _is_ssh and d.use_ssl:
         tls_ok, tls_detail = _tls_reachable(d.host, port, d.verify_ssl)
         phase("TLS Handshake", tls_ok, tls_detail)
         if not tls_ok and d.verify_ssl:
@@ -693,22 +766,43 @@ def test_device(device_id: str, db: Session = Depends(get_db)):
                 disc_parts.append(f"{info['object_count']} network objects")
             phase("API Discovery", True, ", ".join(disc_parts) if disc_parts else "Discovery complete")
 
-        # ── Huawei USG ────────────────────────────────────────────────────────
+        # ── Huawei USG (SSH or REST) ──────────────────────────────────────────
         elif d.vendor == "HuaweiUSG":
+            _hw_port = d.port or 22
+            _hw_ssh  = (_hw_port == 22)
+
             try:
                 info = conn.connect()
-                version = info.get("version", "?")
-                model   = info.get("model", "")
-                phase("Authentication", True, f"Logged in — VRP {version}{' ' + model if model else ''}")
+                version  = info.get("version", "?")
+                model    = info.get("model", "")
+                sysname  = info.get("sysname", "")
+                proto    = "SSH" if _hw_ssh else "REST"
+                detail   = f"Connected via {proto} — VRP {version}"
+                if model:
+                    detail += f" ({model})"
+                if sysname and sysname != d.host:
+                    detail += f" sysname={sysname}"
+                phase("Authentication", True, detail)
             except Exception as e:
                 phase("Authentication", False, str(e))
-                hint = (
-                    "Huawei USG authentication failed. Ensure:\n"
-                    "• Username and password are correct (admin or read-only operator)\n"
-                    "• The REST API is enabled: 'web-manager security enable' in system view\n"
-                    "• HTTPS management is enabled on the management interface\n"
-                    "• Default port is 443 (or 8443 on some models — check your deployment)"
-                )
+                if _hw_ssh:
+                    hint = (
+                        "Huawei USG SSH authentication failed. Ensure:\n"
+                        "• Username and password are correct\n"
+                        "• SSH service is enabled: 'ssh server enable' in system view\n"
+                        "• The user has at minimum operator (read-only) role\n"
+                        "• Management ACL allows SSH (TCP/22) from this server's IP\n"
+                        "• If the device has 'aaa' authentication configured, the user "
+                        "must match the SSH user-interface authentication scheme"
+                    )
+                else:
+                    hint = (
+                        "Huawei USG REST API authentication failed. Ensure:\n"
+                        "• Username and password are correct (admin or read-only operator)\n"
+                        "• The web API is enabled: 'web-manager security enable' in system view\n"
+                        "• HTTPS management is enabled on the management interface\n"
+                        "• Default port is 443 (or 8443 on USG6000E/F — check your deployment)"
+                    )
                 return {"success": False, "phases": phases, "error": str(e), "hint": hint}
 
             try:
@@ -720,6 +814,8 @@ def test_device(device_id: str, db: Session = Depends(get_db)):
                     len(raw.get("address_groups", []))
                 )
                 info["zone_count"] = len(raw.get("zones", []))
+                if raw.get("warnings"):
+                    info["warnings"] = raw["warnings"]
             except Exception as e:
                 logger.warning("HuaweiUSG discovery partial failure: %s", e)
                 info.setdefault("rule_count", None)
@@ -804,7 +900,7 @@ def _vendor_error_hint(vendor: str, error: str) -> str:
             "CheckPoint": "Invalid credentials or the user lacks API access. Check SmartConsole → Manage & Settings → API.",
             "PaloAlto":   "Invalid API key. Regenerate it with GET /api/?type=keygen&user=U&password=P.",
             "CiscoASA":   "Invalid credentials. Ensure the user has privilege level 5+.",
-            "HuaweiUSG":  "Invalid credentials. Check the username/password and ensure the REST API is enabled (web-manager security enable).",
+            "HuaweiUSG":  "Invalid credentials. Check the username/password. For SSH: ensure 'ssh server enable' and the user has operator role. For REST: ensure 'web-manager security enable'.",
         }
         return hints.get(vendor, "Authentication failed — check credentials.")
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useSearchParams, Link } from 'react-router-dom'
+import { useCustomer } from '../contexts/CustomerContext'
 import {
   CheckCircle2, AlertTriangle, TrendingUp, Shield,
   RefreshCw, FileText, BarChart2, ChevronRight, Info,
@@ -111,9 +112,10 @@ function ImprovementRow({ label, severity }: { label: string; severity: string }
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function Scorecard() {
+export function Scorecard({ embedded }: { embedded?: boolean } = {}) {
   const params = useParams<{ customerId?: string }>()
-  const customerId = params.customerId || ''
+  const { activeCustomer } = useCustomer()
+  const customerId = params.customerId || activeCustomer?.id || ''
   const [searchParams, setSearchParams] = useSearchParams()
 
   const [policies,        setPolicies]        = useState<Policy[]>([])
@@ -128,7 +130,8 @@ export function Scorecard() {
     const pp: Record<string, string> = {}
     if (customerId) pp.customer_id = customerId
     getPolicies(pp)
-      .then((list: Policy[]) => {
+      .then((data: unknown) => {
+        const list: Policy[] = Array.isArray(data) ? data : []
         setPolicies(list.filter(p => p.analysis_status === 'completed'))
         if (!selectedPolicy && list.length === 1) setSelectedPolicy(list[0].id)
       })
@@ -166,36 +169,38 @@ export function Scorecard() {
   return (
     <div>
       {/* ── Header ── */}
-      <div className="page-header sticky top-0 z-10">
-        <div>
-          <h1 className="page-title">Policy Hygiene Scorecard</h1>
-          <p className="page-subtitle">
-            Weighted hygiene score across logging, documentation, permissiveness, usage and object health
-          </p>
-        </div>
-        {policy && (
-          <div className="flex gap-2">
-            <Link
-              to={policy.customer_id
-                ? `/customers/${policy.customer_id}/findings?policy_id=${policy.id}`
-                : `/findings?policy_id=${policy.id}`}
-              className="btn-secondary"
-            >
-              <BarChart2 className="w-4 h-4" /> Findings
-            </Link>
-            <button
-              onClick={handleReanalyze}
-              disabled={reanalyzing}
-              className="btn-secondary"
-            >
-              <RefreshCw className={clsx('w-4 h-4', reanalyzing && 'animate-spin')} />
-              {reanalyzing ? 'Analysing…' : 'Re-analyse'}
-            </button>
+      {!embedded && (
+        <div className="page-header sticky top-0 z-10">
+          <div>
+            <h1 className="page-title">Policy Hygiene Scorecard</h1>
+            <p className="page-subtitle">
+              Weighted hygiene score across logging, documentation, permissiveness, usage and object health
+            </p>
           </div>
-        )}
-      </div>
+          {policy && (
+            <div className="flex gap-2">
+              <Link
+                to={policy.customer_id
+                  ? `/customers/${policy.customer_id}/findings?policy_id=${policy.id}`
+                  : `/findings?policy_id=${policy.id}`}
+                className="btn-secondary"
+              >
+                <BarChart2 className="w-4 h-4" /> Findings
+              </Link>
+              <button
+                onClick={handleReanalyze}
+                disabled={reanalyzing}
+                className="btn-secondary"
+              >
+                <RefreshCw className={clsx('w-4 h-4', reanalyzing && 'animate-spin')} />
+                {reanalyzing ? 'Analysing…' : 'Re-analyse'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
-      <div className="page-body max-w-5xl">
+      <div className={embedded ? '' : 'page-body max-w-5xl'}>
 
         {/* ── Policy selector ── */}
         {!loadingPolicies && policies.length > 1 && (

@@ -9,6 +9,7 @@ from typing import Optional, List
 from app.database import get_db
 from app.models.finding import Finding, FindingComment
 from app.models.policy import FirewallPolicy, FirewallRule
+from app.api.tenant import get_finding_with_customer_check, filter_finding_ids_by_customer
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/findings", tags=["findings"])
@@ -116,7 +117,11 @@ def list_findings(
     if export:
         _EXPORT_LIMIT = 10_000
         all_findings = q.order_by(sev_order, Finding.created_at.desc()).limit(_EXPORT_LIMIT).all()
-        policy_map = {p.id: p for p in db.query(FirewallPolicy).all()}
+        # Scope policy_map to the same customer filter used above (no cross-tenant leakage)
+        policy_q = db.query(FirewallPolicy)
+        if customer_id:
+            policy_q = policy_q.filter(FirewallPolicy.customer_id == customer_id)
+        policy_map = {p.id: p for p in policy_q.all()}
         return _findings_csv(all_findings, policy_map)
 
     total = q.count()
@@ -183,10 +188,12 @@ def _findings_csv(findings, policy_map) -> StreamingResponse:
 
 
 @router.get("/{finding_id}")
-def get_finding(finding_id: str, db: Session = Depends(get_db)):
-    f = db.query(Finding).filter(Finding.id == finding_id).first()
-    if not f:
-        raise HTTPException(status_code=404, detail="Finding not found")
+def get_finding(
+    finding_id: str,
+    customer_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    f = get_finding_with_customer_check(finding_id, customer_id, db)
     return _finding_detail(f, db)
 
 
@@ -194,11 +201,10 @@ def get_finding(finding_id: str, db: Session = Depends(get_db)):
 def update_finding(
     finding_id: str,
     body: UpdateFindingRequest,
+    customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    f = db.query(Finding).filter(Finding.id == finding_id).first()
-    if not f:
-        raise HTTPException(status_code=404, detail="Finding not found")
+    f = get_finding_with_customer_check(finding_id, customer_id, db)
 
     old_status = f.status
 
@@ -243,6 +249,7 @@ def update_finding(
 def bulk_update_findings(
     finding_ids: List[str],
     body: UpdateFindingRequest,
+    customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     if body.status and body.status not in VALID_STATUSES:
@@ -252,6 +259,9 @@ def bulk_update_findings(
 
     # Cap batch size to prevent abuse
     finding_ids = finding_ids[:500]
+
+    # Enforce tenant isolation — only allow updates to findings owned by this customer
+    finding_ids = filter_finding_ids_by_customer(finding_ids, customer_id, db)
 
     findings = (
         db.query(Finding)
@@ -287,11 +297,10 @@ def bulk_update_findings(
 def add_comment(
     finding_id: str,
     body: AddCommentRequest,
+    customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    f = db.query(Finding).filter(Finding.id == finding_id).first()
-    if not f:
-        raise HTTPException(status_code=404, detail="Finding not found")
+    f = get_finding_with_customer_check(finding_id, customer_id, db)
     c = FindingComment(
         finding_id=finding_id,
         author=body.safe_author,
@@ -310,10 +319,12 @@ def add_comment(
 
 
 @router.get("/{finding_id}/comments")
-def get_comments(finding_id: str, db: Session = Depends(get_db)):
-    f = db.query(Finding).filter(Finding.id == finding_id).first()
-    if not f:
-        raise HTTPException(status_code=404, detail="Finding not found")
+def get_comments(
+    finding_id: str,
+    customer_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    f = get_finding_with_customer_check(finding_id, customer_id, db)
     comments = (
         db.query(FindingComment)
         .filter(FindingComment.finding_id == finding_id)

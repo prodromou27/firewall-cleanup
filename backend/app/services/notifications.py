@@ -1,4 +1,4 @@
-"""
+﻿"""
 Webhook Notification Service
 ==============================
 Sends structured event payloads to a configured webhook URL when key events
@@ -10,7 +10,7 @@ Webhook payload structure:
     {
       "event":      "sync_completed" | "sync_error" | "high_finding" | "analysis_completed",
       "timestamp":  "2024-01-01T12:00:00Z",
-      "platform":   "PolicyLens",
+      "platform":   "PolicyInsight",
       "data":       { ... event-specific ... }
     }
 
@@ -57,7 +57,7 @@ def _fire_webhook(url: str, payload: dict) -> None:
             resp = client.post(
                 url,
                 json=payload,
-                headers={"Content-Type": "application/json", "User-Agent": "PolicyLens/2.1"},
+                headers={"Content-Type": "application/json", "User-Agent": "PolicyInsight/2.1"},
             )
             if resp.status_code >= 300:
                 logger.warning("Webhook returned %d: %s", resp.status_code, resp.text[:200])
@@ -77,7 +77,7 @@ def _base_payload(event: str, data: dict) -> dict:
     return {
         "event":     event,
         "timestamp": datetime.utcnow().isoformat() + "Z",
-        "platform":  "PolicyLens",
+        "platform":  "PolicyInsight",
         "version":   "2.1",
         "data":      data,
     }

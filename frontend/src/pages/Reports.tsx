@@ -1,12 +1,13 @@
-import { useEffect, useState, useMemo, useCallback } from 'react'
+﻿import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useSearchParams, useParams, Link } from 'react-router-dom'
+import { useCustomer } from '../contexts/CustomerContext'
 import {
   FileText, Download, ExternalLink, Shield, AlertTriangle,
   FileSpreadsheet, FileJson, Globe, Loader,
   Filter, RotateCcw, Check,
   Eye, EyeOff, Search, Settings2,
 } from 'lucide-react'
-import { getPolicies, getFindings, getReportUrl, API_KEY } from '../api/client'
+import { getPolicies, getFindings, getReportUrl, API_KEY, API_BASE } from '../api/client'
 import type { Policy } from '../types'
 import { clsx } from 'clsx'
 
@@ -113,7 +114,8 @@ function StatusBadge({ status }: { status: string }) {
 export function Reports() {
   const [searchParams] = useSearchParams()
   const params = useParams<{ customerId?: string }>()
-  const customerId = params.customerId || ''
+  const { activeCustomer } = useCustomer()
+  const customerId = params.customerId || activeCustomer?.id || ''
 
   /* ── Policies ── */
   const [policies, setPolicies] = useState<Policy[]>([])
@@ -143,7 +145,8 @@ export function Reports() {
     if (customerId) pp.customer_id = customerId
     setLoadingPolicies(true)
     getPolicies(pp)
-      .then((list: Policy[]) => {
+      .then((raw: unknown) => {
+        const list: Policy[] = Array.isArray(raw) ? raw : []
         setPolicies(list)
         if (!selectedPolicyId && list.length === 1) setSelectedPolicyId(list[0].id)
       })
@@ -246,6 +249,26 @@ export function Reports() {
     setSearchText('')
   }, [findings])
 
+  /* ── Customer summary download ── */
+  const [generatingCustomerSummary, setGeneratingCustomerSummary] = useState<'json' | 'excel' | null>(null)
+  const downloadCustomerSummary = async (fmt: 'json' | 'excel') => {
+    if (!customerId) return
+    setGeneratingCustomerSummary(fmt)
+    try {
+      const url = `${API_BASE}/api/reports/customer/${customerId}/summary?format=${fmt}`
+      const headers: HeadersInit = API_KEY ? { 'X-API-Key': API_KEY } : {}
+      const resp = await fetch(url, { headers })
+      if (!resp.ok) throw new Error(`${resp.status}`)
+      const blob = await resp.blob()
+      const cd = resp.headers.get('content-disposition') || ''
+      const name = cd.match(/filename="?([^";]+)"?/)?.[1] || `customer_summary.${fmt === 'excel' ? 'xlsx' : 'json'}`
+      const blobUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href = blobUrl; a.download = name; a.click()
+      URL.revokeObjectURL(blobUrl)
+    } catch (err) { console.error('Customer summary failed', err) }
+    finally { setTimeout(() => setGeneratingCustomerSummary(null), 500) }
+  }
+
   /* ── Counts ── */
   const allTypesInData = useMemo(() => [...new Set(findings.map(f => f.finding_type))], [findings])
   const sevCounts = useMemo(() => {
@@ -279,7 +302,7 @@ export function Reports() {
       const blob = await resp.blob()
       const blobUrl = URL.createObjectURL(blob)
       const ext = format === 'html' ? 'html' : format === 'excel' ? 'xlsx' : format
-      const filename = `policylens-report-${selectedPolicyId.slice(0, 8)}.${ext}`
+      const filename = `policyinsight-report-${selectedPolicyId.slice(0, 8)}.${ext}`
       const a = document.createElement('a')
       a.href = blobUrl
       if (format === 'html') {
@@ -324,6 +347,46 @@ export function Reports() {
       </div>
 
       <div className="page-body max-w-5xl">
+
+        {/* ── Customer-level summary report (only when in customer scope) ── */}
+        {customerId && (
+          <div className="card mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="font-bold text-gray-900 text-sm flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-blue-600" />
+                  Customer Summary Report
+                </h2>
+                <p className="text-xs text-gray-600 mt-1">
+                  Multi-policy aggregate report — includes all policies for this customer with
+                  findings counts, per-policy risk scores, and finding type breakdowns.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  onClick={() => downloadCustomerSummary('excel')}
+                  disabled={generatingCustomerSummary !== null}
+                  className="btn-secondary flex items-center gap-1.5 text-xs"
+                >
+                  {generatingCustomerSummary === 'excel'
+                    ? <Loader className="w-3.5 h-3.5 animate-spin" />
+                    : <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />}
+                  Excel
+                </button>
+                <button
+                  onClick={() => downloadCustomerSummary('json')}
+                  disabled={generatingCustomerSummary !== null}
+                  className="btn-secondary flex items-center gap-1.5 text-xs"
+                >
+                  {generatingCustomerSummary === 'json'
+                    ? <Loader className="w-3.5 h-3.5 animate-spin" />
+                    : <FileJson className="w-3.5 h-3.5 text-purple-600" />}
+                  JSON
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ── Step 1: Policy selector ── */}
         <div className="mb-5">

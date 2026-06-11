@@ -16,6 +16,8 @@ import logging
 router = APIRouter(prefix="/api/policies", tags=["policies"])
 logger = logging.getLogger(__name__)
 
+from app.api.tenant import assert_policy_customer  # noqa: E402 — after router init
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 _ANY_VALUES = {"any", "all", "*", "0.0.0.0/0", "::/0"}
@@ -254,22 +256,34 @@ def get_dashboard_stats(
 
 
 @router.get("/{policy_id}")
-def get_policy(policy_id: str, db: Session = Depends(get_db)):
+def get_policy(
+    policy_id: str,
+    customer_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
     policy = db.query(FirewallPolicy).filter(FirewallPolicy.id == policy_id).first()
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found")
+    if customer_id:
+        assert_policy_customer(policy_id, customer_id, db)
     return _policy_detail(policy, db)
 
 
 @router.delete("/{policy_id}")
-def delete_policy(policy_id: str, db: Session = Depends(get_db)):
+def delete_policy(
+    policy_id: str,
+    customer_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
     policy = db.query(FirewallPolicy).filter(FirewallPolicy.id == policy_id).first()
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found")
-    customer_id = policy.customer_id
+    if customer_id:
+        assert_policy_customer(policy_id, customer_id, db)
+    cid = policy.customer_id
     db.delete(policy)
     db.commit()
-    _refresh_customer_counters(customer_id, db)
+    _refresh_customer_counters(cid, db)
     return {"message": "Policy deleted"}
 
 
@@ -277,11 +291,14 @@ def delete_policy(policy_id: str, db: Session = Depends(get_db)):
 def reanalyze_policy(
     policy_id: str,
     background_tasks: BackgroundTasks,
+    customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     policy = db.query(FirewallPolicy).filter(FirewallPolicy.id == policy_id).first()
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found")
+    if customer_id:
+        assert_policy_customer(policy_id, customer_id, db)
     policy.analysis_status = "pending"
     db.commit()
     background_tasks.add_task(_run_bg, policy_id, policy.customer_id)
@@ -289,11 +306,17 @@ def reanalyze_policy(
 
 
 @router.get("/{policy_id}/risk-score")
-def get_policy_risk_score(policy_id: str, db: Session = Depends(get_db)):
+def get_policy_risk_score(
+    policy_id: str,
+    customer_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
     """Return the computed risk score and breakdown for a policy."""
     p = db.query(FirewallPolicy).filter(FirewallPolicy.id == policy_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Policy not found")
+    if customer_id:
+        assert_policy_customer(policy_id, customer_id, db)
 
     rules = db.query(FirewallRule).filter(FirewallRule.policy_id == policy_id).all()
     enabled = [r for r in rules if r.enabled]

@@ -1,70 +1,63 @@
-import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+﻿import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useEffect, useState, useRef } from 'react'
 import { clsx } from 'clsx'
 import {
   LayoutDashboard, Users, Upload, List, AlertTriangle,
-  Package, FileText, Settings, Shield, Server, TrendingUp,
-  Activity, ChevronRight, Eye, CheckSquare, X, Building2,
+  Package, FileText, Settings, Server,
+  TrendingUp, Eye, ShieldAlert, Building2, ChevronDown, X,
 } from 'lucide-react'
-import { getCustomer } from '../api/client'
+import { getCustomers } from '../api/client'
+import { useCustomer } from '../contexts/CustomerContext'
+import type { Customer } from '../types'
+import logoImg from '../assets/logo.png'
 
 /* ── Nav definitions ─────────────────────────────────────────── */
 
 const globalNav = [
-  { to: '/',            label: 'Dashboard',   icon: LayoutDashboard, exact: true },
-  { to: '/customers',   label: 'Customers',   icon: Users },
-  { to: '/policies',    label: 'Policies',    icon: List },
-  { to: '/findings',    label: 'Findings',    icon: AlertTriangle },
-  { to: '/compliance',  label: 'Compliance',  icon: CheckSquare },
-  { to: '/scorecard',   label: 'Scorecard',   icon: TrendingUp },
-  { to: '/health',      label: 'Health',      icon: Activity },
-  { to: '/reports',     label: 'Reports',     icon: FileText },
-  { to: '/upload',      label: 'Upload',      icon: Upload },
-  { to: '/settings',    label: 'Settings',    icon: Settings },
+  { to: '/',                label: 'Dashboard',       icon: LayoutDashboard, exact: true },
+  { to: '/customers',       label: 'Customers',       icon: Users },
+  { to: '/findings',        label: 'Findings',        icon: AlertTriangle },
+  { to: '/policies',        label: 'Policies',        icon: List },
+  { to: '/posture',         label: 'Posture',         icon: TrendingUp },
+  { to: '/devices',         label: 'Devices',         icon: Server },
+  { to: '/vulnerabilities', label: 'Vulnerabilities', icon: ShieldAlert },
+  { to: '/objects',         label: 'Objects',         icon: Package },
+  { to: '/reports',         label: 'Reports',         icon: FileText },
 ]
 
-/** When in customer scope, remap certain global nav links to customer-scoped equivalents. */
-function scopedTo(to: string, customerId: string): string {
-  const map: Record<string, string> = {
-    '/':           `/customers/${customerId}`,
-    '/policies':   `/customers/${customerId}/policies`,
-    '/findings':   `/customers/${customerId}/findings`,
-    '/compliance': `/customers/${customerId}/compliance`,
-    '/scorecard':  `/customers/${customerId}/scorecard`,
-    '/health':     `/customers/${customerId}/health`,
-    '/reports':    `/customers/${customerId}/reports`,
-    '/upload':     `/upload?customer_id=${customerId}`,
-  }
-  return map[to] ?? to
-}
+const utilityNav = [
+  { to: '/upload',   label: 'Upload Policy', icon: Upload },
+  { to: '/settings', label: 'Settings',      icon: Settings },
+]
 
 /* ── NavItem ─────────────────────────────────────────────────── */
 
 interface NavItemProps {
   to: string; label: string; icon: React.ElementType
-  exact?: boolean; active: boolean; indent?: boolean
+  exact?: boolean; active: boolean; muted?: boolean
 }
 
-function NavItem({ to, label, icon: Icon, active, indent }: NavItemProps) {
+function NavItem({ to, label, icon: Icon, active, muted }: NavItemProps) {
   return (
     <Link
       to={to}
       className={clsx(
         'group flex items-center gap-2.5 py-1.5 pr-3 rounded-lg text-[13px]',
         'font-medium transition-all duration-100 relative',
-        indent ? 'pl-3 ml-2' : 'pl-2.5 mx-1',
+        'pl-2.5 mx-1',
         active
           ? 'bg-white/10 text-white'
+          : muted
+          ? 'text-slate-600 hover:text-slate-400 hover:bg-white/5'
           : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
       )}
     >
-      {/* Active indicator */}
       {active && (
         <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-blue-400 rounded-r" />
       )}
       <span className={clsx(
         'flex-shrink-0 w-5 h-5 flex items-center justify-center rounded transition-colors',
-        active ? 'text-blue-400' : 'text-slate-500 group-hover:text-slate-300'
+        active ? 'text-blue-400' : muted ? 'text-slate-600 group-hover:text-slate-400' : 'text-slate-500 group-hover:text-slate-300'
       )}>
         <Icon className="w-3.5 h-3.5" />
       </span>
@@ -73,35 +66,147 @@ function NavItem({ to, label, icon: Icon, active, indent }: NavItemProps) {
   )
 }
 
+/* ── Customer selector dropdown ──────────────────────────────── */
+
+function CustomerSelector() {
+  const { activeCustomer, setActiveCustomer } = useCustomer()
+  const navigate = useNavigate()
+  const [open, setOpen] = useState(false)
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [loading, setLoading] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  // Load customers when dropdown opens
+  useEffect(() => {
+    if (!open) return
+    setLoading(true)
+    getCustomers().then(setCustomers).finally(() => setLoading(false))
+  }, [open])
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const select = (c: Customer) => {
+    setActiveCustomer({ id: c.id, name: c.name })
+    setOpen(false)
+    navigate('/')
+  }
+
+  const clear = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setActiveCustomer(null)
+    navigate('/')
+  }
+
+  return (
+    <div ref={ref} className="mx-2.5 mb-2 relative">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className={clsx(
+          'w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition-all',
+          activeCustomer
+            ? 'bg-blue-500/15 border border-blue-500/25 hover:bg-blue-500/20'
+            : 'bg-white/5 border border-white/8 hover:bg-white/8'
+        )}
+      >
+        <Building2 className={clsx('w-3.5 h-3.5 flex-shrink-0', activeCustomer ? 'text-blue-400' : 'text-slate-500')} />
+        <div className="flex-1 min-w-0">
+          {activeCustomer ? (
+            <>
+              <p className="text-[9px] font-bold text-blue-400 uppercase tracking-widest leading-none mb-0.5">
+                Active Customer
+              </p>
+              <p className="text-[12px] font-semibold text-white truncate leading-tight">
+                {activeCustomer.name}
+              </p>
+            </>
+          ) : (
+            <p className="text-[12px] text-slate-400 font-medium">All Customers</p>
+          )}
+        </div>
+        {activeCustomer ? (
+          <button
+            onClick={clear}
+            title="Clear customer scope"
+            className="flex-shrink-0 text-slate-500 hover:text-red-400 transition-colors p-0.5 rounded"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        ) : (
+          <ChevronDown className={clsx('w-3 h-3 flex-shrink-0 text-slate-500 transition-transform', open && 'rotate-180')} />
+        )}
+        {!activeCustomer && (
+          <span className="sr-only">open</span>
+        )}
+      </button>
+
+      {/* Dropdown */}
+      {open && (
+        <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-[#1e293b] border border-white/10 rounded-xl shadow-2xl overflow-hidden">
+          <div className="px-2.5 py-1.5 border-b border-white/5">
+            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Select Customer</p>
+          </div>
+          <div className="max-h-56 overflow-y-auto">
+            {loading ? (
+              <div className="flex justify-center py-4">
+                <div className="w-4 h-4 border-b-2 border-blue-400 rounded-full animate-spin" />
+              </div>
+            ) : customers.length === 0 ? (
+              <p className="text-xs text-slate-500 px-3 py-3 text-center">No customers found</p>
+            ) : (
+              <>
+                <button
+                  onClick={() => { setActiveCustomer(null); setOpen(false); navigate('/') }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/5 transition-colors text-slate-400 hover:text-white text-[12px]"
+                >
+                  <span className="text-slate-600 text-[10px]">—</span>
+                  <span>All Customers</span>
+                </button>
+                {customers.map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => select(c)}
+                    className={clsx(
+                      'w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-white/5 transition-colors text-[12px]',
+                      activeCustomer?.id === c.id ? 'text-blue-300 bg-blue-500/10' : 'text-slate-300 hover:text-white'
+                    )}
+                  >
+                    <div className="w-5 h-5 rounded-md bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center flex-shrink-0">
+                      <span className="text-white font-bold text-[8px]">{c.name.slice(0, 2).toUpperCase()}</span>
+                    </div>
+                    <span className="flex-1 truncate font-medium">{c.name}</span>
+                    {c.high_findings > 0 && (
+                      <span className="flex-shrink-0 bg-red-500/20 text-red-400 text-[9px] font-bold px-1 py-px rounded">
+                        {c.high_findings}H
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ── Layout ──────────────────────────────────────────────────── */
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation()
-  const navigate = useNavigate()
-  const customerMatch = location.pathname.match(/^\/customers\/([^/]+)/)
-  const activeCustomerId = customerMatch?.[1]
-
-  // Load customer name when in customer scope
-  const [customerName, setCustomerName] = useState<string | null>(null)
-  useEffect(() => {
-    if (activeCustomerId) {
-      getCustomer(activeCustomerId)
-        .then((c: { name: string }) => setCustomerName(c.name))
-        .catch(() => setCustomerName(null))
-    } else {
-      setCustomerName(null)
-    }
-  }, [activeCustomerId])
 
   const isActive = (to: string, exact?: boolean) => {
     if (exact) return location.pathname === to
-    if (to === '/customers' && activeCustomerId) return false
     return location.pathname.startsWith(to)
   }
-
-  /** When in customer scope, return the customer-scoped equivalent of a global nav link. */
-  const effectiveTo = (to: string) =>
-    activeCustomerId ? scopedTo(to, activeCustomerId) : to
 
   return (
     <div className="flex h-screen bg-[#f5f5f5] overflow-hidden">
@@ -112,94 +217,38 @@ export function Layout({ children }: { children: React.ReactNode }) {
         style={{ background: '#0f172a', boxShadow: '1px 0 0 rgba(255,255,255,0.04)' }}
       >
         {/* Brand */}
-        <div className="flex items-center gap-2.5 px-4 pt-5 pb-4 mb-1">
-          <div className="w-7 h-7 bg-blue-500 rounded-lg flex items-center justify-center flex-shrink-0">
-            <Shield className="w-3.5 h-3.5 text-white" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-white font-semibold text-[13px] leading-tight tracking-tight">PolicyLens</p>
-            <p className="text-slate-500 text-[10px] font-medium">Firewall Audit</p>
+        <div className="px-3 pt-4 pb-3 mb-1">
+          <div className="bg-white rounded-lg px-2.5 py-1.5 inline-flex items-center">
+            <img src={logoImg} alt="PolicyInsight" className="h-7 w-auto object-contain" />
           </div>
         </div>
 
-        {/* Customer scope banner */}
-        {activeCustomerId && (
-          <div className="mx-3 mb-2 rounded-lg bg-blue-500/10 border border-blue-500/20 px-2.5 py-2">
-            <div className="flex items-start justify-between gap-1">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <Building2 className="w-3 h-3 text-blue-400 flex-shrink-0" />
-                <div className="min-w-0">
-                  <p className="text-[9px] font-bold text-blue-400 uppercase tracking-widest leading-none mb-0.5">Customer Scope</p>
-                  <p className="text-[11px] font-semibold text-white truncate leading-tight">
-                    {customerName ?? '…'}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => navigate('/customers')}
-                title="Exit customer scope"
-                className="flex-shrink-0 text-slate-500 hover:text-white transition-colors mt-0.5"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            </div>
-            {/* Quick-access unique customer links */}
-            <div className="mt-2 flex flex-col gap-0.5">
-              <Link
-                to={`/customers/${activeCustomerId}`}
-                className={clsx(
-                  'flex items-center gap-1.5 text-[11px] px-1.5 py-0.5 rounded transition-colors',
-                  location.pathname === `/customers/${activeCustomerId}`
-                    ? 'text-white bg-white/10'
-                    : 'text-slate-400 hover:text-slate-200'
-                )}
-              >
-                <LayoutDashboard className="w-3 h-3" /> Overview
-              </Link>
-              <Link
-                to={`/customers/${activeCustomerId}/devices`}
-                className={clsx(
-                  'flex items-center gap-1.5 text-[11px] px-1.5 py-0.5 rounded transition-colors',
-                  location.pathname.startsWith(`/customers/${activeCustomerId}/devices`)
-                    ? 'text-white bg-white/10'
-                    : 'text-slate-400 hover:text-slate-200'
-                )}
-              >
-                <Server className="w-3 h-3" /> Live Devices
-              </Link>
-              <Link
-                to={`/customers/${activeCustomerId}/objects`}
-                className={clsx(
-                  'flex items-center gap-1.5 text-[11px] px-1.5 py-0.5 rounded transition-colors',
-                  location.pathname.startsWith(`/customers/${activeCustomerId}/objects`)
-                    ? 'text-white bg-white/10'
-                    : 'text-slate-400 hover:text-slate-200'
-                )}
-              >
-                <Package className="w-3 h-3" /> Objects
-              </Link>
-            </div>
-          </div>
-        )}
+        {/* Global customer selector */}
+        <CustomerSelector />
 
         {/* Divider */}
         <div className="mx-3 mb-2 border-t border-white/5" />
 
-        {/* Nav — global links, customer-scoped when in scope */}
+        {/* Main nav */}
         <nav className="flex-1 px-1 py-1 space-y-0.5 overflow-y-auto min-h-0">
-          {globalNav.map(({ to, label, icon, exact }) => {
-            const resolvedTo = effectiveTo(to)
-            const active = exact
-              ? location.pathname === resolvedTo || location.pathname === to
-              : location.pathname.startsWith(resolvedTo) || (!activeCustomerId && location.pathname.startsWith(to))
-            // Don't highlight /customers when in customer scope
-            const reallyActive = to === '/customers' && activeCustomerId ? false : active
-            return (
-              <NavItem key={to} to={resolvedTo} label={label} icon={icon}
-                exact={exact} active={reallyActive} />
-            )
-          })}
+          {globalNav.map(({ to, label, icon, exact }) => (
+            <NavItem
+              key={to}
+              to={to}
+              label={label}
+              icon={icon}
+              exact={exact}
+              active={isActive(to, exact)}
+            />
+          ))}
         </nav>
+
+        {/* Utility links */}
+        <div className="px-1 pb-2 space-y-0.5 border-t border-white/5 pt-2">
+          {utilityNav.map(({ to, label, icon }) => (
+            <NavItem key={to} to={to} label={label} icon={icon} active={isActive(to)} muted />
+          ))}
+        </div>
 
         {/* Footer */}
         <div className="px-4 py-3 border-t border-white/5">

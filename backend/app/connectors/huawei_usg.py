@@ -390,6 +390,43 @@ class HuaweiUSGConnector:
         except Exception as e:
             logger.debug("IPv6 rules: %s", e)
 
+        # Hit count statistics — try statistics endpoints and merge into rules by name
+        # Some VRP REST APIs expose per-rule stats separately from the policy listing.
+        stat_map: Dict[str, dict] = {}
+        for stat_ep in [
+            f"{b}/sec-policy/statistics",
+            f"{b}/sec-policy/ipv4/statistics",
+            f"{b}/monitor/statistic",
+            f"{b}/security-policy/statistics",
+        ]:
+            try:
+                stats = self._get_paged(client, stat_ep)
+                if stats:
+                    for s in stats:
+                        name = (s.get("ruleName") or s.get("name") or s.get("id") or "").strip()
+                        if name:
+                            stat_map[name] = s
+                    logger.info("Huawei REST: got %d stats entries from %s", len(stat_map), stat_ep)
+                    break
+            except Exception as e:
+                logger.debug("Stats from %s: %s", stat_ep, e)
+
+        if stat_map:
+            for r in result["rules"]:
+                name = r.get("rule_name", "")
+                if name in stat_map:
+                    s = stat_map[name]
+                    hc = (s.get("hitCount") or s.get("matchCount") or s.get("forwardMatchCount")
+                          or s.get("matchTimes") or 0)
+                    if hc and not r.get("hit_count"):
+                        r["hit_count"] = hc
+                    if not r.get("last_hit"):
+                        r["last_hit"] = (s.get("lastMatchTime") or s.get("lastHitTime")
+                                         or s.get("forwardLastMatchTime"))
+                    if not r.get("first_hit"):
+                        r["first_hit"] = (s.get("firstMatchTime") or s.get("firstHitTime")
+                                          or s.get("forwardFirstMatchTime"))
+
         # Address objects
         for addr_ep in [f"{b}/object/address", f"{b}/object/addresses"]:
             try:

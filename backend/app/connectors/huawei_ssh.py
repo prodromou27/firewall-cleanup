@@ -75,8 +75,13 @@ _USERMODE_CMDS: List[str] = [
     "display service-set all",
     "display nat-policy all",
     "display nat-policy",
-    "display security-policy statistics",   # security policy hit counts (correct command)
-    "display traffic policy statistics",    # QoS/network traffic policy stats (kept for completeness)
+    # Hit count / statistics — try all known VRP variants:
+    #   V500R001C30/C60:  "display security-policy rule all statistics"
+    #   V600R007+:        "display security-policy statistics"
+    # Both are run; parser deduplicates overlapping data.
+    "display security-policy rule all statistics",
+    "display security-policy statistics",
+    "display traffic policy statistics",    # QoS/network traffic policy stats (completeness)
     "display predefined-service",
     "display application pre-defined",
     "display application user-defined",
@@ -104,6 +109,8 @@ _SYSVIEW_CMDS: List[str] = []  # none currently; kept for future use
 # Per-vsys commands (run after "switch vsys <name>")
 _VSYS_CMDS: List[str] = [
     "display security-policy all",
+    "display security-policy rule all statistics",
+    "display security-policy statistics",
     "display ip address-set all",
     "display service-set all",
     "display nat-policy all",

@@ -4,8 +4,38 @@ Supports FortiGate full config exports (.conf) and firewall policy exports.
 """
 import re
 import json
+from datetime import datetime
 from typing import List, Dict, Tuple, Any, Optional
 from app.parsers.base import BaseParser
+
+
+def _fgt_parse_ts(value) -> Optional[str]:
+    """
+    Convert a FortiGate timestamp to ISO-8601 string.
+    FortiGate uses Unix epoch integers (e.g. 1705320000) in config file exports
+    and ISO strings in API responses.  Returns None for zero / absent values.
+    """
+    if value is None or value == "" or value == "0":
+        return None
+    if isinstance(value, str):
+        # Might be an ISO string already
+        if re.match(r'^\d{4}-\d{2}-\d{2}', value):
+            return value
+        # Try parsing as integer unix timestamp string
+        try:
+            t = int(value)
+            if t <= 0:
+                return None
+            return datetime.utcfromtimestamp(t).isoformat() + "Z"
+        except (ValueError, OSError):
+            return None
+    try:
+        t = int(value)
+        if t <= 0:
+            return None
+        return datetime.utcfromtimestamp(t).isoformat() + "Z"
+    except (ValueError, TypeError, OSError):
+        return None
 
 
 class FortiGateParser(BaseParser):
@@ -305,9 +335,18 @@ class FortiGateParser(BaseParser):
     def _parse_policies(self, content: str) -> List[dict]:
         rules = []
         entries = self._parse_entries(content)
+        current_section = ""
+
         for idx, entry in enumerate(entries):
             f = entry["_fields"]
             rule_id = entry["_id"]
+            rule_name = f.get("name", f"Policy {rule_id}")
+
+            # FortiGate section markers: policy names matching "--- Section Name ---"
+            # These are special policies used as visual dividers; tag following rules.
+            section_m = re.match(r'^-+\s*(.+?)\s*-+$', rule_name)
+            if section_m:
+                current_section = section_m.group(1).strip()
 
             # Parse source/dest/service lists
             srcaddr = self._parse_space_list(f.get("srcaddr", ""))
@@ -323,25 +362,32 @@ class FortiGateParser(BaseParser):
 
             action = f.get("action", "accept").lower()
             status = f.get("status", "enable")
+            # logtraffic defaults to "utm" (FGT built-in default = log UTM events = ON).
+            # "disable" and "none" both mean logging OFF.
             logtraffic = f.get("logtraffic", "utm")
             nat = f.get("nat", "disable")
 
-            # Hit count
+            # Hit count — present in some config exports (get system performance stat /
+            # backup with statistics), rarely in standard backups.
             hit_count = None
-            hc = f.get("hitc", f.get("hit-count", ""))
+            hc = f.get("hitc", f.get("hit-count", f.get("hit_count", "")))
             if hc:
                 try:
                     hit_count = int(hc)
-                except ValueError:
+                except (ValueError, TypeError):
                     pass
+
+            # Timestamps: first-used / last-used may appear as unix timestamps
+            last_hit = _fgt_parse_ts(f.get("last-used") or f.get("last_used"))
+            first_hit = _fgt_parse_ts(f.get("first-used") or f.get("first_used"))
 
             rules.append({
                 "vendor": "FortiGate",
                 "rule_id": rule_id,
                 "rule_uid": f.get("uuid", ""),
                 "rule_number": idx + 1,
-                "rule_name": f.get("name", f"Policy {rule_id}"),
-                "section": "",
+                "rule_name": rule_name,
+                "section": current_section,
                 "source_interfaces": srcintf,
                 "destination_interfaces": dstintf,
                 "sources": srcaddr,
@@ -357,8 +403,8 @@ class FortiGateParser(BaseParser):
                 "nat_enabled": nat.lower() == "enable",
                 "comments": f.get("comments", ""),
                 "hit_count": hit_count,
-                "last_hit": f.get("last-used", None),
-                "first_hit": None,
+                "last_hit": last_hit,
+                "first_hit": first_hit,
                 "install_on": [],
                 "raw_data": f,
             })
@@ -409,12 +455,12 @@ class FortiGateParser(BaseParser):
             "action": item.get("action", "accept"),
             "schedule": item.get("schedule", "always"),
             "enabled": item.get("status", "enable") == "enable",
-            "logging_enabled": item.get("logtraffic", "utm") not in ("disable", "none"),
+            "logging_enabled": (item.get("logtraffic", "utm") or "utm").lower() not in ("disable", "none"),
             "nat_enabled": item.get("nat", "disable") == "enable",
             "comments": item.get("comments", ""),
-            "hit_count": item.get("hitc", None),
-            "last_hit": item.get("last-used", None),
-            "first_hit": None,
+            "hit_count": item.get("hitc", item.get("hit_count", None)),
+            "last_hit": _fgt_parse_ts(item.get("last-used") or item.get("last_used")),
+            "first_hit": _fgt_parse_ts(item.get("first-used") or item.get("first_used")),
             "install_on": [],
             "raw_data": item,
         }

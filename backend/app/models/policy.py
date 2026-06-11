@@ -16,6 +16,8 @@ class FirewallPolicy(Base):
 
     # Tenant link
     customer_id = Column(String, ForeignKey("customers.id"), nullable=False)
+    # Device that created this policy via live sync (NULL for file-upload policies)
+    device_id = Column(String, ForeignKey("firewall_devices.id", ondelete="SET NULL"), nullable=True)
 
     firewall_name = Column(String, nullable=False)
     vendor = Column(String, nullable=False)          # FortiGate | CheckPoint

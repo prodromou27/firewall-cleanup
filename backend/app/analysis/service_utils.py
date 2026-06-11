@@ -4,17 +4,21 @@ from typing import Dict, Optional
 
 def normalize_service(svc: dict) -> dict:
     """Normalize a service dict to {protocol, port_start, port_end}."""
+    # Use `or` to coerce None to the safe default (None is falsy)
     return {
-        "protocol": svc.get("protocol", "any").lower(),
-        "port_start": int(svc.get("port_start", 0)),
-        "port_end": int(svc.get("port_end", 65535)),
+        "protocol": (svc.get("protocol") or "any").lower(),
+        "port_start": int(svc.get("port_start") if svc.get("port_start") is not None else 0),
+        "port_end": int(svc.get("port_end") if svc.get("port_end") is not None else 65535),
     }
 
 
 def service_is_any(svc: dict) -> bool:
-    proto = svc.get("protocol", "").lower()
-    ps = int(svc.get("port_start", 0))
-    pe = int(svc.get("port_end", 65535))
+    # Short-circuit for unknown/unresolvable service objects — they are never "any"
+    if svc.get("unknown"):
+        return False
+    proto = (svc.get("protocol") or "").lower()
+    ps = int(svc.get("port_start") if svc.get("port_start") is not None else 0)
+    pe = int(svc.get("port_end") if svc.get("port_end") is not None else 65535)
     return proto in ("any", "") and ps == 0 and pe == 65535
 
 

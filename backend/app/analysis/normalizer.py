@@ -63,7 +63,8 @@ def expand_service_object(
 
     obj = obj_map.get(name)
     if obj is None:
-        return [{"protocol": "any", "port_start": 0, "port_end": 65535, "name": name, "unknown": True}]
+        # Keep as opaque unknown — do NOT treat as "any" (would cause false duplicate matches)
+        return [{"protocol": "unknown", "port_start": None, "port_end": None, "name": name, "unknown": True}]
 
     obj_type = obj.get("object_type", "")
     if "group" in obj_type:

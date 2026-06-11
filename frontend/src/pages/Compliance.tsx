@@ -15,6 +15,7 @@
  */
 import { useEffect, useState, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
+import { useCustomer } from '../contexts/CustomerContext'
 import {
   CheckCircle2, XCircle, AlertTriangle, Info, ChevronDown, ChevronUp,
   RefreshCw, Shield, Award, BarChart3, FileText,
@@ -184,8 +185,10 @@ function CheckRow({ check }: { check: ComplianceCheck }) {
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
-export function Compliance() {
-  const { customerId } = useParams<{ customerId: string }>()
+export function Compliance({ embedded }: { embedded?: boolean } = {}) {
+  const params = useParams<{ customerId?: string }>()
+  const { activeCustomer } = useCustomer()
+  const customerId = params.customerId || activeCustomer?.id || ''
 
   const [policies, setPolicies]               = useState<Policy[]>([])
   const [selectedPolicy, setSelectedPolicy]   = useState<string>('')
@@ -204,7 +207,8 @@ export function Compliance() {
   useEffect(() => {
     const params: Record<string, string> = { limit: '100' }
     if (customerId) params.customer_id = customerId
-    getPolicies(params).then((data: Policy[]) => {
+    getPolicies(params).then((raw: unknown) => {
+      const data: Policy[] = Array.isArray(raw) ? raw : []
       const completed = data.filter((p: Policy) => p.analysis_status === 'completed')
       setPolicies(completed)
       if (completed.length > 0 && !selectedPolicy) {
@@ -273,7 +277,7 @@ export function Compliance() {
   return (
     <div className="space-y-6">
       {/* ── Header ── */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      {!embedded && <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
             <Shield className="w-6 h-6 text-blue-600" /> Compliance
@@ -309,7 +313,7 @@ export function Compliance() {
             </button>
           )}
         </div>
-      </div>
+      </div>}
 
       {/* ── Cross-framework summary ── */}
       {allResults && allResults.length > 0 && (

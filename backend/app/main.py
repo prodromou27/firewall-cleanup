@@ -135,6 +135,21 @@ async def _auto_sync_loop() -> None:
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
 
+    # ── Schema migrations (additive-only, safe to re-run) ─────────────────────
+    try:
+        with engine.connect() as _conn:
+            from sqlalchemy import text as _text
+            # Add device_id FK column to firewall_policies if not present
+            _cols = [r[1] for r in _conn.execute(_text("PRAGMA table_info(firewall_policies)"))]
+            if "device_id" not in _cols:
+                _conn.execute(_text(
+                    "ALTER TABLE firewall_policies ADD COLUMN device_id TEXT REFERENCES firewall_devices(id) ON DELETE SET NULL"
+                ))
+                _conn.commit()
+                logger.info("Schema migration: added device_id column to firewall_policies.")
+    except Exception as _mig_exc:
+        logger.error("Schema migration failed: %s", _mig_exc)
+
     # Recover any devices stuck in "running" state from a previous crashed process
     try:
         from app.database import SessionLocal
@@ -177,6 +192,24 @@ async def lifespan(app: FastAPI):
             "dev key. Set SECRET_KEY in .env for production deployments."
         )
 
+    # ── Credential migration: encrypt any legacy plaintext credentials ─────────
+    try:
+        from app.database import SessionLocal
+        from app.security.migrate_credentials import migrate_device_credentials
+        _mdb = SessionLocal()
+        try:
+            _count = migrate_device_credentials(_mdb)
+            if _count:
+                logger.info(
+                    "Startup credential migration: re-encrypted %d device record(s) "
+                    "that had plaintext credentials stored.",
+                    _count,
+                )
+        finally:
+            _mdb.close()
+    except Exception as _mig_exc:
+        logger.error("Credential migration failed: %s", _mig_exc)
+
     yield
     task.cancel()
     try:
@@ -188,7 +221,7 @@ async def lifespan(app: FastAPI):
 # ── App ───────────────────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="Firewall Policy Cleanup & Monitoring Assistant",
+    title="PolicyInsight",
     description="Multi-tenant firewall policy analysis and live monitoring for FortiGate and Check Point.",
     version="2.1.0",
     lifespan=lifespan,

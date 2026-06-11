@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useSearchParams, useParams } from 'react-router-dom'
+import { useCustomer } from '../contexts/CustomerContext'
 import {
   ChevronDown, ChevronUp, MessageSquare, Check, Filter,
   CheckSquare, Square, AlertTriangle, Shield, Clock, Copy,
@@ -792,7 +793,8 @@ function FindingRow({ finding, onUpdate, selected, onSelect }: {
 export function Findings() {
   const [searchParams, setSearchParams] = useSearchParams()
   const params = useParams<{ customerId?: string }>()
-  const customerId = params.customerId || searchParams.get('customer_id') || ''
+  const { activeCustomer } = useCustomer()
+  const customerId = params.customerId || searchParams.get('customer_id') || activeCustomer?.id || ''
 
   const [findings, setFindings] = useState<Finding[]>([])
   const [total, setTotal] = useState(0)
@@ -841,7 +843,7 @@ export function Findings() {
   useEffect(() => {
     const pp: Record<string, string> = {}
     if (customerId) pp.customer_id = customerId
-    getPolicies(pp).then(setPolicies)
+    getPolicies(pp).then(data => setPolicies(Array.isArray(data) ? data : []))
   }, [customerId])
 
   const setFilter = (key: string, val: string) => {

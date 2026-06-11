@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useSearchParams, Link } from 'react-router-dom'
+import { useCustomer } from '../contexts/CustomerContext'
 import {
   Shield, CheckCircle2, AlertTriangle, XCircle, Info,
   HelpCircle, RefreshCw, ChevronRight, Globe, Server,
@@ -250,9 +251,10 @@ function HealthRing({ score, coverage }: { score: number | null; coverage: numbe
 const TABS = ['Overview', 'Config Health', 'NAT Review', 'Attack Surface'] as const
 type Tab = typeof TABS[number]
 
-export function HealthAssessment() {
+export function HealthAssessment({ embedded }: { embedded?: boolean } = {}) {
   const routeParams = useParams<{ customerId?: string }>()
-  const customerId = routeParams.customerId || ''
+  const { activeCustomer } = useCustomer()
+  const customerId = routeParams.customerId || activeCustomer?.id || ''
   const [searchParams, setSearchParams] = useSearchParams()
 
   const [policies,       setPolicies]       = useState<Policy[]>([])
@@ -265,7 +267,8 @@ export function HealthAssessment() {
   useEffect(() => {
     const pp: Record<string, string> = {}
     if (customerId) pp.customer_id = customerId
-    getPolicies(pp).then((list: Policy[]) => {
+    getPolicies(pp).then((raw: unknown) => {
+      const list: Policy[] = Array.isArray(raw) ? raw : []
       const completed = list.filter(p => p.analysis_status === 'completed')
       setPolicies(completed)
       if (!selectedPolicy && completed.length === 1) setSelectedPolicy(completed[0].id)
@@ -296,22 +299,24 @@ export function HealthAssessment() {
   return (
     <div>
       {/* Header */}
-      <div className="page-header sticky top-0 z-10">
-        <div>
-          <h1 className="page-title">Firewall Health Assessment</h1>
-          <p className="page-subtitle">
-            Configuration best-practice checks · NAT review · Attack surface analysis
-          </p>
+      {!embedded && (
+        <div className="page-header sticky top-0 z-10">
+          <div>
+            <h1 className="page-title">Firewall Health Assessment</h1>
+            <p className="page-subtitle">
+              Configuration best-practice checks · NAT review · Attack surface analysis
+            </p>
+          </div>
+          {data && (
+            <button onClick={refresh} disabled={refreshing} className="btn-secondary">
+              <RefreshCw className={clsx('w-4 h-4', refreshing && 'animate-spin')} />
+              Refresh
+            </button>
+          )}
         </div>
-        {data && (
-          <button onClick={refresh} disabled={refreshing} className="btn-secondary">
-            <RefreshCw className={clsx('w-4 h-4', refreshing && 'animate-spin')} />
-            Refresh
-          </button>
-        )}
-      </div>
+      )}
 
-      <div className="page-body max-w-6xl">
+      <div className={embedded ? '' : 'page-body max-w-6xl'}>
 
         {/* Policy selector */}
         {policies.length > 1 && (

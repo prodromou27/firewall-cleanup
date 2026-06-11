@@ -9,6 +9,10 @@ from app.analysis.service_utils import services_equal, service_is_any
 
 def _addr_sets_equal(a: List[dict], b: List[dict]) -> bool:
     """True if two expanded address lists are semantically equal."""
+    # If either side has unresolvable objects, we cannot confirm equality
+    if any(s.get("type") == "unknown" for s in a) or any(s.get("type") == "unknown" for s in b):
+        return False
+
     # Check if either is 'any'
     a_any = any(s.get("type") == "any" or is_any(s.get("value", "")) for s in a)
     b_any = any(s.get("type") == "any" or is_any(s.get("value", "")) for s in b)
@@ -18,8 +22,8 @@ def _addr_sets_equal(a: List[dict], b: List[dict]) -> bool:
         return False
 
     # Compare by expanded IP values
-    a_values = sorted(s.get("value", "") for s in a if s.get("type") != "unknown")
-    b_values = sorted(s.get("value", "") for s in b if s.get("type") != "unknown")
+    a_values = sorted(s.get("value", "") for s in a)
+    b_values = sorted(s.get("value", "") for s in b)
 
     if len(a_values) != len(b_values):
         return False
@@ -29,6 +33,10 @@ def _addr_sets_equal(a: List[dict], b: List[dict]) -> bool:
 
 def _svc_sets_equal(a: List[dict], b: List[dict]) -> bool:
     """True if two expanded service lists are semantically equal."""
+    # If either side has unresolvable objects, we cannot confirm equality
+    if any(s.get("unknown") for s in a) or any(s.get("unknown") for s in b):
+        return False
+
     a_any = any(service_is_any(s) for s in a)
     b_any = any(service_is_any(s) for s in b)
     if a_any and b_any:

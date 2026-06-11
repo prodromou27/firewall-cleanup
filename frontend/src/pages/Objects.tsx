@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useSearchParams, useParams } from 'react-router-dom'
+import { useCustomer } from '../contexts/CustomerContext'
 import { Package, Search } from 'lucide-react'
 import { getObjects, getPolicies } from '../api/client'
 import type { FirewallObject, Policy } from '../types'
@@ -25,7 +26,8 @@ function ObjectTypeChip({ type }: { type: string }) {
 export function Objects() {
   const [searchParams, setSearchParams] = useSearchParams()
   const params = useParams<{ customerId?: string }>()
-  const customerId = params.customerId || ''
+  const { activeCustomer } = useCustomer()
+  const customerId = params.customerId || activeCustomer?.id || ''
   const [objects, setObjects] = useState<FirewallObject[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -57,7 +59,7 @@ export function Objects() {
   useEffect(() => {
     const pp: Record<string, string> = {}
     if (customerId) pp.customer_id = customerId
-    getPolicies(pp).then(setPolicies)
+    getPolicies(pp).then(data => setPolicies(Array.isArray(data) ? data : []))
   }, [customerId])
 
   const setFilter = (key: string, val: string) => {

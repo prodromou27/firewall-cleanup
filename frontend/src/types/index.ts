@@ -235,7 +235,8 @@ export interface FirewallDeviceT {
   cp_management_type: 'SmartCenter' | 'MDS' | 'Smart-1Cloud' | string
   has_token: boolean
   has_credentials: boolean
-  username?: string
+  /** Masked username hint returned by the API (e.g. "ad***"). Never the full plaintext value. */
+  username_hint?: string
   sync_interval_hours: number | null
   sync_status: 'never' | 'running' | 'ok' | 'error'
   last_sync_at: string | null

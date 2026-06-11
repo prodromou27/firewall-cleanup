@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import { getDashboardStats, getCustomers } from '../api/client'
 import { useSearchParams, useNavigate } from 'react-router-dom'
+import { useCustomer } from '../contexts/CustomerContext'
 import type { DashboardStats, Customer, RiskHeatmapEntry } from '../types'
 
 /* ── Helpers ─────────────────────────────────────────────── */
@@ -166,11 +167,14 @@ function RiskHeatmap({ data, showCustomer }: { data: RiskHeatmapEntry[]; showCus
 export function Dashboard() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
+  const { activeCustomer, setActiveCustomer } = useCustomer()
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [customers, setCustomers] = useState<Customer[]>([])
-  // Initialise from URL so Dashboard respects customer scope when linked with ?customer_id=
-  const [selectedCustomer, setSelectedCustomer] = useState(searchParams.get('customer_id') || '')
+  // Use global customer context; fall back to URL param for backwards compat
+  const [selectedCustomer, setSelectedCustomer] = useState(
+    searchParams.get('customer_id') || activeCustomer?.id || ''
+  )
 
   useEffect(() => { getCustomers().then(setCustomers).catch(() => {}) }, [])
 
@@ -182,9 +186,10 @@ export function Dashboard() {
 
   const handleCustomerChange = (id: string) => {
     setSelectedCustomer(id)
-    // Navigate into customer scope so the sidebar and all nav links become customer-scoped
-    if (id) navigate(`/customers/${id}`)
-    else navigate('/')
+    // Sync with global customer context
+    const found = customers.find(c => c.id === id)
+    if (found) setActiveCustomer({ id: found.id, name: found.name })
+    else setActiveCustomer(null)
   }
 
   if (loading) {

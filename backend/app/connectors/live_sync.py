@@ -348,25 +348,31 @@ def _huawei_translate(raw: dict) -> dict:
     for r in rules_raw:
         rules.append({
             "rule_id":                r.get("rule_id", ""),
+            "rule_uid":               r.get("rule_uid") or r.get("rule_id", ""),
+            "rule_number":            r.get("rule_number") or r.get("sequence_number") or 0,
             "rule_name":              r.get("rule_name", ""),
             "section":                r.get("section"),
             "sources":                r.get("sources", []),
             "destinations":           r.get("destinations", []),
             "services":               r.get("services", []),
-            "source_interfaces":      [],
-            "destination_interfaces": [],
+            # Zone-based interfaces (populated by parser/SSH connector)
+            "source_interfaces":      r.get("source_interfaces") or r.get("src_zones", []),
+            "destination_interfaces": r.get("destination_interfaces") or r.get("dst_zones", []),
             "applications":           r.get("applications", []),
+            "users":                  r.get("users", []),
+            "vpn":                    r.get("vpn", []),
+            "install_on":             r.get("install_on", []),
             "action":                 r.get("action", "deny"),
             "enabled":                r.get("enabled", True),
             "logging_enabled":        r.get("logging_enabled", True),
-            "nat_enabled":            False,
-            "schedule":               "always",
+            "nat_enabled":            r.get("nat_enabled", False),
+            "schedule":               r.get("schedule") or "always",
             "comments":               r.get("comments", ""),
             "hit_count":              r.get("hit_count") or 0,
-            "bytes":                  0,
-            "pkts":                   0,
-            "active_sessions":        0,
-            "first_hit":              None,
+            "bytes":                  r.get("bytes") or 0,
+            "pkts":                   r.get("pkts") or 0,
+            "active_sessions":        r.get("active_sessions") or 0,
+            "first_hit":              r.get("first_hit"),
             "last_hit":               r.get("last_hit"),
         })
 
@@ -1058,18 +1064,36 @@ def sync_device(device: FirewallDevice, db: Session) -> dict:
             vendor_label = "CiscoASA"
 
         elif device.vendor == "HuaweiUSG":
-            from app.connectors.huawei_usg import HuaweiUSGConnector
-            conn = HuaweiUSGConnector(
-                host=device.host,
-                username=device.username or "",
-                password=_password,
-                port=device.port or 443,
-                use_ssl=device.use_ssl,
-                verify_ssl=device.verify_ssl,
-            )
-            info   = conn.connect()
-            raw    = conn.get_all()
-            conn.disconnect()
+            _hw_port = device.port or 22
+            _use_ssh = (_hw_port == 22)
+
+            if _use_ssh:
+                # ── SSH path (primary for live Huawei devices) ──────────────
+                from app.connectors.huawei_ssh import HuaweiSSHConnector
+                conn = HuaweiSSHConnector(
+                    host=device.host,
+                    username=device.username or "",
+                    password=_password,
+                    port=_hw_port,
+                )
+                info = conn.connect()
+                raw  = conn.get_all()
+                conn.disconnect()
+            else:
+                # ── REST API path (HTTPS, port 443 or 8443) ─────────────────
+                from app.connectors.huawei_usg import HuaweiUSGConnector
+                conn = HuaweiUSGConnector(
+                    host=device.host,
+                    username=device.username or "",
+                    password=_password,
+                    port=_hw_port,
+                    use_ssl=device.use_ssl,
+                    verify_ssl=device.verify_ssl,
+                )
+                info = conn.connect()
+                raw  = conn.get_all()
+                conn.disconnect()
+
             parsed = _huawei_translate(raw)
             vendor_label = "HuaweiUSG"
 
@@ -1087,6 +1111,7 @@ def sync_device(device: FirewallDevice, db: Session) -> dict:
             policy = FirewallPolicy(
                 id=str(uuid.uuid4()),
                 customer_id=device.customer_id,
+                device_id=device.id,
                 firewall_name=device.name,
                 vendor=vendor_label,
                 policy_package=(
@@ -1099,6 +1124,10 @@ def sync_device(device: FirewallDevice, db: Session) -> dict:
             db.add(policy)
             db.commit()
             db.refresh(policy)
+        else:
+            # Stamp device_id on existing policies that predate this column
+            if not policy.device_id:
+                policy.device_id = device.id
 
         policy_id = policy.id
         device.last_policy_id = policy_id
@@ -1192,15 +1221,19 @@ def sync_device(device: FirewallDevice, db: Session) -> dict:
                 device.fw_model = asa_model
 
         elif device.vendor == "HuaweiUSG":
-            hw_ver   = info.get("version", "")
-            hw_model = info.get("model", "")
+            hw_ver    = info.get("version", "")
+            hw_model  = info.get("model", "")
             hw_serial = info.get("serial", "")
+            hw_sysname = info.get("sysname", "")
             if hw_ver:
                 device.os_version = hw_ver
             if hw_model:
                 device.fw_model = hw_model
             if hw_serial:
                 device.serial_number = hw_serial
+            # Use sysname as friendly name if device name hasn't been customised
+            if hw_sysname and device.name in (device.host, ""):
+                device.name = hw_sysname
 
         # ── Mark success ───────────────────────────────────────────────────
         device.sync_status  = "ok"

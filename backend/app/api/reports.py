@@ -1,4 +1,4 @@
-"""Report generation API — HTML, PDF, Excel, CSV, JSON.
+﻿"""Report generation API — HTML, PDF, Excel, CSV, JSON.
 
 All export endpoints accept optional filter query parameters:
   severities   — comma-separated list, e.g. "High,Medium"
@@ -18,6 +18,7 @@ from typing import Optional, List
 from app.database import get_db
 from app.models.policy import FirewallPolicy, FirewallRule
 from app.models.finding import Finding
+from app.api.tenant import assert_policy_customer
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
@@ -72,10 +73,11 @@ def generate_html_report(
     statuses: Optional[str] = None,
     finding_ids: Optional[str] = None,
     include_rules: bool = True,
+    customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     policy, rules, findings = _load_report_data(
-        policy_id, db, severities, finding_types, statuses, finding_ids
+        policy_id, db, severities, finding_types, statuses, finding_ids, customer_id
     )
     rules_data = rules if include_rules else []
     html = _build_html_report(policy, rules_data, findings)
@@ -90,6 +92,7 @@ def generate_excel_report(
     statuses: Optional[str] = None,
     finding_ids: Optional[str] = None,
     include_rules: bool = True,
+    customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     try:
@@ -99,7 +102,7 @@ def generate_excel_report(
         raise HTTPException(status_code=500, detail="openpyxl not installed")
 
     policy, rules, findings = _load_report_data(
-        policy_id, db, severities, finding_types, statuses, finding_ids
+        policy_id, db, severities, finding_types, statuses, finding_ids, customer_id
     )
 
     wb = openpyxl.Workbook()
@@ -133,10 +136,11 @@ def generate_csv_report(
     finding_types: Optional[str] = None,
     statuses: Optional[str] = None,
     finding_ids: Optional[str] = None,
+    customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     policy, rules, findings = _load_report_data(
-        policy_id, db, severities, finding_types, statuses, finding_ids
+        policy_id, db, severities, finding_types, statuses, finding_ids, customer_id
     )
 
     output = io.StringIO()
@@ -172,10 +176,11 @@ def generate_json_report(
     statuses: Optional[str] = None,
     finding_ids: Optional[str] = None,
     include_rules: bool = True,
+    customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     policy, rules, findings = _load_report_data(
-        policy_id, db, severities, finding_types, statuses, finding_ids
+        policy_id, db, severities, finding_types, statuses, finding_ids, customer_id
     )
 
     data = {
@@ -257,10 +262,13 @@ def _load_report_data(
     finding_types: Optional[str] = None,
     statuses: Optional[str] = None,
     finding_ids: Optional[str] = None,
+    customer_id: Optional[str] = None,
 ):
     policy = db.query(FirewallPolicy).filter(FirewallPolicy.id == policy_id).first()
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found")
+    if customer_id:
+        assert_policy_customer(policy_id, customer_id, db)
 
     rules = (
         db.query(FirewallRule)
@@ -280,6 +288,171 @@ def _load_report_data(
         .all()
     )
     return policy, rules, findings
+
+
+# ── Customer-level summary report ─────────────────────────────────────────────
+
+@router.get("/customer/{customer_id}/summary")
+def generate_customer_summary_report(
+    customer_id: str,
+    format: str = Query("json", regex="^(json|excel)$"),
+    severities: Optional[str] = None,
+    finding_types: Optional[str] = None,
+    statuses: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Multi-policy summary report for an entire customer.
+    Includes all policies, aggregate findings counts, per-policy risk scores,
+    and a findings breakdown — exported as JSON or Excel.
+    """
+    from app.models.customer import Customer
+    from app.models.policy import FirewallRule
+    from sqlalchemy import func
+
+    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    policies = (
+        db.query(FirewallPolicy)
+        .filter(FirewallPolicy.customer_id == customer_id)
+        .order_by(FirewallPolicy.upload_date.desc())
+        .all()
+    )
+
+    policy_summaries = []
+    for p in policies:
+        fq = db.query(Finding).filter(Finding.policy_id == p.id)
+        fq = _apply_finding_filters(fq, severities, finding_types, statuses, None)
+        findings = fq.all()
+
+        sev_counts = {"High": 0, "Medium": 0, "Low": 0, "Informational": 0}
+        for f in findings:
+            if f.severity in sev_counts:
+                sev_counts[f.severity] += 1
+
+        type_breakdown: dict = {}
+        for f in findings:
+            type_breakdown[f.finding_type] = type_breakdown.get(f.finding_type, 0) + 1
+
+        status_breakdown: dict = {}
+        for f in findings:
+            status_breakdown[f.status] = status_breakdown.get(f.status, 0) + 1
+
+        policy_summaries.append({
+            "policy_id":       p.id,
+            "firewall_name":   p.firewall_name,
+            "vendor":          p.vendor,
+            "policy_package":  p.policy_package,
+            "rule_count":      p.rule_count,
+            "object_count":    p.object_count,
+            "analysis_status": p.analysis_status,
+            "upload_date":     p.upload_date.isoformat() if p.upload_date else None,
+            "health_score":    p.health_score,
+            "complexity_score": p.complexity_score,
+            "total_findings":  len(findings),
+            "severity_counts": sev_counts,
+            "type_breakdown":  type_breakdown,
+            "status_breakdown": status_breakdown,
+        })
+
+    # Aggregate totals
+    total_findings   = sum(s["total_findings"]           for s in policy_summaries)
+    total_high       = sum(s["severity_counts"]["High"]  for s in policy_summaries)
+    total_medium     = sum(s["severity_counts"]["Medium"] for s in policy_summaries)
+    total_low        = sum(s["severity_counts"]["Low"]   for s in policy_summaries)
+    total_info       = sum(s["severity_counts"]["Informational"] for s in policy_summaries)
+
+    agg_types: dict = {}
+    for s in policy_summaries:
+        for k, v in s["type_breakdown"].items():
+            agg_types[k] = agg_types.get(k, 0) + v
+
+    now_str = datetime.now().strftime('%Y%m%d_%H%M%S')
+    safe_name = customer.name.replace(" ", "_").replace("/", "-")
+
+    data = {
+        "report_generated": datetime.now().isoformat(),
+        "report_type":      "customer_summary",
+        "disclaimer":       DISCLAIMER,
+        "customer": {
+            "id":   customer.id,
+            "name": customer.name,
+        },
+        "filters_applied": {
+            "severities":    _parse_csv_param(severities),
+            "finding_types": _parse_csv_param(finding_types),
+            "statuses":      _parse_csv_param(statuses),
+        },
+        "summary": {
+            "total_policies":    len(policies),
+            "total_findings":    total_findings,
+            "high":              total_high,
+            "medium":            total_medium,
+            "low":               total_low,
+            "informational":     total_info,
+            "findings_by_type":  agg_types,
+        },
+        "policies": policy_summaries,
+    }
+
+    if format == "json":
+        buf = io.BytesIO(json.dumps(data, indent=2, default=str).encode())
+        filename = f"customer_summary_{safe_name}_{now_str}.json"
+        return StreamingResponse(buf, media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+    # Excel format
+    try:
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment
+    except ImportError:
+        raise HTTPException(status_code=500, detail="openpyxl not installed")
+
+    wb = openpyxl.Workbook()
+
+    # Summary sheet
+    ws = wb.active
+    ws.title = "Summary"
+    hdr_fill = PatternFill(fill_type="solid", fgColor="1e3a5f")
+    hdr_font = Font(bold=True, color="FFFFFF")
+
+    ws.append(["Customer Summary Report"])
+    ws["A1"].font = Font(bold=True, size=14)
+    ws.append([f"Customer: {customer.name}"])
+    ws.append([f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"])
+    ws.append([])
+    ws.append(["Total Policies", "Total Findings", "High", "Medium", "Low", "Informational"])
+    for cell in ws[5]:
+        cell.fill = hdr_fill
+        cell.font = hdr_font
+    ws.append([len(policies), total_findings, total_high, total_medium, total_low, total_info])
+    ws.append([])
+
+    # Policies sheet
+    wp = wb.create_sheet("Policies")
+    pol_headers = ["Firewall Name", "Vendor", "Package", "Rules", "Objects",
+                   "Analysis", "Total Findings", "High", "Medium", "Low", "Upload Date"]
+    wp.append(pol_headers)
+    for cell in wp[1]:
+        cell.fill = hdr_fill
+        cell.font = hdr_font
+    for s in policy_summaries:
+        wp.append([
+            s["firewall_name"], s["vendor"], s["policy_package"] or "", s["rule_count"], s["object_count"],
+            s["analysis_status"], s["total_findings"],
+            s["severity_counts"]["High"], s["severity_counts"]["Medium"], s["severity_counts"]["Low"],
+            s["upload_date"] or "",
+        ])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    filename = f"customer_summary_{safe_name}_{now_str}.xlsx"
+    return StreamingResponse(buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 # ── HTML builder ───────────────────────────────────────────────────────────────
@@ -539,7 +712,7 @@ def _build_html_report(policy, rules, findings) -> str:
   {'<!-- Rulebase --><div class="section"><div class="section-header"><h2>Rulebase Appendix</h2><span class="count">' + str(len(rules)) + ' rules</span></div><table><thead><tr><th style="width:40px">#</th><th style="width:90px">Rule ID</th><th style="width:120px">Name</th><th>Source</th><th>Destination</th><th>Service</th><th style="width:60px">Action</th><th style="width:35px">On</th><th style="width:55px;text-align:right">Hits</th><th style="width:45px;text-align:right">Risk</th></tr></thead><tbody>' + rules_rows + '</tbody></table></div>' if rules else ''}
 
   <div class="footer">
-    PolicyLens — Read-Only Firewall Audit Platform &nbsp;·&nbsp; Generated {now} &nbsp;·&nbsp;
+    PolicyInsight — Read-Only Firewall Audit Platform &nbsp;·&nbsp; Generated {now} &nbsp;·&nbsp;
     All recommendations require engineer validation and formal change approval before implementation.
   </div>
 

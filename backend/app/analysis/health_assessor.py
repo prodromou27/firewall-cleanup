@@ -966,27 +966,70 @@ def run_nat_review(policy: FirewallPolicy, db: Session) -> dict:
         seen_nat.setdefault(str(key), []).append(e)
     duplicate_nat = [entries for entries in seen_nat.values() if len(entries) > 1]
 
-    # Public IP exposure — destinations that look like public IPs
-    public_exposures = []
+    # Overlapping NAT — rules where destination ranges overlap (subset/superset)
+    overlapping_nat: List[dict] = []
+    try:
+        _nat_nets = []
+        for e in nat_entries:
+            if not e["enabled"]:
+                continue
+            for dst in e["destinations"]:
+                try:
+                    net = ipaddress.ip_network(dst, strict=False)
+                    _nat_nets.append((net, e))
+                except ValueError:
+                    pass
+        for i in range(len(_nat_nets)):
+            for j in range(i + 1, len(_nat_nets)):
+                net_a, entry_a = _nat_nets[i]
+                net_b, entry_b = _nat_nets[j]
+                if entry_a["rule_id"] == entry_b["rule_id"]:
+                    continue
+                if net_a.overlaps(net_b):
+                    overlap_key = tuple(sorted([entry_a["rule_id"], entry_b["rule_id"]]))
+                    if not any(
+                        tuple(sorted([x["rule_a"], x["rule_b"]])) == overlap_key
+                        for x in overlapping_nat
+                    ):
+                        overlapping_nat.append({
+                            "rule_a": entry_a["rule_id"],
+                            "rule_name_a": entry_a["rule_name"],
+                            "rule_b": entry_b["rule_id"],
+                            "rule_name_b": entry_b["rule_name"],
+                            "overlap": f"{net_a} ∩ {net_b}",
+                        })
+    except Exception:
+        pass  # overlap detection is best-effort
+
+    # Any-service NAT — NAT rules with no service restriction
+    _any_svc_values = {"any", "all", "", "ANY"}
+    any_service_nat = [
+        e for e in nat_entries
+        if e["enabled"] and (
+            not e["services"] or
+            any(s.lower() in ("any", "all") for s in e["services"])
+        )
+    ]
+
+    # Objects for port-forward / public exposure detection
     objects = db.query(FirewallObject).filter(
         FirewallObject.policy_id == policy.id
     ).all()
     obj_map = {o.object_name: o for o in objects}
 
+    # Public IP exposure via high-risk port NAT rules
+    public_exposures = []
     for rule in rules:
         if not rule.enabled:
             continue
         action = (rule.action or "").lower()
         if action not in ("accept", "allow", "permit"):
             continue
-
-        # Check sources — if any is public-looking, this might be internet-facing
         for svc_name in (rule.services or []):
             obj = obj_map.get(svc_name)
             if obj and obj.port_start:
                 port = obj.port_start
                 if port in _HIGH_RISK_PORTS and rule.nat_enabled:
-                    dst_str = ", ".join((rule.destinations or [])[:3])
                     public_exposures.append({
                         "rule_id": rule.rule_id or str(rule.rule_number),
                         "rule_name": rule.rule_name or f"Rule {rule.rule_id}",
@@ -997,6 +1040,38 @@ def run_nat_review(policy: FirewallPolicy, db: Session) -> dict:
                         "risk": "High" if port in _HIGH_RISK_PORTS else "Medium",
                     })
 
+    # NAT rules without a corresponding security policy match
+    # A NAT rule "has a security policy" if there exists an allow rule that covers
+    # the same source+destination (exact name match is a reasonable heuristic here)
+    allow_rule_keys: set = set()
+    for r in rules:
+        if (r.action or "").lower() in ("accept", "allow", "permit") and r.enabled and not r.nat_enabled:
+            for src in (r.sources or []):
+                for dst in (r.destinations or []):
+                    allow_rule_keys.add((src.lower(), dst.lower()))
+
+    nat_without_policy = []
+    for e in nat_entries:
+        if not e["enabled"]:
+            continue
+        matched = False
+        for src in (e["sources"] or ["any"]):
+            for dst in (e["destinations"] or ["any"]):
+                if (src.lower(), dst.lower()) in allow_rule_keys:
+                    matched = True
+                    break
+                # any-source or any-dest in allow rules always matches
+                if ("any", dst.lower()) in allow_rule_keys or (src.lower(), "any") in allow_rule_keys:
+                    matched = True
+                    break
+                if ("any", "any") in allow_rule_keys:
+                    matched = True
+                    break
+            if matched:
+                break
+        if not matched:
+            nat_without_policy.append(e)
+
     return {
         "total_nat_rules": len(nat_rules),
         "enabled_nat_rules": len(enabled_nat),
@@ -1006,6 +1081,9 @@ def run_nat_review(policy: FirewallPolicy, db: Session) -> dict:
             {"rules": [e["rule_name"] for e in grp], "count": len(grp)}
             for grp in duplicate_nat
         ],
+        "overlapping_nat": overlapping_nat,
+        "any_service_nat": any_service_nat,
+        "nat_without_policy": nat_without_policy,
         "nat_entries": nat_entries,
         "public_exposures": public_exposures,
     }

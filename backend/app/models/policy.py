@@ -34,6 +34,7 @@ class FirewallPolicy(Base):
     high_finding_count = Column(Integer, default=0)
     notes = Column(Text, nullable=True)
     complexity_score = Column(Float, nullable=True)
+    complexity_breakdown = Column(JSON, nullable=True)
     cleanup_readiness_score = Column(Float, nullable=True)
     health_score = Column(Float, nullable=True)
     top_risk_drivers = Column(JSON, nullable=True)

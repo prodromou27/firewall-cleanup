@@ -208,3 +208,10 @@ export const addFindingComment = (id: string, comment: string, author = 'enginee
 
 export const getFindingComments = (id: string) =>
   api.get(`/findings/${id}/comments`).then(r => r.data)
+
+// ── Recommendation Library ─────────────────────────────────────────────────────
+export const getRecommendations = () =>
+  api.get('/recommendations').then(r => r.data as { recommendations: Array<{ finding_type: string; recommendation: string }> })
+
+export const getRecommendation = (findingType: string) =>
+  api.get(`/recommendations/${findingType}`).then(r => r.data as { finding_type: string; recommendation: string })

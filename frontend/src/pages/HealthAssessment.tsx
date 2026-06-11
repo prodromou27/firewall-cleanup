@@ -75,6 +75,9 @@ interface HealthData {
     enabled_nat_rules: number
     unused_nat_rules: NatEntry[]
     duplicate_nat_groups: Array<{ rules: string[]; count: number }>
+    overlapping_nat: Array<{ rule_a: string; rule_name_a: string; rule_b: string; rule_name_b: string; overlap: string }>
+    any_service_nat: NatEntry[]
+    nat_without_policy: NatEntry[]
     nat_entries: NatEntry[]
     public_exposures: unknown[]
   }
@@ -572,6 +575,83 @@ export function HealthAssessment({ embedded }: { embedded?: boolean } = {}) {
                         </div>
                       ))}
                     </div>
+                  </div>
+                )}
+
+                {/* Overlapping NAT */}
+                {(data.nat.overlapping_nat?.length ?? 0) > 0 && (
+                  <div className="card">
+                    <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-3 flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-orange-500" /> Overlapping NAT Destinations
+                    </h3>
+                    <p className="text-xs text-gray-500 mb-3">
+                      These NAT rule pairs have destination ranges that overlap. Rule order determines which translation
+                      takes precedence — verify intent and consolidate if possible.
+                    </p>
+                    <div className="space-y-2">
+                      {data.nat.overlapping_nat.map((item, i) => (
+                        <div key={i} className="flex items-center gap-3 bg-orange-50 border border-orange-100 rounded-lg px-3 py-2 text-xs">
+                          <span className="font-mono font-bold text-orange-700">{item.rule_name_a}</span>
+                          <span className="text-gray-400">↔</span>
+                          <span className="font-mono font-bold text-orange-700">{item.rule_name_b}</span>
+                          <span className="text-gray-400 ml-auto">{item.overlap}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Any-service NAT */}
+                {(data.nat.any_service_nat?.length ?? 0) > 0 && (
+                  <div className="card">
+                    <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-3 flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-red-500" /> Any-Service NAT Rules
+                    </h3>
+                    <p className="text-xs text-gray-500 mb-3">
+                      These NAT rules have no service restriction — they translate all traffic regardless of port.
+                      Restrict to specific services to prevent unintended exposure.
+                    </p>
+                    <table className="data-table">
+                      <thead><tr>{['Rule', 'Name', 'Sources', 'Destinations', 'Action'].map(h => <th key={h}>{h}</th>)}</tr></thead>
+                      <tbody>
+                        {data.nat.any_service_nat.map(r => (
+                          <tr key={r.rule_id}>
+                            <td className="font-mono text-xs text-gray-500">{r.rule_id}</td>
+                            <td className="font-medium text-sm">{r.rule_name}</td>
+                            <td className="text-xs text-gray-500">{r.sources.join(', ') || '—'}</td>
+                            <td className="text-xs text-gray-500">{r.destinations.join(', ') || '—'}</td>
+                            <td><span className="text-xs text-red-600 font-bold bg-red-50 px-2 py-0.5 rounded">Any Service</span></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* NAT without matching security policy */}
+                {(data.nat.nat_without_policy?.length ?? 0) > 0 && (
+                  <div className="card">
+                    <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-3 flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-red-500" /> NAT Rules Without Matching Security Policy
+                    </h3>
+                    <p className="text-xs text-gray-500 mb-3">
+                      No allow rule was found that covers the same source/destination as these NAT rules.
+                      Traffic may pass without inspection. Verify a security policy exists for each.
+                    </p>
+                    <table className="data-table">
+                      <thead><tr>{['Rule', 'Name', 'Sources', 'Destinations', 'NAT Type'].map(h => <th key={h}>{h}</th>)}</tr></thead>
+                      <tbody>
+                        {data.nat.nat_without_policy.map(r => (
+                          <tr key={r.rule_id}>
+                            <td className="font-mono text-xs text-gray-500">{r.rule_id}</td>
+                            <td className="font-medium text-sm">{r.rule_name}</td>
+                            <td className="text-xs text-gray-500">{r.sources.join(', ') || '—'}</td>
+                            <td className="text-xs text-gray-500">{r.destinations.join(', ') || '—'}</td>
+                            <td><span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded font-mono">{r.nat_type || 'snat'}</span></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
 

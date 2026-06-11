@@ -13,6 +13,7 @@ from app.analysis.duplicate_detector import detect_duplicates
 from app.analysis.shadow_detector import detect_shadows
 from app.analysis.risk_scorer import score_rule, score_to_severity
 from app.analysis.service_utils import identify_risky_service
+from app.analysis import recommendation_library as _RL
 from app.config import settings
 import uuid
 import logging
@@ -163,34 +164,88 @@ def run_analysis(policy_id: str, db: Session) -> str:
         policy.analysis_error = None
 
         # --- Compute extended scores ---
+        from collections import Counter
         enabled_rules = [r for r in rules if r.get("enabled", True)]
         total_rules = len(rules)
 
-        # Complexity score: penalise large rule count, low documentation, high permissiveness
-        perm_count = sum(1 for f in findings if f["finding_type"] == "overly_permissive")
-        doc_miss = sum(1 for f in findings if f["finding_type"] == "no_documentation")
-        complexity_score = min(100, int(
-            min(30, total_rules / 5) +
-            min(30, len(objects) / 20) +
-            min(20, perm_count * 4) +
-            min(20, doc_miss * 2)
-        ))
+        # ── 12-Factor Rulebase Complexity Index ───────────────────────────────
+        # Each factor contributes 0–N raw points; we normalise to 0–100.
+        # Higher score = more complex / harder to maintain.
+        perm_count     = sum(1 for f in findings if f["finding_type"] == "overly_permissive")
+        shadow_count   = sum(1 for f in findings if f["finding_type"] == "shadowed_rule")
+        dup_count      = sum(1 for f in findings if f["finding_type"] == "duplicate_rule")
+        disabled_count = sum(1 for r in rules if not r.get("enabled", True))
+        unused_obj_cnt = sum(1 for f in findings if f["finding_type"] == "unused_object")
+        broad_net_cnt  = sum(1 for f in findings if f["finding_type"] == "broad_network")
+        large_svc_cnt  = sum(1 for f in findings if f["finding_type"] == "service_range")
+        doc_miss       = sum(1 for f in findings if f["finding_type"] == "no_documentation")
 
-        # Cleanup readiness: how much useful data do we have?
+        # Factor 3: number of groups and nested groups
+        group_objects  = [o for o in objects if "group" in o.get("object_type", "")]
+        nested_groups  = sum(
+            1 for o in group_objects
+            if any(
+                any("group" in (obj_map.get(m, {}).get("object_type", "")) for m in o.get("members", []))
+            )
+        )
+
+        # Factor 12: rules older than 2 years (by rule_id containing old year patterns)
+        import re as _re_age
+        _OLD_YEARS = {str(y) for y in range(2015, 2023)}
+        old_rules = sum(
+            1 for r in rules
+            if any(yr in (r.get("rule_name") or "") or yr in (r.get("comments") or "")
+                   for yr in _OLD_YEARS)
+        )
+
+        # Weighted raw score (max theoretical = 10+10+8+8+8+8+6+6+6+6+4+4 = 84 pts → norm to 100)
+        raw_complexity = (
+            min(10, total_rules / 10)       +   # F1: rule count
+            min(10, len(objects) / 30)      +   # F2: object count
+            min(8,  len(group_objects) / 5) +   # F3: group count
+            min(8,  nested_groups * 2)      +   # F4: nested groups
+            min(8,  perm_count * 2)         +   # F5: any rules
+            min(8,  shadow_count * 2)       +   # F6: shadowed rules
+            min(6,  dup_count * 2)          +   # F7: duplicate rules
+            min(6,  disabled_count)         +   # F8: disabled rules
+            min(6,  unused_obj_cnt / 3)     +   # F9: unused objects
+            min(6,  broad_net_cnt * 1.5)    +   # F10: broad networks
+            min(4,  large_svc_cnt * 1.5)    +   # F11: large service groups
+            min(4,  old_rules)                  # F12: rule age
+        )
+        complexity_score = min(100, int(raw_complexity / 84 * 100))
+
+        # Store breakdown for UI drill-down
+        complexity_breakdown = {
+            "rule_count":       {"value": total_rules,          "label": "Total Rules",          "points": round(min(10, total_rules / 10), 1)},
+            "object_count":     {"value": len(objects),         "label": "Total Objects",        "points": round(min(10, len(objects) / 30), 1)},
+            "group_count":      {"value": len(group_objects),   "label": "Object Groups",        "points": round(min(8, len(group_objects) / 5), 1)},
+            "nested_groups":    {"value": nested_groups,        "label": "Nested Groups",        "points": round(min(8, nested_groups * 2), 1)},
+            "any_rules":        {"value": perm_count,           "label": "Any-Source/Dest Rules","points": round(min(8, perm_count * 2), 1)},
+            "shadowed_rules":   {"value": shadow_count,         "label": "Shadowed Rules",       "points": round(min(8, shadow_count * 2), 1)},
+            "duplicate_rules":  {"value": dup_count,            "label": "Duplicate Rules",      "points": round(min(6, dup_count * 2), 1)},
+            "disabled_rules":   {"value": disabled_count,       "label": "Disabled Rules",       "points": round(min(6, disabled_count), 1)},
+            "unused_objects":   {"value": unused_obj_cnt,       "label": "Unused Objects",       "points": round(min(6, unused_obj_cnt / 3), 1)},
+            "broad_networks":   {"value": broad_net_cnt,        "label": "Broad Networks",       "points": round(min(6, broad_net_cnt * 1.5), 1)},
+            "large_svc_groups": {"value": large_svc_cnt,        "label": "Large Service Ranges", "points": round(min(4, large_svc_cnt * 1.5), 1)},
+            "rule_age":         {"value": old_rules,            "label": "Aged Rules (pre-2023)","points": round(min(4, old_rules), 1)},
+        }
+
+        # ── Cleanup readiness ──────────────────────────────────────────────────
         rules_with_hits = sum(1 for r in rules if r.get("hit_count") is not None)
         readiness_score = int(100 * rules_with_hits / max(1, total_rules))
 
-        # Health score: inverse risk proxy
+        # ── Health score: inverse risk proxy ─────────────────────────────────
         sev_weights = {"High": 10, "Medium": 5, "Low": 2, "Informational": 0}
         total_sev = sum(sev_weights.get(f.get("severity", "Informational"), 0) for f in findings)
         health_score = max(0, 100 - min(100, total_sev))
 
-        # Top risk drivers
-        from collections import Counter
+        # ── Top risk drivers ──────────────────────────────────────────────────
         driver_counts = Counter(f["finding_type"] for f in findings)
         top_risk_drivers = [{"type": t, "count": c} for t, c in driver_counts.most_common(5)]
 
         policy.complexity_score = complexity_score
+        policy.complexity_breakdown = complexity_breakdown
         policy.cleanup_readiness_score = readiness_score
         policy.health_score = health_score
         policy.top_risk_drivers = top_risk_drivers
@@ -279,11 +334,7 @@ def _analyze_disabled(rules: List[dict], obj_map: dict) -> List[dict]:
                     "enabled": False,
                     "last_hit": last_hit,
                 },
-                "recommendation": (
-                    f"This rule is currently disabled. If it has remained disabled for a long "
-                    "period and there is no business requirement, consider removing it after "
-                    "change approval."
-                ),
+                "recommendation": _RL.get("disabled_rule"),
             })
     return findings
 
@@ -313,11 +364,7 @@ def _analyze_usage(rules: List[dict], obj_map: dict) -> List[dict]:
                 ),
                 "affected_rules": [rule.get("id")],
                 "evidence": {"rule_id": rule_id, "hit_count": 0},
-                "recommendation": (
-                    "Review whether this rule has a valid business requirement. If it has never "
-                    "been used and no future use is expected, consider removing it after "
-                    "change approval."
-                ),
+                "recommendation": _RL.get("zero_hit_rule"),
             })
         elif last_hit:
             try:
@@ -352,11 +399,7 @@ def _analyze_usage(rules: List[dict], obj_map: dict) -> List[dict]:
                             "days_inactive": days_inactive,
                             "hit_count": hit_count,
                         },
-                        "recommendation": (
-                            f"This rule has not been used in {days_inactive} days. Review whether "
-                            "it has an active business requirement. If no requirement exists, "
-                            "consider removing it through the change management process."
-                        ),
+                        "recommendation": _RL.get("low_usage_rule"),
                     })
             except (ValueError, TypeError):
                 pass
@@ -412,10 +455,7 @@ def _analyze_permissive(rules: List[dict], obj_map: dict) -> List[dict]:
                     "any_service": any_svc,
                     "action": rule.get("action"),
                 },
-                "recommendation": (
-                    "Review the business requirement and restrict the source, destination, and "
-                    "service to the minimum required scope. Apply the principle of least privilege."
-                ),
+                "recommendation": _RL.get("overly_permissive"),
             })
 
     return findings
@@ -459,12 +499,7 @@ def _analyze_risky_services(rules: List[dict], obj_map: dict) -> List[dict]:
                 "sources": rule.get("sources", []),
                 "destinations": rule.get("destinations", []),
             },
-            "recommendation": (
-                "Review whether the identified risky services are required. Restrict access "
-                "to specific, known source and destination addresses. Consider using "
-                "encrypted alternatives where available (e.g., HTTPS instead of HTTP, "
-                "SSH instead of Telnet)."
-            ),
+            "recommendation": _RL.get("risky_service"),
         })
 
     return findings
@@ -491,10 +526,7 @@ def _analyze_no_logging(rules: List[dict], obj_map: dict) -> List[dict]:
                 ),
                 "affected_rules": [rule.get("id")],
                 "evidence": {"rule_id": rule_id, "logging_enabled": False},
-                "recommendation": (
-                    "Consider enabling logging on this rule if visibility is required "
-                    "for troubleshooting, auditing, or security monitoring purposes."
-                ),
+                "recommendation": _RL.get("no_logging"),
             })
     return findings
 
@@ -529,11 +561,7 @@ def _analyze_temp_rules(rules: List[dict], obj_map: dict) -> List[dict]:
                     "matched_keyword": matched_keyword,
                     "comments": rule.get("comments"),
                 },
-                "recommendation": (
-                    "Review whether this rule is still required. If it was created for a "
-                    "temporary purpose that has since expired, remove it through the formal "
-                    "change management process."
-                ),
+                "recommendation": _RL.get("temporary_rule"),
             })
     return findings
 
@@ -602,11 +630,7 @@ def _analyze_unused_objects(
                     "value": obj.get("value"),
                     "members": obj.get("members"),
                 },
-                "recommendation": (
-                    f"Review whether the object '{name}' is referenced in other policies "
-                    "or has a future use. If unused, consider removing it to reduce "
-                    "policy complexity."
-                ),
+                "recommendation": _RL.get("unused_object"),
             })
 
     return findings
@@ -649,10 +673,7 @@ def _analyze_duplicate_objects(objects: List[dict]) -> List[dict]:
                 "object_names": names,
                 "object_types": [o.get("object_type") for o in objs],
             },
-            "recommendation": (
-                "Consider consolidating these objects into a single standard object after "
-                "validating all rule references. Update all rules to use the consolidated object."
-            ),
+            "recommendation": _RL.get("duplicate_object"),
         })
 
     return findings
@@ -700,11 +721,7 @@ def _analyze_no_documentation(rules: List[dict]) -> List[dict]:
                 "comments": comments or None,
                 "action": rule.get("action"),
             },
-            "recommendation": (
-                "Add a comment to this rule identifying the business owner, ticket reference, "
-                "and purpose of the access. Rules without documented justification should be "
-                "reviewed to confirm they are still required."
-            ),
+            "recommendation": _RL.get("no_documentation"),
         })
     return findings
 
@@ -737,10 +754,7 @@ def _analyze_naming_quality(rules: List[dict]) -> List[dict]:
                 ),
                 "affected_rules": [rule.get("id")],
                 "evidence": {"rule_id": rule_id, "rule_name": None},
-                "recommendation": (
-                    "Assign a meaningful name that reflects the rule's purpose, the owning "
-                    "team, and the relevant change ticket."
-                ),
+                "recommendation": _RL.get("naming_quality"),
             })
         elif name.lower() in _VAGUE_NAME_KEYWORDS or len(name) < 4:
             findings.append({
@@ -754,10 +768,7 @@ def _analyze_naming_quality(rules: List[dict]) -> List[dict]:
                 ),
                 "affected_rules": [rule.get("id")],
                 "evidence": {"rule_id": rule_id, "rule_name": name},
-                "recommendation": (
-                    "Rename this rule to clearly describe its purpose, traffic type, and "
-                    "business owner."
-                ),
+                "recommendation": _RL.get("naming_quality"),
             })
     return findings
 
@@ -798,11 +809,7 @@ def _analyze_expired_rules(rules: List[dict]) -> List[dict]:
                     "schedule": schedule,
                     "matched_keyword": matched,
                 },
-                "recommendation": (
-                    "Verify the schedule object and confirm whether this rule is still "
-                    "within its intended active period. If the schedule has expired, "
-                    "disable or remove the rule through the change management process."
-                ),
+                "recommendation": _RL.get("expired_rule"),
             })
     return findings
 
@@ -833,11 +840,7 @@ def _analyze_nat_rules(rules: List[dict]) -> List[dict]:
                 "sources": rule.get("sources", []),
                 "destinations": rule.get("destinations", []),
             },
-            "recommendation": (
-                "Review this NAT rule to confirm the translation is still accurate, "
-                "necessary, and documented. Verify the associated security rule permits "
-                "only the intended traffic."
-            ),
+            "recommendation": _RL.get("nat_complexity"),
         })
     return findings
 
@@ -886,11 +889,7 @@ def _analyze_vpn_rules(rules: List[dict], obj_map: dict) -> List[dict]:
                 "any_destination": any_dst,
                 "any_service": any_svc,
             },
-            "recommendation": (
-                "Restrict VPN access to the minimum required source groups, destination "
-                "segments, and services. Apply role-based segmentation for different "
-                "user populations."
-            ),
+            "recommendation": _RL.get("vpn_broad_access"),
         })
     return findings
 
@@ -924,11 +923,7 @@ def _analyze_negated_objects(rules: List[dict]) -> List[dict]:
                 "negated_sources": neg_srcs,
                 "negated_destinations": neg_dsts,
             },
-            "recommendation": (
-                "Review negated objects to confirm the exclusion logic is intentional "
-                "and correctly scoped. Where possible, convert to explicit positive "
-                "object definitions."
-            ),
+            "recommendation": _RL.get("negated_objects"),
         })
     return findings
 
@@ -1042,10 +1037,7 @@ def _analyze_empty_groups(objects: List[dict]) -> List[dict]:
                     "object_type": obj["object_type"],
                     "member_count": 0,
                 },
-                "recommendation": (
-                    "Either populate the group with appropriate members or remove it "
-                    "if it is no longer needed. Verify no rules reference this empty group."
-                ),
+                "recommendation": _RL.get("empty_group"),
             })
     return findings
 
@@ -1078,10 +1070,7 @@ def _analyze_large_groups(objects: List[dict]) -> List[dict]:
                     "member_count": len(members),
                     "members": members[:10],
                 },
-                "recommendation": (
-                    "Review group membership to identify obsolete or overly broad entries. "
-                    "Consider splitting into smaller, purpose-specific groups."
-                ),
+                "recommendation": _RL.get("large_group"),
             })
     return findings
 
@@ -1122,10 +1111,7 @@ def _analyze_broad_networks(objects: List[dict]) -> List[dict]:
                         "prefix_length": net.prefixlen,
                         "num_addresses": net.num_addresses,
                     },
-                    "recommendation": (
-                        "Verify that the broad scope is intentional. Where possible, "
-                        "restrict the object to the specific subnet or host range required."
-                    ),
+                    "recommendation": _RL.get("broad_network"),
                 })
         except ValueError:
             pass
@@ -1208,9 +1194,6 @@ def _analyze_service_ranges(objects: List[dict]) -> List[dict]:
                     "port_end": end,
                     "port_span": span,
                 },
-                "recommendation": (
-                    "Review whether the full port range is required. Restrict service "
-                    "objects to the specific ports needed by the application."
-                ),
+                "recommendation": _RL.get("service_range"),
             })
     return findings

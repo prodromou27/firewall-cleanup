@@ -147,6 +147,12 @@ async def lifespan(app: FastAPI):
                 ))
                 _conn.commit()
                 logger.info("Schema migration: added device_id column to firewall_policies.")
+            if "complexity_breakdown" not in _cols:
+                _conn.execute(_text(
+                    "ALTER TABLE firewall_policies ADD COLUMN complexity_breakdown TEXT"
+                ))
+                _conn.commit()
+                logger.info("Schema migration: added complexity_breakdown column to firewall_policies.")
     except Exception as _mig_exc:
         logger.error("Schema migration failed: %s", _mig_exc)
 
@@ -313,3 +319,19 @@ app.include_router(compliance.router)
 @app.get("/api/health")
 def health():
     return {"status": "ok", "version": "2.1.0"}
+
+
+@app.get("/api/recommendations")
+def list_recommendations():
+    """Return the full centralised recommendation library.
+    Used by reports and the frontend to render consistent guidance per finding type.
+    """
+    from app.analysis.recommendation_library import all_types
+    return {"recommendations": all_types()}
+
+
+@app.get("/api/recommendations/{finding_type}")
+def get_recommendation(finding_type: str):
+    """Return the standard recommendation for a specific finding type."""
+    from app.analysis.recommendation_library import get as _get
+    return {"finding_type": finding_type, "recommendation": _get(finding_type)}

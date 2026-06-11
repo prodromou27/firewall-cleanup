@@ -7,11 +7,12 @@ import { useEffect, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft, ArrowRight, Plus, Minus, RefreshCw, Shield,
-  AlertTriangle, TrendingDown, TrendingUp, Minus as MinusIcon,
-  ChevronDown, ChevronUp,
+  AlertTriangle, TrendingDown, TrendingUp, Clock, GitCompare,
+  ChevronDown, ChevronUp, CheckCircle2, XCircle,
 } from 'lucide-react'
 import { getRevisions, getRevision, getPolicies } from '../api/client'
 import type { PolicyRevision, Policy } from '../types'
+import { clsx } from 'clsx'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -76,6 +77,93 @@ function ChangeTypeBadge({ type }: { type: string }) {
   )
 }
 
+// ── Revision Timeline ─────────────────────────────────────────────────────────
+
+function RevisionTimeline({
+  revisions,
+  selectedBeforeId,
+  selectedAfterId,
+  onSelect,
+}: {
+  revisions: PolicyRevision[]
+  selectedBeforeId: string
+  selectedAfterId: string
+  onSelect: (id: string) => void
+}) {
+  if (revisions.length === 0) return null
+  const sorted = [...revisions].sort((a, b) => a.revision_number - b.revision_number)
+
+  return (
+    <div className="card mb-6">
+      <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-4 flex items-center gap-2">
+        <Clock className="w-3.5 h-3.5" /> Revision History — {revisions.length} version{revisions.length !== 1 ? 's' : ''}
+      </h3>
+      <div className="relative">
+        {/* Connecting line */}
+        <div className="absolute top-5 left-5 right-5 h-0.5 bg-gray-200" />
+        <div className="flex items-start gap-0 overflow-x-auto pb-2">
+          {sorted.map((rev, idx) => {
+            const isBefore = rev.id === selectedBeforeId
+            const isAfter  = rev.id === selectedAfterId
+            const isSelected = isBefore || isAfter
+            const date = rev.synced_at ? new Date(rev.synced_at) : null
+            const hasChanges = (rev.rules_added ?? 0) + (rev.rules_removed ?? 0) + (rev.rules_modified ?? 0) > 0
+            return (
+              <div
+                key={rev.id}
+                className="flex flex-col items-center flex-shrink-0 cursor-pointer group"
+                style={{ minWidth: `${Math.max(80, Math.floor(100 / Math.min(sorted.length, 10)))}px` }}
+                onClick={() => onSelect(rev.id)}
+                title={`Rev #${rev.revision_number}${date ? ' · ' + date.toLocaleDateString() : ''}`}
+              >
+                {/* Node */}
+                <div className={clsx(
+                  'relative z-10 w-10 h-10 rounded-full border-2 flex items-center justify-center font-bold text-sm transition-all',
+                  isBefore  ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-200' :
+                  isAfter   ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-200' :
+                  hasChanges ? 'bg-white border-amber-400 text-amber-600 group-hover:border-blue-400 group-hover:text-blue-600' :
+                              'bg-white border-gray-300 text-gray-500 group-hover:border-blue-400 group-hover:text-blue-600'
+                )}>
+                  {isBefore ? 'B' : isAfter ? 'A' : rev.revision_number}
+                </div>
+
+                {/* Label */}
+                <div className="mt-2 text-center px-1">
+                  <p className={clsx('text-[10px] font-bold',
+                    isBefore ? 'text-blue-700' : isAfter ? 'text-emerald-700' : 'text-gray-500'
+                  )}>
+                    {isBefore ? 'Before' : isAfter ? 'After' : `Rev #${rev.revision_number}`}
+                  </p>
+                  {date && (
+                    <p className="text-[9px] text-gray-400 leading-tight">
+                      {date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
+                    </p>
+                  )}
+                  {rev.rule_count != null && (
+                    <p className="text-[9px] text-gray-400">{rev.rule_count} rules</p>
+                  )}
+                  {hasChanges && !isSelected && (
+                    <div className="flex justify-center gap-1 mt-0.5">
+                      {(rev.rules_added ?? 0) > 0 && <span className="text-[8px] font-bold text-green-600">+{rev.rules_added}</span>}
+                      {(rev.rules_removed ?? 0) > 0 && <span className="text-[8px] font-bold text-red-600">−{rev.rules_removed}</span>}
+                      {(rev.rules_modified ?? 0) > 0 && <span className="text-[8px] font-bold text-amber-600">~{rev.rules_modified}</span>}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+      <p className="text-[10px] text-gray-400 mt-2">
+        Click a revision to set it as the <span className="font-bold text-blue-600">Before</span> baseline.
+        The most recent revision is automatically the <span className="font-bold text-emerald-600">After</span> target.
+      </p>
+    </div>
+  )
+}
+
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export function PolicyComparison() {
@@ -102,8 +190,9 @@ export function PolicyComparison() {
       if (Array.isArray(policies) && policies.length > 0) setPolicy(policies[0])
       // Auto-select: oldest as "before", newest as "after"
       if (revList.length >= 2) {
-        setBeforeId(revList[revList.length - 1].id)
+        // newest is "after", oldest is "before"
         setAfterId(revList[0].id)
+        setBeforeId(revList[revList.length - 1].id)
       }
     }).finally(() => setLoading(false))
   }, [policyId])
@@ -186,6 +275,22 @@ export function PolicyComparison() {
         </p>
       </div>
 
+      {/* Visual timeline */}
+      <RevisionTimeline
+        revisions={revisions}
+        selectedBeforeId={beforeId}
+        selectedAfterId={afterId}
+        onSelect={(id) => {
+          // clicking a revision sets it as "before"; if already after, swap
+          if (id === afterId) {
+            setAfterId(beforeId)
+            setBeforeId(id)
+          } else {
+            setBeforeId(id)
+          }
+        }}
+      />
+
       {/* Revision selector */}
       <div className="card mb-6">
         <h3 className="text-sm font-semibold text-gray-800 mb-3">Select Revisions to Compare</h3>
@@ -240,11 +345,36 @@ export function PolicyComparison() {
             <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">
               Summary — Rev #{beforeRev.revision_number} → Rev #{afterRev.revision_number}
             </h3>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-4">
               <StatDelta label="Total Rules" before={beforeRev.rule_count} after={afterRev.rule_count} positiveIsGood={false} />
               <StatDelta label="Findings" before={beforeRev.finding_count} after={afterRev.finding_count} positiveIsGood={false} />
               <StatDelta label="High Findings" before={beforeRev.high_finding_count} after={afterRev.high_finding_count} positiveIsGood={false} />
               <StatDelta label="Objects" before={beforeRev.object_count} after={afterRev.object_count} positiveIsGood={false} />
+              <div className="bg-white border border-gray-200 rounded-xl p-4 text-center">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Risk Delta</p>
+                {beforeRev.finding_count != null && afterRev.finding_count != null ? (
+                  <div className="flex flex-col items-center">
+                    <RiskDelta
+                      before={beforeRev.high_finding_count ?? 0}
+                      after={afterRev.high_finding_count ?? 0}
+                    />
+                    <p className="text-[10px] text-gray-400 mt-1">High-severity findings</p>
+                    {(afterRev.finding_count ?? 0) < (beforeRev.finding_count ?? 0) ? (
+                      <span className="mt-1 text-[10px] font-bold text-emerald-600 flex items-center gap-0.5">
+                        <CheckCircle2 className="w-3 h-3" /> Posture improved
+                      </span>
+                    ) : (afterRev.finding_count ?? 0) > (beforeRev.finding_count ?? 0) ? (
+                      <span className="mt-1 text-[10px] font-bold text-red-600 flex items-center gap-0.5">
+                        <XCircle className="w-3 h-3" /> Posture degraded
+                      </span>
+                    ) : (
+                      <span className="mt-1 text-[10px] text-gray-400">No change</span>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-gray-400 text-sm">—</span>
+                )}
+              </div>
             </div>
 
             {/* Rules added/removed/modified summary */}

@@ -1,0 +1,190 @@
+"""
+Centralised recommendation library for PolicyInsight findings.
+
+Every finding_type has an approved, consistent recommendation that is used
+across analysis outputs and exported reports. This ensures all engineers see
+identical guidance regardless of who ran the analysis.
+
+SAFETY NOTE: All recommendations explicitly require engineer validation and
+formal change approval. The tool operates in read-only mode only.
+"""
+from typing import Optional
+
+# ── Standard recommendation text per finding_type ────────────────────────────
+
+LIBRARY: dict[str, str] = {
+
+    # ── Rule hygiene ──────────────────────────────────────────────────────────
+    "disabled_rule": (
+        "Review whether this disabled rule still has an active business requirement. "
+        "If no requirement exists, raise a change request to remove it — retaining "
+        "disabled rules increases policy complexity and creates confusion during audits."
+    ),
+    "zero_hit_rule": (
+        "Confirm the business requirement for this rule before taking any action. "
+        "A zero hit count may indicate the rule is unreachable, misconfigured, or no "
+        "longer needed. If no valid requirement can be confirmed, raise a change request "
+        "for removal through the formal change management process."
+    ),
+    "low_usage_rule": (
+        "Verify whether the access this rule provides is still required. Low usage over "
+        "an extended period may indicate the rule is no longer needed. If the business "
+        "requirement cannot be confirmed, raise a change request for removal."
+    ),
+    "overly_permissive": (
+        "Review and restrict overly broad fields (source, destination, service) to the "
+        "minimum required for business operations. Replace 'Any' with specific IP objects, "
+        "subnets, or named groups where possible. All changes require engineer validation "
+        "and formal change approval before implementation."
+    ),
+    "risky_service": (
+        "Validate the business requirement for this service. Restrict the source to the "
+        "minimum set of authorised hosts and verify that destination systems are hardened. "
+        "Consider whether the service can be replaced with a more secure alternative "
+        "(e.g. SSH instead of Telnet, SFTP instead of FTP)."
+    ),
+    "no_logging": (
+        "Enable logging on this rule to support security monitoring, incident response, "
+        "and compliance requirements. Allow rules without logging create visibility gaps. "
+        "All logging changes require change approval before implementation."
+    ),
+    "temporary_rule": (
+        "Confirm whether the temporary or test access this rule provides is still required. "
+        "If access is ongoing, rename the rule to reflect its purpose and assign an owner. "
+        "If access is no longer needed, raise a change request for removal. Temporary rules "
+        "without an expiry date are a common source of policy bloat."
+    ),
+    "no_documentation": (
+        "Add a comment to this rule identifying the business owner, the relevant change "
+        "ticket or reference, and the purpose of the access. Rules without documented "
+        "justification are difficult to audit and should be reviewed to confirm they remain "
+        "required."
+    ),
+    "naming_quality": (
+        "Rename this rule to clearly describe its purpose, the traffic it permits, and the "
+        "owning team or application. A good naming convention includes: application name, "
+        "source zone/segment, destination zone/segment, and ticket reference."
+    ),
+    "expired_rule": (
+        "Verify the schedule object and confirm whether this rule is still within its "
+        "intended active period. If the schedule has expired or no longer reflects the "
+        "business requirement, raise a change request to disable or remove the rule."
+    ),
+    "nat_complexity": (
+        "Review this NAT rule to confirm the address translation is accurate, necessary, "
+        "and documented. Verify the associated security rule permits only the intended "
+        "translated traffic. All NAT changes require engineer validation and change approval."
+    ),
+    "vpn_broad_access": (
+        "Restrict VPN access rules to the minimum required source and destination. "
+        "Replace broad network objects with specific host or subnet objects. Ensure VPN "
+        "access is reviewed periodically as part of access recertification."
+    ),
+    "negated_objects": (
+        "Review rules using negated objects to confirm the intended traffic match is correct. "
+        "Negated objects are counterintuitive and may produce unexpected permit/deny decisions. "
+        "Consider rewriting the rule using explicit positive objects where possible."
+    ),
+
+    # ── Object hygiene ────────────────────────────────────────────────────────
+    "unused_object": (
+        "Verify that this object is not referenced in policies outside the current view. "
+        "If the object is confirmed unused, raise a change request to remove it from the "
+        "object database to reduce policy complexity."
+    ),
+    "duplicate_object": (
+        "Consolidate duplicate objects to a single canonical definition. Update any rules "
+        "that reference the redundant object to use the canonical one, then remove the "
+        "duplicate through the change management process."
+    ),
+    "empty_group": (
+        "Investigate why this group has no members. An empty group used in a rule will "
+        "match no traffic — effectively making the rule non-functional. Either populate "
+        "the group with the correct objects or remove it if it is no longer needed."
+    ),
+    "large_group": (
+        "Review whether this group requires all its current members. Large groups with "
+        "many members are harder to audit and may contain objects that are no longer "
+        "relevant. Consider splitting into smaller, purpose-specific groups."
+    ),
+    "broad_network": (
+        "Assess whether this broad network object can be replaced with a more specific "
+        "subnet or host object. Rules referencing broad networks may unintentionally permit "
+        "traffic to or from unintended hosts. All object changes require change approval."
+    ),
+    "service_range": (
+        "Review whether the full port range defined in this service object is required. "
+        "Large port ranges may inadvertently permit traffic on unintended ports. Replace "
+        "with specific port definitions where possible."
+    ),
+
+    # ── Structural / policy-level ─────────────────────────────────────────────
+    "duplicate_rule": (
+        "Review the duplicate rule and confirm whether it has a separate business "
+        "requirement. If no independent requirement exists, raise a change request to "
+        "remove or consolidate the duplicate through the formal change management process. "
+        "Maintaining duplicate rules increases policy complexity without security benefit."
+    ),
+    "shadowed_rule": (
+        "Review the rule order and confirm whether the shadowed rule is intended to be "
+        "unreachable. If the rule should match traffic, adjust the rule order after "
+        "engineer review and change approval. If the rule is redundant, raise a change "
+        "request for removal."
+    ),
+
+    # ── NAT / exposure ────────────────────────────────────────────────────────
+    "nat_any_service": (
+        "Restrict the NAT rule service to specific protocols and ports. A NAT rule with "
+        "any-service translates all traffic matching the source/destination regardless of "
+        "port, which may expose unintended services. Specify the minimum required services."
+    ),
+    "nat_no_security_policy": (
+        "Verify that a corresponding security policy rule exists to control traffic for "
+        "this NAT translation. NAT rules that have no matching security policy may allow "
+        "traffic to pass without inspection or logging."
+    ),
+    "nat_overlapping": (
+        "Review overlapping NAT rules to confirm which translation should take precedence. "
+        "Overlapping NAT entries can cause inconsistent translation behaviour depending on "
+        "rule order. Consolidate or reorder to make intent explicit."
+    ),
+    "rdp_exposed": (
+        "RDP (port 3389) should never be directly exposed to untrusted networks. "
+        "Remove or restrict this rule immediately. Replace with VPN-gated access or a "
+        "jump host. This finding requires urgent review by the responsible engineer."
+    ),
+    "ssh_exposed": (
+        "SSH exposure to untrusted networks should be restricted to known source IPs. "
+        "Verify the business requirement and restrict the source to specific authorised "
+        "management hosts or implement VPN-gated access."
+    ),
+    "database_exposed": (
+        "Database ports should never be directly exposed to untrusted networks. "
+        "Remove or restrict this rule and route database access through an application "
+        "tier or VPN. This finding requires urgent review by the responsible engineer."
+    ),
+}
+
+
+def get(finding_type: str, fallback: Optional[str] = None) -> str:
+    """Return the standard recommendation for a finding type.
+
+    Args:
+        finding_type: The finding type identifier.
+        fallback:     Text to return if finding_type is not in the library.
+                      If None, a generic recommendation is returned.
+    """
+    if finding_type in LIBRARY:
+        return LIBRARY[finding_type]
+    if fallback:
+        return fallback
+    return (
+        "Review this finding and confirm whether any remediation is required. "
+        "All changes must be validated by the responsible engineer and implemented "
+        "through the formal change management process."
+    )
+
+
+def all_types() -> list[dict]:
+    """Return the full library as a list of {finding_type, recommendation} dicts."""
+    return [{"finding_type": k, "recommendation": v} for k, v in LIBRARY.items()]

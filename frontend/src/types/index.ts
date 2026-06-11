@@ -61,6 +61,7 @@ export interface Policy {
   findings_by_type?: Array<{ type: string; count: number }>
   findings_by_severity?: Array<{ severity: string; count: number }>
   complexity_score?: number | null
+  complexity_breakdown?: Record<string, { value: number; label: string; points: number }> | null
   cleanup_readiness_score?: number | null
   health_score?: number | null
   top_risk_drivers?: Array<{ type: string; count: number }>

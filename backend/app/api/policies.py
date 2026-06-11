@@ -912,6 +912,7 @@ def _policy_detail(p: FirewallPolicy, db: Session) -> dict:
         "findings_by_type": [{"type": t, "count": c} for t, c in findings_by_type],
         "findings_by_severity": [{"severity": s, "count": c} for s, c in findings_by_severity],
         "complexity_score": p.complexity_score,
+        "complexity_breakdown": p.complexity_breakdown or {},
         "cleanup_readiness_score": p.cleanup_readiness_score,
         "health_score": p.health_score,
         "top_risk_drivers": p.top_risk_drivers or [],

@@ -232,14 +232,16 @@ def update_finding(
     if body.risk_accepted_by is not None:
         f.risk_accepted_by = body.risk_accepted_by
 
-    comment = FindingComment(
-        finding_id=finding_id,
-        author="engineer",
-        comment=body.engineer_comment or "",
-        old_status=old_status,
-        new_status=body.status or old_status,
-    )
-    db.add(comment)
+    # Only create a comment record when there is meaningful content to record
+    if body.status or body.engineer_comment:
+        comment = FindingComment(
+            finding_id=finding_id,
+            author="engineer",
+            comment=body.engineer_comment or "",
+            old_status=old_status,
+            new_status=body.status or old_status,
+        )
+        db.add(comment)
     db.commit()
     db.refresh(f)
     return _finding_dict(f)

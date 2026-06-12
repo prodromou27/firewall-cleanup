@@ -27,32 +27,38 @@ def _is_any(values: list) -> bool:
     return bool(values and any(str(v).lower().strip() in _ANY_VALUES for v in values))
 
 
-def _policy_risk_score(p: FirewallPolicy, db: Session) -> int:
+def _policy_risk_score(p: FirewallPolicy, db: Session,
+                        _rules: list | None = None,
+                        _sev_map: dict | None = None) -> int:
     """
     Compute a 0–100 risk score for a policy based on:
     - Weighted finding severity counts
     - % of permissive rules (any source / any dest / any service)
     - % zero-hit enabled rules
+
+    Pass pre-fetched _rules / _sev_map to avoid redundant DB queries.
     """
     if p.rule_count == 0:
         return 0
 
-    rules = db.query(FirewallRule).filter(FirewallRule.policy_id == p.id).all()
-    enabled = [r for r in rules if r.enabled]
+    if _rules is None:
+        _rules = db.query(FirewallRule).filter(FirewallRule.policy_id == p.id).all()
+    enabled = [r for r in _rules if r.enabled]
     if not enabled:
         return 0
 
     # Finding severity score (0–50)
-    sev_counts = (
-        db.query(Finding.severity, func.count(Finding.id))
-        .filter(Finding.policy_id == p.id)
-        .group_by(Finding.severity).all()
-    )
-    sev_map = {s: c for s, c in sev_counts}
+    if _sev_map is None:
+        sev_counts = (
+            db.query(Finding.severity, func.count(Finding.id))
+            .filter(Finding.policy_id == p.id)
+            .group_by(Finding.severity).all()
+        )
+        _sev_map = {s: c for s, c in sev_counts}
     finding_score = min(50, (
-        (sev_map.get("High", 0) * 5) +
-        (sev_map.get("Medium", 0) * 2) +
-        (sev_map.get("Low", 0) * 0.5)
+        (_sev_map.get("High", 0) * 5) +
+        (_sev_map.get("Medium", 0) * 2) +
+        (_sev_map.get("Low", 0) * 0.5)
     ))
 
     # Permissive rule score (0–30)
@@ -336,7 +342,7 @@ def get_policy_risk_score(
 
     return {
         "policy_id": policy_id,
-        "risk_score": _policy_risk_score(p, db),
+        "risk_score": _policy_risk_score(p, db, _rules=rules, _sev_map=sev_map),
         "breakdown": {
             "high_findings": sev_map.get("High", 0),
             "medium_findings": sev_map.get("Medium", 0),
@@ -429,13 +435,13 @@ def get_policy_scorecard(policy_id: str, db: Session = Depends(get_db)):
     n_temp = len(temp_rules)
 
     # 6. Object hygiene — unused objects
-    used_names = set()
+    used_names: set[str] = set()
     for r in rules:
         for n in (r.sources or []) + (r.destinations or []) + (r.services or []):
-            used_names.add(n)
+            used_names.add(n.lower())
     unused_objects = [
         o for o in objects
-        if o.object_name not in used_names
+        if o.object_name.lower() not in used_names
         and o.object_name.lower() not in ("any", "all")
     ]
     n_unused_obj = len(unused_objects)
@@ -595,7 +601,7 @@ def get_permissive_analysis(policy_id: str, db: Session = Depends(get_db)):
     rules = db.query(FirewallRule).filter(
         FirewallRule.policy_id == policy_id,
         FirewallRule.enabled == True,
-        FirewallRule.action == "accept",
+        FirewallRule.action.in_(["accept", "allow", "permit"]),
     ).order_by(FirewallRule.risk_score.desc()).all()
 
     # Pre-load findings for this policy
@@ -722,7 +728,9 @@ def get_rules(
             )
         )
     if action:
-        q = q.filter(FirewallRule.action == action)
+        # Support comma-separated list (e.g. "accept,allow,permit") and case-insensitive match
+        action_values = [a.strip().lower() for a in action.split(",") if a.strip()]
+        q = q.filter(func.lower(FirewallRule.action).in_(action_values))
     if enabled is not None:
         q = q.filter(FirewallRule.enabled == enabled)
     if zero_hits:

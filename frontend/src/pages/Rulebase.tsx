@@ -128,7 +128,8 @@ function RuleRow({ rule }: { rule: Rule }) {
         <td className="px-3 py-2">
           <span className={clsx(
             'text-xs font-semibold px-1.5 py-0.5 rounded',
-            rule.action === 'accept' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600',
+            ['accept', 'allow', 'permit'].includes((rule.action || '').toLowerCase())
+              ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600',
           )}>
             {rule.action || '—'}
           </span>
@@ -195,7 +196,7 @@ function RuleRow({ rule }: { rule: Rule }) {
                 <div className="space-y-1">
                   <p><span className="text-gray-400 w-20 inline-block">Rule ID</span><span className="font-mono">{rule.rule_id || '—'}</span></p>
                   <p><span className="text-gray-400 w-20 inline-block">Action</span>
-                    <span className={clsx('font-semibold', rule.action === 'accept' ? 'text-green-700' : 'text-red-600')}>{rule.action}</span>
+                    <span className={clsx('font-semibold', ['accept', 'allow', 'permit'].includes((rule.action || '').toLowerCase()) ? 'text-green-700' : 'text-red-600')}>{rule.action}</span>
                   </p>
                   <p><span className="text-gray-400 w-20 inline-block">Status</span>
                     <span className={rule.enabled ? 'text-green-700' : 'text-red-600'}>{rule.enabled ? 'Enabled' : 'Disabled'}</span>

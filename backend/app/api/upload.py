@@ -20,21 +20,33 @@ import logging
 router = APIRouter(prefix="/api/upload", tags=["upload"])
 logger = logging.getLogger(__name__)
 
-# Allowed file extensions for uploaded policy files
-_ALLOWED_EXTENSIONS = {".conf", ".txt", ".json", ".csv", ".log", ".cfg"}
+# Allowed file extensions for uploaded policy files (union across all vendors).
+_ALLOWED_EXTENSIONS = {".conf", ".txt", ".json", ".csv", ".log", ".cfg", ".xml"}
+
+# Per-vendor extension allow-list.
+_VENDOR_EXTENSIONS = {
+    "CheckPoint": {".csv"},
+    "FortiGate":  {".conf", ".txt", ".json", ".cfg"},
+    "PaloAlto":   {".xml", ".json", ".conf"},
+    "CiscoASA":   {".txt", ".conf", ".cfg"},
+    "HuaweiUSG":  {".txt", ".cfg", ".conf"},
+}
 
 # Max filename length
 _MAX_FILENAME_LEN = 255
+
+# Read uploads in 1 MiB chunks so an oversized file is rejected mid-stream
+# rather than fully buffered into memory.
+_READ_CHUNK = 1024 * 1024
 
 # Allowed vendor values (must match parsers)
 _ALLOWED_VENDORS = {"FortiGate", "CheckPoint", "PaloAlto", "CiscoASA", "HuaweiUSG"}
 
 
-def _safe_extension(filename: str) -> str:
-    """Return a sanitised file extension, defaulting to .txt."""
+def _file_extension(filename: str) -> str:
+    """Return the lowercased file extension (empty string if none)."""
     _, ext = os.path.splitext(filename)
-    ext = ext.lower()
-    return ext if ext in _ALLOWED_EXTENSIONS else ".txt"
+    return ext.lower()
 
 
 def _sanitize_filename(filename: str) -> str:
@@ -81,17 +93,10 @@ async def upload_policy(
         raise HTTPException(status_code=400, detail=f"No parser available for vendor: {vendor}")
 
     safe_filename = _sanitize_filename(file.filename)
-    ext = _safe_extension(safe_filename)
+    ext = _file_extension(safe_filename)
 
-    # Validate extension against vendor
-    vendor_extensions = {
-        "CheckPoint": {".csv"},
-        "FortiGate":  {".conf", ".txt", ".json", ".cfg"},
-        "PaloAlto":   {".xml", ".json", ".conf"},
-        "CiscoASA":   {".txt", ".conf", ".cfg"},
-        "HuaweiUSG":  {".txt", ".cfg", ".conf"},
-    }
-    allowed_exts = vendor_extensions.get(vendor, _ALLOWED_EXTENSIONS)
+    # Validate extension against the vendor's allow-list.
+    allowed_exts = _VENDOR_EXTENSIONS.get(vendor, _ALLOWED_EXTENSIONS)
     if ext not in allowed_exts:
         raise HTTPException(
             status_code=400,
@@ -99,16 +104,44 @@ async def upload_policy(
                    f"Allowed: {', '.join(sorted(allowed_exts))}",
         )
 
-    # ── Read and size-check content ───────────────────────────────────────────
-    content = await file.read()
+    # ── Read content with a streaming size cap ────────────────────────────────
+    # Reject early if the client-declared size already exceeds the limit, then
+    # read in chunks so an oversized stream is aborted without being fully
+    # buffered into memory.
     max_bytes = settings.max_upload_size_mb * 1024 * 1024
-    if len(content) > max_bytes:
+    declared = getattr(file, "size", None)
+    if declared is not None and declared > max_bytes:
         raise HTTPException(
             status_code=413,
-            detail=f"File too large ({len(content) // (1024*1024)} MB). Max allowed: {settings.max_upload_size_mb} MB",
+            detail=f"File too large ({declared // (1024*1024)} MB). Max allowed: {settings.max_upload_size_mb} MB",
         )
+
+    chunks = []
+    total = 0
+    while True:
+        chunk = await file.read(_READ_CHUNK)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large (> {settings.max_upload_size_mb} MB). Upload aborted.",
+            )
+        chunks.append(chunk)
+    content = b"".join(chunks)
+
     if len(content) == 0:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    # ── Binary-content guard ──────────────────────────────────────────────────
+    # Policy exports are text (conf/csv/xml/json). A NUL byte in the leading
+    # bytes indicates a binary/garbage upload, not a config file.
+    if b"\x00" in content[:8192]:
+        raise HTTPException(
+            status_code=400,
+            detail="Uploaded file appears to be binary. Expected a text-based policy export.",
+        )
 
     # ── Save file with UUID name (no user-controlled filename on disk) ─────────
     os.makedirs(settings.upload_dir, exist_ok=True)

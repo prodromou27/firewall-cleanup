@@ -21,7 +21,7 @@ interface SettingsData {
   webhook_events_available?: string[]
   nvd_api_key_set?: boolean
   syslog_listener?: { active: boolean; port: number; cooldown_seconds?: number }
-  security?: { auth_enabled: boolean; secret_key_set: boolean; api_key_prefix: string | null }
+  security?: { auth_enabled: boolean; auth_mode: string; secret_key_set: boolean }
   app_version?: string
 }
 
@@ -261,7 +261,7 @@ export function Settings() {
             >
               <t.icon className="w-4 h-4" />
               {t.label}
-              {t.id === 'security' && sec && !sec.auth_enabled && (
+              {t.id === 'security' && sec && !sec.secret_key_set && (
                 <span className="ml-0.5 w-2 h-2 rounded-full bg-red-500 inline-block" />
               )}
             </button>

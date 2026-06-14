@@ -384,6 +384,7 @@ def _finding_dict(f: Finding, rule_map: dict | None = None) -> dict:
     d = {
         "id": f.id,
         "policy_id": f.policy_id,
+        "analysis_run_id": f.analysis_run_id,
         "vendor": f.vendor,
         "finding_type": f.finding_type,
         "severity": f.severity,

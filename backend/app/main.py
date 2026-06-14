@@ -153,6 +153,14 @@ async def lifespan(app: FastAPI):
                 ))
                 _conn.commit()
                 logger.info("Schema migration: added complexity_breakdown column to firewall_policies.")
+            # Add analysis_run_id column to findings if not present
+            _fcols = [r[1] for r in _conn.execute(_text("PRAGMA table_info(findings)"))]
+            if "analysis_run_id" not in _fcols:
+                _conn.execute(_text(
+                    "ALTER TABLE findings ADD COLUMN analysis_run_id TEXT"
+                ))
+                _conn.commit()
+                logger.info("Schema migration: added analysis_run_id column to findings.")
     except Exception as _mig_exc:
         logger.error("Schema migration failed: %s", _mig_exc)
 

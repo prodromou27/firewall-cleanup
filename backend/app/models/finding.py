@@ -14,6 +14,7 @@ class Finding(Base):
 
     id = Column(String, primary_key=True, default=gen_uuid)
     policy_id = Column(String, ForeignKey("firewall_policies.id"), nullable=False)
+    analysis_run_id = Column(String, nullable=True)  # links finding to the run that produced it
     vendor = Column(String, nullable=True)
     finding_type = Column(String, nullable=False)
     severity = Column(String, nullable=False)       # High/Medium/Low/Informational

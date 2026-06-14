@@ -1,14 +1,19 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useCustomer } from '../contexts/CustomerContext'
-import { useForm } from 'react-hook-form'
+import { useForm, Controller } from 'react-hook-form'
 import {
-  Users, Plus, Search, Trash2, Eye, Edit2, X,
-  Building2, Mail, Tag, AlertTriangle, CheckCircle, Clock
+  Users, Plus, Search, Trash2, Edit2, AlertTriangle,
 } from 'lucide-react'
 import { getCustomers, createCustomer, updateCustomer, deleteCustomer } from '../api/client'
 import type { Customer } from '../types'
 import { clsx } from 'clsx'
+import {
+  Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle,
+} from '../components/ui/dialog'
+import {
+  Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
+} from '../components/ui/select'
 
 // ── Risk indicator ──────────────────────────────────────────
 function RiskPill({ high, total }: { high: number; total: number }) {
@@ -52,7 +57,7 @@ function CustomerModal({
 }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const { register, handleSubmit, formState: { errors } } = useForm<FormValues>({
+  const { register, handleSubmit, control, formState: { errors } } = useForm<FormValues>({
     defaultValues: {
       name: customer?.name || '',
       description: customer?.description || '',
@@ -85,17 +90,13 @@ function CustomerModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 bg-[#0f2744]">
-          <h2 className="text-white font-semibold">
+    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="max-w-lg p-0 overflow-hidden gap-0">
+        <DialogHeader className="px-6 py-4 bg-[#0f2744] space-y-0">
+          <DialogTitle className="text-white font-semibold">
             {customer ? 'Edit Customer' : 'Onboard New Customer'}
-          </h2>
-          <button onClick={onClose} className="text-blue-300 hover:text-white">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+          </DialogTitle>
+        </DialogHeader>
 
         <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-4">
           <div className="grid grid-cols-2 gap-4">
@@ -139,13 +140,20 @@ function CustomerModal({
 
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1.5">Industry</label>
-              <select
-                {...register('industry')}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">Select industry</option>
-                {INDUSTRIES.map(i => <option key={i} value={i}>{i}</option>)}
-              </select>
+              <Controller
+                control={control}
+                name="industry"
+                render={({ field }) => (
+                  <Select value={field.value || undefined} onValueChange={field.onChange}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select industry" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {INDUSTRIES.map(i => <SelectItem key={i} value={i}>{i}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
             </div>
 
             <div>
@@ -172,15 +180,15 @@ function CustomerModal({
             <p className="text-red-600 text-sm bg-red-50 rounded-lg px-3 py-2">{error}</p>
           )}
 
-          <div className="flex justify-end gap-3 pt-2">
+          <DialogFooter className="pt-2">
             <button type="button" onClick={onClose} className="btn-secondary">Cancel</button>
             <button type="submit" disabled={saving} className="btn-primary">
               {saving ? 'Saving…' : customer ? 'Save Changes' : 'Create Customer'}
             </button>
-          </div>
+          </DialogFooter>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -291,25 +299,27 @@ function DeleteConfirmDialog({
   onCancel,
 }: { customer: Customer; onConfirm: () => void; onCancel: () => void }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full mx-4 border border-gray-200">
-        <div className="flex items-center gap-3 mb-3">
-          <div className="p-2 rounded-full bg-red-100">
-            <AlertTriangle className="w-5 h-5 text-red-600" />
-          </div>
-          <h3 className="text-base font-semibold text-gray-900">Delete customer?</h3>
-        </div>
+    <Dialog open onOpenChange={(o) => { if (!o) onCancel() }}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-3">
+            <span className="p-2 rounded-full bg-red-100">
+              <AlertTriangle className="w-5 h-5 text-red-600" />
+            </span>
+            Delete customer?
+          </DialogTitle>
+        </DialogHeader>
         <p className="text-sm text-gray-600 mb-1">
           <span className="font-semibold">{customer.name}</span> will be permanently removed, including all
           associated policies and findings.
         </p>
-        <p className="text-xs text-red-600 font-medium mb-5">This action cannot be undone.</p>
-        <div className="flex gap-3 justify-end">
+        <p className="text-xs text-red-600 font-medium mb-2">This action cannot be undone.</p>
+        <DialogFooter>
           <button onClick={onCancel} className="px-4 py-2 text-sm rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors">Cancel</button>
           <button onClick={onConfirm} className="px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 font-semibold transition-colors">Delete</button>
-        </div>
-      </div>
-    </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

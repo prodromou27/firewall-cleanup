@@ -5,6 +5,28 @@
 @layer base {
   :root {
     --sidebar-width: 220px;
+
+    /* ── shadcn/ui semantic theme (blue primary, slate neutrals) ── */
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 221 83% 53%;            /* brand blue-600 */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 96%;          /* ink-100 */
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;   /* ink-500 */
+    --accent: 210 40% 96%;             /* neutral hover surface */
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 72% 51%;          /* red-600 */
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 32% 91%;             /* ink-200 */
+    --input: 214 32% 91%;
+    --ring: 221 83% 53%;               /* brand blue */
+    --radius: 0.5rem;
   }
   body {
     @apply bg-canvas text-ink-900 antialiased font-sans;

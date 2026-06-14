@@ -13,7 +13,7 @@ import {
   BarChart2, Zap, Layers, ClipboardList, TrendingUp, Activity,
   Trash2, Save, RotateCcw, Plus,
 } from 'lucide-react'
-import { getPolicies, getFindings, API_KEY, API_BASE } from '../api/client'
+import { getPolicies, getFindings } from '../api/client'
 import type { Policy } from '../types'
 import { clsx } from 'clsx'
 
@@ -392,12 +392,13 @@ export function Reports() {
     if (!selectedId) return
     setGenerating(format)
     try {
-      const url = `${API_BASE}/api/reports/${selectedId}/build?format=${format}`
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-        ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
-      }
-      const resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(buildPayload()) })
+      const url = `/api/reports/${selectedId}/build?format=${format}`
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(buildPayload()),
+      })
       if (!resp.ok) throw new Error(`${resp.status}`)
       const blob = await resp.blob()
       const cd = resp.headers.get('content-disposition') || ''
@@ -417,9 +418,8 @@ export function Reports() {
     if (!customerId) return
     setGenCSummary(fmt)
     try {
-      const url = `${API_BASE}/api/reports/customer/${customerId}/summary?format=${fmt}`
-      const headers: HeadersInit = API_KEY ? { 'X-API-Key': API_KEY } : {}
-      const resp = await fetch(url, { headers })
+      const url = `/api/reports/customer/${customerId}/summary?format=${fmt}`
+      const resp = await fetch(url, { credentials: 'include' })
       if (!resp.ok) throw new Error(`${resp.status}`)
       const blob = await resp.blob()
       const cd = resp.headers.get('content-disposition') || ''

@@ -1,26 +1,59 @@
 ﻿import axios from 'axios'
 
-// API key is injected at build time from .env (VITE_API_KEY).
-// In development this is read from frontend/.env.
-// The key is sent in every request as X-API-Key so the backend can
-// authenticate the frontend. This is a shared-secret approach suitable
-// for single-tenant / on-premise deployments. For multi-user SaaS,
-// replace with per-user JWT authentication.
-const _apiKey = import.meta.env.VITE_API_KEY as string | undefined
+// Authentication is session-cookie based. On login the backend sets an
+// HttpOnly cookie (pi_session); the browser sends it automatically on every
+// same-origin request. The frontend never sees or stores the token.
+//
+// All requests go through the same-origin path (`/api`, proxied to the backend
+// in dev) so the cookie is included without any CORS credential gymnastics.
+// `withCredentials` ensures the cookie rides along even if a request ends up
+// being treated as cross-origin.
 
-// Exported so report download helpers and settings page can attach the same header
-export const API_KEY = _apiKey
-
-// Base URL for direct fetch calls (downloads, etc.)
-export const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) || 'http://localhost:8000'
+// Same-origin base for direct fetch() calls (downloads, etc.). Empty string =>
+// relative URLs like `/api/...`, which the dev server proxies to the backend.
+export const API_BASE = ''
 
 const api = axios.create({
   baseURL: '/api',
   timeout: 60000,
-  headers: _apiKey ? { 'X-API-Key': _apiKey } : {},
+  withCredentials: true,
 })
 
+// On any 401, drop to the login screen. A custom event lets the AuthProvider
+// react without this module importing React.
+let _redirectingToLogin = false
+api.interceptors.response.use(
+  r => r,
+  err => {
+    if (err?.response?.status === 401 && !_redirectingToLogin) {
+      _redirectingToLogin = true
+      window.dispatchEvent(new CustomEvent('auth:unauthorized'))
+      // allow subsequent 401s after a tick (e.g. parallel requests)
+      setTimeout(() => { _redirectingToLogin = false }, 500)
+    }
+    return Promise.reject(err)
+  },
+)
+
 export default api
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
+export interface CurrentUser {
+  id: string
+  email: string
+  full_name: string | null
+  role: string
+  customer_ids: string[] | null // null => all customers (global role)
+}
+
+export const login = (email: string, password: string) =>
+  api.post('/auth/login', { email, password }).then(r => r.data.user as CurrentUser)
+
+export const logout = () =>
+  api.post('/auth/logout').then(r => r.data)
+
+export const getMe = () =>
+  api.get('/auth/me').then(r => r.data.user as CurrentUser)
 
 // â”€â”€ Customers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const getCustomers = (params?: Record<string, string>) =>

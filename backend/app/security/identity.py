@@ -73,37 +73,10 @@ def _resolve_user(db: Session, raw_token: Optional[str]) -> Optional[User]:
     return user
 
 
-def _legacy_api_key_user(request: Request) -> Optional[User]:
-    """TRANSITION BRIDGE — to be removed once the frontend uses session login.
-
-    While the frontend still authenticates with the global X-API-Key, treat a
-    valid key as a synthetic, non-persisted system_admin so per-user enforcement
-    can be layered onto endpoints without breaking the running app. This user is
-    never written to the DB. Remove this bridge (and the X-API-Key header) after
-    the frontend login screen ships.
-    """
-    configured = settings.api_key.strip()
-    if not configured:
-        return None
-    if request.headers.get("X-API-Key", "") != configured:
-        return None
-    bridge = User(
-        id="legacy-api-key",
-        email="legacy-api-key@local",
-        full_name="Legacy API Key",
-        password_hash="",
-        role="system_admin",
-        is_active=True,
-    )
-    return bridge
-
-
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
-    """Dependency: require a valid session (or, transitionally, a valid API key)."""
+    """Dependency: require a valid session cookie."""
     raw_token = request.cookies.get(SESSION_COOKIE_NAME)
     user = _resolve_user(db, raw_token)
-    if user is None:
-        user = _legacy_api_key_user(request)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -114,10 +87,7 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
 
 def get_optional_user(request: Request, db: Session = Depends(get_db)) -> Optional[User]:
     """Dependency: return the user if logged in, else None (no error)."""
-    user = _resolve_user(db, request.cookies.get(SESSION_COOKIE_NAME))
-    if user is None:
-        user = _legacy_api_key_user(request)
-    return user
+    return _resolve_user(db, request.cookies.get(SESSION_COOKIE_NAME))
 
 
 def require_capability(capability: str):

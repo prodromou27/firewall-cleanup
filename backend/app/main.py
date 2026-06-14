@@ -13,7 +13,6 @@ from app.config import settings
 from app.database import engine, Base
 from app.api import upload, policies, findings, objects, reports, settings as settings_api
 from app.api import customers, devices, revisions, compliance, auth as auth_api, users as users_api
-from app.security.auth import require_api_key
 import app.models  # ensure models are registered
 
 # ── Logging configuration ─────────────────────────────────────────────────────
@@ -195,11 +194,6 @@ async def lifespan(app: FastAPI):
         logger.warning("Syslog listener startup skipped: %s", _syslog_exc)
 
     # Warn if running in insecure dev mode
-    if not settings.api_key.strip():
-        logger.warning(
-            "⚠  API_KEY is not set — authentication is DISABLED. "
-            "Set API_KEY in .env before exposing this server on a network."
-        )
     if not settings.secret_key.strip():
         logger.warning(
             "⚠  SECRET_KEY is not set — credentials will be encrypted with a "
@@ -282,7 +276,7 @@ app.add_middleware(
     allow_origins=_allowed_origins,
     allow_credentials=False,      # credentials=True + wildcard is forbidden by browsers anyway
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "X-API-Key", "Accept", "Authorization"],
+    allow_headers=["Content-Type", "Accept", "Authorization"],
 )
 
 
@@ -301,53 +295,50 @@ async def security_headers(request: Request, call_next):
     return response
 
 
-# ── API key authentication middleware ─────────────────────────────────────────
+# ── Session authentication middleware ─────────────────────────────────────────
 
+# Paths reachable without an authenticated session.
 _PUBLIC_PATHS = {"/api/health"}
 
 @app.middleware("http")
-async def api_key_middleware(request: Request, call_next):
-    """Enforce API key on all non-public paths when API_KEY is configured."""
-    configured_key = settings.api_key.strip()
-    if not configured_key:
-        # Auth disabled — dev mode
-        return await call_next(request)
-
+async def session_auth_middleware(request: Request, call_next):
+    """Coarse, defense-in-depth gate: every protected path requires a valid
+    server-side session. Per-endpoint dependencies (get_current_user /
+    require_capability / require_customer_access) still perform the real
+    fine-grained authorization — this middleware just ensures no endpoint is
+    reachable anonymously, even one that forgot to declare a dependency.
+    """
     path = request.url.path
-    # Health check is always public
+
+    # Always-public paths.
     if path in _PUBLIC_PATHS:
         return await call_next(request)
-    # Auth endpoints manage their own session-based authentication and must be
-    # reachable without the legacy global API key (e.g. the login form).
+    # Auth endpoints manage their own login/logout/session flow.
     if path.startswith("/api/auth/"):
         return await call_next(request)
-    # API docs — allow only when accessed with a valid key OR in dev mode (no key configured)
-    if path in {"/docs", "/openapi.json", "/redoc"} or path.startswith("/redoc"):
-        provided_key = request.headers.get("X-API-Key", "")
-        if provided_key == configured_key:
-            return await call_next(request)
-        return JSONResponse(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            content={"detail": "API documentation requires a valid X-API-Key header"},
-        )
-
-    # OPTIONS preflight — let CORS middleware handle
+    # OPTIONS preflight — let CORS middleware handle.
     if request.method == "OPTIONS":
         return await call_next(request)
 
-    # Session-cookie auth: if a session cookie is present, let the request through
-    # so the per-endpoint dependencies (get_current_user / require_capability /
-    # require_customer_access) perform the real, fine-grained enforcement. The
-    # legacy global X-API-Key remains accepted during the transition.
-    from app.security.identity import SESSION_COOKIE_NAME
-    if request.cookies.get(SESSION_COOKIE_NAME):
-        return await call_next(request)
+    # Everything else (API routes + docs) requires a valid session cookie.
+    from app.security.identity import SESSION_COOKIE_NAME, _resolve_user
+    from app.database import SessionLocal
 
-    provided_key = request.headers.get("X-API-Key", "")
-    if provided_key != configured_key:
+    raw_token = request.cookies.get(SESSION_COOKIE_NAME)
+    if not raw_token:
         return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            content={"detail": "Invalid or missing API key"},
+            content={"detail": "Authentication required"},
+        )
+    _db = SessionLocal()
+    try:
+        user = _resolve_user(_db, raw_token)
+    finally:
+        _db.close()
+    if user is None:
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"detail": "Authentication required"},
         )
     return await call_next(request)
 

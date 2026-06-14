@@ -1,6 +1,9 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { Loader2 } from 'lucide-react'
 import { Layout } from './components/Layout'
 import { CustomerProvider } from './contexts/CustomerContext'
+import { AuthProvider, useAuth } from './contexts/AuthContext'
+import { Login } from './pages/Login'
 import { Dashboard } from './pages/Dashboard'
 import { Upload } from './pages/Upload'
 import { Policies, PolicyDetail } from './pages/Policies'
@@ -20,7 +23,7 @@ import { DeviceHistory } from './pages/DeviceHistory'
 import { PolicyComparison } from './pages/PolicyComparison'
 import { Compliance } from './pages/Compliance'
 
-export default function App() {
+function AuthenticatedApp() {
   return (
     <CustomerProvider>
       <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -67,5 +70,26 @@ export default function App() {
         </Layout>
       </BrowserRouter>
     </CustomerProvider>
+  )
+}
+
+function Gate() {
+  const { user, loading } = useAuth()
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#0f172a' }}>
+        <Loader2 className="w-6 h-6 text-slate-400 animate-spin" />
+      </div>
+    )
+  }
+  if (!user) return <Login />
+  return <AuthenticatedApp />
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <Gate />
+    </AuthProvider>
   )
 }

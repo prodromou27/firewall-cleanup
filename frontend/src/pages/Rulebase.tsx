@@ -5,7 +5,7 @@ import {
   Download, SlidersHorizontal, X, Shield, Zap, Eye, EyeOff,
   ArrowUpDown, ArrowUp, ArrowDown, Filter,
 } from 'lucide-react'
-import { getRules, getPolicy, getRulesExportUrl, API_KEY } from '../api/client'
+import { getRules, getPolicy, getRulesExportUrl } from '../api/client'
 import { SeverityBadge } from '../components/ui/SeverityBadge'
 import type { Rule, Policy } from '../types'
 import { clsx } from 'clsx'
@@ -350,7 +350,7 @@ export function Rulebase() {
     setExporting(true)
     try {
       const url = getRulesExportUrl(policyId, { ...buildParams(), page: 1, page_size: 9999 })
-      const res = await fetch(url, { headers: API_KEY ? { 'X-API-Key': API_KEY } : {} })
+      const res = await fetch(url, { credentials: 'include' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const blob = await res.blob()
       const a = document.createElement('a')

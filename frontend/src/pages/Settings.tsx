@@ -5,7 +5,7 @@ import {
   Lock, Download, Upload, Database, Key,
   AlertOctagon,
 } from 'lucide-react'
-import { getSettings, updateSettings, API_BASE, API_KEY } from '../api/client'
+import { getSettings, updateSettings } from '../api/client'
 
 interface SettingsData {
   inactivity_threshold_low: number
@@ -124,9 +124,7 @@ export function Settings() {
   const checkApi = async () => {
     setApiChecking(true)
     try {
-      const res = await fetch(`${API_BASE}/api/health`, {
-        headers: API_KEY ? { 'X-API-Key': API_KEY } : {},
-      })
+      const res = await fetch(`/api/health`, { credentials: 'include' })
       if (res.ok) {
         const data = await res.json()
         setApiVersion(data.version || '')
@@ -183,9 +181,7 @@ export function Settings() {
   const downloadBackup = async (type: 'database' | 'settings') => {
     setBackupStatus(`Preparing ${type} backup…`)
     try {
-      const res = await fetch(`${API_BASE}/api/settings/backup/${type}`, {
-        headers: API_KEY ? { 'X-API-Key': API_KEY } : {},
-      })
+      const res = await fetch(`/api/settings/backup/${type}`, { credentials: 'include' })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
         setBackupStatus(`Error: ${err.detail || res.statusText}`)
@@ -518,12 +514,9 @@ export function Settings() {
               <SectionTitle icon={Lock} title="Authentication & Access Control" subtitle="Live status from backend configuration" />
               <div className="space-y-3">
                 <StatusRow
-                  label="API Key Authentication"
-                  ok={sec?.auth_enabled}
-                  warn={!sec?.auth_enabled}
-                  desc={sec?.auth_enabled
-                    ? `Enabled — key prefix: ${sec.api_key_prefix ?? '(set)'}`
-                    : 'DISABLED — API_KEY not set in .env. Any request is accepted. Set API_KEY before exposing on a network.'}
+                  label="User Authentication"
+                  ok
+                  desc="Per-user accounts with bcrypt-hashed passwords and server-side sessions (HttpOnly cookies). Each request is authenticated and authorized by role."
                 />
                 <StatusRow
                   label="Credential Encryption Key"
@@ -556,15 +549,14 @@ export function Settings() {
               </div>
             </div>
 
-            {(!sec?.auth_enabled || !sec?.secret_key_set) && (
+            {!sec?.secret_key_set && (
               <div className="bg-red-50 border border-red-200 rounded-xl p-4">
                 <div className="flex items-center gap-2 mb-2">
                   <AlertOctagon className="w-5 h-5 text-red-600 flex-shrink-0" />
                   <p className="font-semibold text-red-800">Action required before production deployment</p>
                 </div>
                 <ul className="text-sm text-red-700 space-y-1 pl-7 list-disc">
-                  {!sec?.auth_enabled && <li>Set <code className="bg-red-100 px-1 rounded font-mono text-xs">API_KEY=&lt;strong-random-key&gt;</code> in <code className="bg-red-100 px-1 rounded font-mono text-xs">backend/.env</code></li>}
-                  {!sec?.secret_key_set && <li>Set <code className="bg-red-100 px-1 rounded font-mono text-xs">SECRET_KEY=&lt;32-byte-base64-key&gt;</code> in <code className="bg-red-100 px-1 rounded font-mono text-xs">backend/.env</code></li>}
+                  <li>Set <code className="bg-red-100 px-1 rounded font-mono text-xs">SECRET_KEY=&lt;32-byte-base64-key&gt;</code> in <code className="bg-red-100 px-1 rounded font-mono text-xs">backend/.env</code></li>
                 </ul>
               </div>
             )}
@@ -686,12 +678,10 @@ export function Settings() {
                     try {
                       const text = await file.text()
                       const payload = JSON.parse(text)
-                      const res = await fetch(`${API_BASE}/api/settings/backup/settings/restore`, {
+                      const res = await fetch(`/api/settings/backup/settings/restore`, {
                         method: 'POST',
-                        headers: {
-                          'Content-Type': 'application/json',
-                          ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
-                        },
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
                         body: JSON.stringify(payload),
                       })
                       const data = await res.json()

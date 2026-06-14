@@ -4,10 +4,11 @@ import { clsx } from 'clsx'
 import {
   LayoutDashboard, Users, Upload, List, AlertTriangle,
   Package, FileText, Settings, Server,
-  TrendingUp, Eye, ShieldAlert, Building2, ChevronDown, X,
+  TrendingUp, Eye, ShieldAlert, Building2, ChevronDown, X, LogOut,
 } from 'lucide-react'
 import { getCustomers } from '../api/client'
 import { useCustomer } from '../contexts/CustomerContext'
+import { useAuth } from '../contexts/AuthContext'
 import type { Customer } from '../types'
 import logoImg from '../assets/logo.png'
 
@@ -205,6 +206,42 @@ function CustomerSelector() {
 
 /* ── Layout ──────────────────────────────────────────────────── */
 
+const ROLE_LABELS: Record<string, string> = {
+  system_admin: 'System Admin',
+  tenant_admin: 'Tenant Admin',
+  engineer: 'Engineer',
+  reviewer: 'Reviewer',
+  report_viewer: 'Report Viewer',
+  read_only: 'Read-Only',
+}
+
+function UserFooter() {
+  const { user, logout } = useAuth()
+  if (!user) return null
+  const name = user.full_name || user.email
+  const initials = (user.full_name || user.email).slice(0, 2).toUpperCase()
+  return (
+    <div className="px-2.5 py-2.5 border-t border-white/5">
+      <div className="flex items-center gap-2">
+        <div className="w-7 h-7 rounded-md bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center flex-shrink-0">
+          <span className="text-white font-bold text-[10px]">{initials}</span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[12px] font-semibold text-white truncate leading-tight">{name}</p>
+          <p className="text-[10px] text-slate-500 truncate">{ROLE_LABELS[user.role] || user.role}</p>
+        </div>
+        <button
+          onClick={() => { void logout() }}
+          title="Sign out"
+          className="flex-shrink-0 text-slate-500 hover:text-red-400 transition-colors p-1 rounded"
+        >
+          <LogOut className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation()
 
@@ -263,6 +300,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </div>
           <p className="text-slate-700 text-[10px] font-mono">v2.1.0</p>
         </div>
+
+        {/* Current user + sign out */}
+        <UserFooter />
       </aside>
 
       {/* ── Main ────────────────────────────────────────────────── */}

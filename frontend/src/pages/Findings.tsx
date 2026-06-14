@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import {
   getFindings, updateFinding, bulkUpdateFindings, getPolicies,
-  addFindingComment, getFindingComments, getFindingsExportUrl, API_KEY,
+  addFindingComment, getFindingComments, getFindingsExportUrl,
 } from '../api/client'
 import { SeverityBadge, StatusBadge } from '../components/ui/SeverityBadge'
 import type { Finding, Policy, AffectedRuleData, FindingComment } from '../types'
@@ -888,9 +888,7 @@ export function Findings() {
       if (findingType) params.finding_type = findingType
       if (status) params.status = status
       const url = getFindingsExportUrl(params)
-      const res = await fetch(url, {
-        headers: API_KEY ? { 'X-API-Key': API_KEY } : {},
-      })
+      const res = await fetch(url, { credentials: 'include' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const blob = await res.blob()
       const a = document.createElement('a')

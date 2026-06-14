@@ -8,6 +8,12 @@ from app.database import get_db
 from app.models.customer import Customer
 from app.models.policy import FirewallPolicy, FirewallRule
 from app.models.finding import Finding
+from app.models.user import User
+from app.security.identity import (
+    get_current_user, require_capability, require_customer_access, accessible_customer_ids,
+)
+from app.security.rbac import CAP_MANAGE_CUSTOMERS
+from app.security.audit import audit_log
 
 router = APIRouter(prefix="/api/customers", tags=["customers"])
 
@@ -38,18 +44,27 @@ def list_customers(
     status: Optional[str] = None,
     search: Optional[str] = None,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     q = db.query(Customer)
     if status:
         q = q.filter(Customer.status == status)
     if search:
         q = q.filter(Customer.name.ilike(f"%{search}%"))
+    # Tenant isolation: non-global users see only their assigned customers.
+    allowed = accessible_customer_ids(db, user)
+    if allowed is not None:
+        q = q.filter(Customer.id.in_(allowed)) if allowed else q.filter(False)
     customers = q.order_by(Customer.name).all()
     return [_customer_summary(c) for c in customers]
 
 
 @router.post("", status_code=201)
-def create_customer(body: CustomerCreate, db: Session = Depends(get_db)):
+def create_customer(
+    body: CustomerCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_MANAGE_CUSTOMERS)),
+):
     existing = db.query(Customer).filter(Customer.name == body.name).first()
     if existing:
         raise HTTPException(status_code=409, detail=f"Customer '{body.name}' already exists.")
@@ -68,11 +83,17 @@ def create_customer(body: CustomerCreate, db: Session = Depends(get_db)):
     db.add(c)
     db.commit()
     db.refresh(c)
+    audit_log("customer.create", user_id=user.id, customer_id=c.id, name=c.name)
     return _customer_summary(c)
 
 
 @router.get("/{customer_id}")
-def get_customer(customer_id: str, db: Session = Depends(get_db)):
+def get_customer(
+    customer_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    require_customer_access(db, user, customer_id)
     c = db.query(Customer).filter(Customer.id == customer_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Customer not found")
@@ -84,7 +105,9 @@ def update_customer(
     customer_id: str,
     body: CustomerUpdate,
     db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_MANAGE_CUSTOMERS)),
 ):
+    require_customer_access(db, user, customer_id)
     c = db.query(Customer).filter(Customer.id == customer_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Customer not found")
@@ -110,17 +133,28 @@ def update_customer(
 
 
 @router.delete("/{customer_id}")
-def delete_customer(customer_id: str, db: Session = Depends(get_db)):
+def delete_customer(
+    customer_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_MANAGE_CUSTOMERS)),
+):
+    require_customer_access(db, user, customer_id)
     c = db.query(Customer).filter(Customer.id == customer_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Customer not found")
     db.delete(c)
     db.commit()
+    audit_log("customer.delete", user_id=user.id, customer_id=customer_id, name=c.name)
     return {"message": "Customer deleted"}
 
 
 @router.get("/{customer_id}/stats")
-def customer_stats(customer_id: str, db: Session = Depends(get_db)):
+def customer_stats(
+    customer_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    require_customer_access(db, user, customer_id)
     c = db.query(Customer).filter(Customer.id == customer_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Customer not found")

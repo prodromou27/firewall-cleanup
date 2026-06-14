@@ -26,6 +26,17 @@ class Settings(BaseSettings):
     # Default: localhost only. In production set to your actual frontend URL.
     allowed_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
+    # ── User authentication (Phase 1) ─────────────────────────────────────────
+    # Session lifetime in hours for the HttpOnly session cookie.
+    session_ttl_hours: int = 12
+    # Set cookies with the Secure flag (HTTPS only). Leave False for local dev
+    # over http://localhost; set True in production behind TLS.
+    cookie_secure: bool = False
+    # Bootstrap admin — if no users exist at startup and both are set, a
+    # system_admin is created. Change the password immediately after first login.
+    bootstrap_admin_email: str = ""
+    bootstrap_admin_password: str = ""
+
     # Analysis thresholds (days)
     inactivity_threshold_low: int = 90
     inactivity_threshold_medium: int = 180

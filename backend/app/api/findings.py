@@ -10,9 +10,24 @@ from app.database import get_db
 from app.models.finding import Finding, FindingComment
 from app.models.policy import FirewallPolicy, FirewallRule
 from app.api.tenant import get_finding_with_customer_check, filter_finding_ids_by_customer
+from app.models.user import User
+from app.security.identity import (
+    get_current_user, require_capability, require_customer_access, accessible_customer_ids,
+)
+from app.security.rbac import CAP_COMMENT
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/findings", tags=["findings"])
+
+
+def _authz_finding(finding_id: str, customer_id, db: Session, user: User) -> Finding:
+    """Resolve a finding, confirm policy↔customer consistency, AND that the
+    current user is authorized for the owning customer (server-side)."""
+    f = get_finding_with_customer_check(finding_id, customer_id, db)
+    policy = db.query(FirewallPolicy).filter(FirewallPolicy.id == f.policy_id).first()
+    owning_customer_id = policy.customer_id if policy else None
+    require_customer_access(db, user, owning_customer_id)
+    return f
 
 # Spec-aligned finding statuses (Section 15)
 VALID_STATUSES = [
@@ -78,17 +93,28 @@ def list_findings(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     q = db.query(Finding)
 
-    if customer_id:
-        policy_ids = [
-            p.id for p in db.query(FirewallPolicy)
-            .filter(FirewallPolicy.customer_id == customer_id).all()
-        ]
-        if not policy_ids:
+    # Tenant isolation: restrict to policies owned by customers this user may access.
+    allowed = accessible_customer_ids(db, user)  # None => global (all customers)
+    policy_q = db.query(FirewallPolicy.id, FirewallPolicy.customer_id)
+    if allowed is not None:
+        if not allowed:
             return {"total": 0, "page": page, "page_size": page_size, "findings": []}
-        q = q.filter(Finding.policy_id.in_(policy_ids))
+        policy_q = policy_q.filter(FirewallPolicy.customer_id.in_(allowed))
+    if customer_id:
+        # Explicit customer filter must still be within the user's allowed set.
+        if allowed is not None and customer_id not in allowed:
+            raise HTTPException(status_code=403, detail="Access denied: you are not authorized for this customer.")
+        policy_q = policy_q.filter(FirewallPolicy.customer_id == customer_id)
+
+    if allowed is not None or customer_id:
+        scoped_policy_ids = [pid for pid, _cid in policy_q.all()]
+        if not scoped_policy_ids:
+            return {"total": 0, "page": page, "page_size": page_size, "findings": []}
+        q = q.filter(Finding.policy_id.in_(scoped_policy_ids))
 
     if policy_id:
         q = q.filter(Finding.policy_id == policy_id)
@@ -117,11 +143,13 @@ def list_findings(
     if export:
         _EXPORT_LIMIT = 10_000
         all_findings = q.order_by(sev_order, Finding.created_at.desc()).limit(_EXPORT_LIMIT).all()
-        # Scope policy_map to the same customer filter used above (no cross-tenant leakage)
-        policy_q = db.query(FirewallPolicy)
+        # Scope policy_map to the same access filter used above (no cross-tenant leakage)
+        pmap_q = db.query(FirewallPolicy)
+        if allowed is not None:
+            pmap_q = pmap_q.filter(FirewallPolicy.customer_id.in_(allowed))
         if customer_id:
-            policy_q = policy_q.filter(FirewallPolicy.customer_id == customer_id)
-        policy_map = {p.id: p for p in policy_q.all()}
+            pmap_q = pmap_q.filter(FirewallPolicy.customer_id == customer_id)
+        policy_map = {p.id: p for p in pmap_q.all()}
         return _findings_csv(all_findings, policy_map)
 
     total = q.count()
@@ -192,8 +220,9 @@ def get_finding(
     finding_id: str,
     customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    f = get_finding_with_customer_check(finding_id, customer_id, db)
+    f = _authz_finding(finding_id, customer_id, db, user)
     return _finding_detail(f, db)
 
 
@@ -203,8 +232,9 @@ def update_finding(
     body: UpdateFindingRequest,
     customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_COMMENT)),
 ):
-    f = get_finding_with_customer_check(finding_id, customer_id, db)
+    f = _authz_finding(finding_id, customer_id, db, user)
 
     old_status = f.status
 
@@ -253,6 +283,7 @@ def bulk_update_findings(
     body: UpdateFindingRequest,
     customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_COMMENT)),
 ):
     if body.status and body.status not in VALID_STATUSES:
         raise HTTPException(status_code=400, detail="Invalid status.")
@@ -264,6 +295,18 @@ def bulk_update_findings(
 
     # Enforce tenant isolation — only allow updates to findings owned by this customer
     finding_ids = filter_finding_ids_by_customer(finding_ids, customer_id, db)
+
+    # Per-user tenant access: drop any finding whose owning customer this user can't access.
+    allowed = accessible_customer_ids(db, user)
+    if allowed is not None:
+        if not allowed:
+            return {"updated": 0}
+        allowed_policy_ids = {
+            pid for (pid,) in db.query(FirewallPolicy.id)
+            .filter(FirewallPolicy.customer_id.in_(allowed)).all()
+        }
+        rows = db.query(Finding.id, Finding.policy_id).filter(Finding.id.in_(finding_ids)).all()
+        finding_ids = [fid for fid, pid in rows if pid in allowed_policy_ids]
 
     findings = (
         db.query(Finding)
@@ -301,8 +344,9 @@ def add_comment(
     body: AddCommentRequest,
     customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_COMMENT)),
 ):
-    f = get_finding_with_customer_check(finding_id, customer_id, db)
+    f = _authz_finding(finding_id, customer_id, db, user)
     c = FindingComment(
         finding_id=finding_id,
         author=body.safe_author,
@@ -325,8 +369,9 @@ def get_comments(
     finding_id: str,
     customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    f = get_finding_with_customer_check(finding_id, customer_id, db)
+    f = _authz_finding(finding_id, customer_id, db, user)
     comments = (
         db.query(FindingComment)
         .filter(FindingComment.finding_id == finding_id)

@@ -14,6 +14,9 @@ import {
 import type { FirewallDeviceT } from '../types'
 import { clsx } from 'clsx'
 import { useForm } from 'react-hook-form'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from '../components/ui/dialog'
 
 // ── Status chip ─────────────────────────────────────────────────────────────
 function SyncStatusChip({ status }: { status: string }) {
@@ -162,17 +165,15 @@ function DeviceModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm overflow-y-auto py-8">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 bg-[#0f2744] rounded-t-xl">
-          <h2 className="text-white font-semibold flex items-center gap-2">
+    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="max-w-lg p-0 gap-0 overflow-hidden max-h-[90vh] flex flex-col">
+        <DialogHeader className="px-6 py-4 bg-[#0f2744] rounded-t-xl space-y-0 flex-shrink-0">
+          <DialogTitle className="text-white font-semibold flex items-center gap-2">
             <Server className="w-4 h-4" /> {device ? 'Edit Device' : 'Add Firewall Device'}
-          </h2>
-          <button onClick={onClose} className="text-blue-300 hover:text-white"><X className="w-5 h-5" /></button>
-        </div>
+          </DialogTitle>
+        </DialogHeader>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-4">
+        <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-4 overflow-y-auto">
           {/* Basic */}
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
@@ -560,8 +561,8 @@ function DeviceModal({
             </div>
           </div>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 

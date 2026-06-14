@@ -28,6 +28,7 @@ class SettingsUpdate(BaseModel):
     # NVD API key (optional, increases rate limits)
     nvd_api_key: Optional[str] = None
     # Analysis thresholds (stored in DB, override config defaults)
+    severity_critical_threshold: Optional[int] = None
     severity_high_threshold: Optional[int] = None
     severity_medium_threshold: Optional[int] = None
     severity_low_threshold: Optional[int] = None
@@ -37,6 +38,7 @@ _THRESHOLD_KEYS = [
     "inactivity_threshold_low",
     "inactivity_threshold_medium",
     "inactivity_threshold_high",
+    "severity_critical_threshold",
     "severity_high_threshold",
     "severity_medium_threshold",
     "severity_low_threshold",
@@ -92,6 +94,7 @@ def get_settings(db: Session = Depends(get_db)):
     inact_low    = _get_threshold(db, "inactivity_threshold_low",    app_settings.inactivity_threshold_low)
     inact_medium = _get_threshold(db, "inactivity_threshold_medium", app_settings.inactivity_threshold_medium)
     inact_high   = _get_threshold(db, "inactivity_threshold_high",   app_settings.inactivity_threshold_high)
+    sev_critical = _get_threshold(db, "severity_critical_threshold", app_settings.severity_critical_threshold)
     sev_high     = _get_threshold(db, "severity_high_threshold",     app_settings.severity_high_threshold)
     sev_medium   = _get_threshold(db, "severity_medium_threshold",   app_settings.severity_medium_threshold)
     sev_low      = _get_threshold(db, "severity_low_threshold",      app_settings.severity_low_threshold)
@@ -117,9 +120,10 @@ def get_settings(db: Session = Depends(get_db)):
             "temp_keyword":   app_settings.risk_temp_keyword,
         },
         "severity_thresholds": {
-            "high":   sev_high,
-            "medium": sev_medium,
-            "low":    sev_low,
+            "critical": sev_critical,
+            "high":     sev_high,
+            "medium":   sev_medium,
+            "low":      sev_low,
         },
         "temp_keywords":    app_settings.temp_keywords,
         "risky_services":   app_settings.risky_services,

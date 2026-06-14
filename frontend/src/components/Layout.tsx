@@ -107,10 +107,15 @@ function CustomerSelector() {
 
   return (
     <div ref={ref} className="mx-2.5 mb-2 relative">
-      <button
+      <div
+        role="button"
+        tabIndex={0}
+        aria-haspopup="listbox"
+        aria-expanded={open}
         onClick={() => setOpen(o => !o)}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(o => !o) } }}
         className={clsx(
-          'w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition-all',
+          'w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition-all cursor-pointer',
           activeCustomer
             ? 'bg-blue-500/15 border border-blue-500/25 hover:bg-blue-500/20'
             : 'bg-white/5 border border-white/8 hover:bg-white/8'
@@ -145,7 +150,7 @@ function CustomerSelector() {
         {!activeCustomer && (
           <span className="sr-only">open</span>
         )}
-      </button>
+      </div>
 
       {/* Dropdown */}
       {open && (

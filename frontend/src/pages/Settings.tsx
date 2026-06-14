@@ -12,7 +12,7 @@ interface SettingsData {
   inactivity_threshold_medium: number
   inactivity_threshold_high: number
   risk_weights: Record<string, number>
-  severity_thresholds: { high: number; medium: number; low: number }
+  severity_thresholds: { critical: number; high: number; medium: number; low: number }
   temp_keywords: string[]
   risky_services: Array<{ name: string; protocol: string; port_start: number; port_end: number }>
   internal_networks: string[]
@@ -91,6 +91,7 @@ export function Settings() {
   const [threshLow,    setThreshLow]    = useState(0)
   const [threshMedium, setThreshMedium] = useState(0)
   const [threshHigh,   setThreshHigh]   = useState(0)
+  const [sevCritical,  setSevCritical]  = useState(0)
   const [sevHigh,      setSevHigh]      = useState(0)
   const [sevMedium,    setSevMedium]    = useState(0)
   const [sevLow,       setSevLow]       = useState(0)
@@ -110,6 +111,7 @@ export function Settings() {
         setThreshLow(data.inactivity_threshold_low)
         setThreshMedium(data.inactivity_threshold_medium)
         setThreshHigh(data.inactivity_threshold_high)
+        setSevCritical(data.severity_thresholds.critical)
         setSevHigh(data.severity_thresholds.high)
         setSevMedium(data.severity_thresholds.medium)
         setSevLow(data.severity_thresholds.low)
@@ -163,6 +165,7 @@ export function Settings() {
         inactivity_threshold_low:    threshLow,
         inactivity_threshold_medium: threshMedium,
         inactivity_threshold_high:   threshHigh,
+        severity_critical_threshold: sevCritical,
         severity_high_threshold:     sevHigh,
         severity_medium_threshold:   sevMedium,
         severity_low_threshold:      sevLow,
@@ -294,11 +297,12 @@ export function Settings() {
 
             <div className="card">
               <SectionTitle icon={AlertTriangle} title="Severity Score Thresholds" subtitle="Minimum risk score to trigger each severity level" />
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-4 gap-4">
                 {[
-                  { key: 'high',   label: 'High',   color: 'text-red-600',   bg: 'bg-red-50',   ring: 'ring-red-200' },
-                  { key: 'medium', label: 'Medium', color: 'text-amber-600', bg: 'bg-amber-50', ring: 'ring-amber-200' },
-                  { key: 'low',    label: 'Low',    color: 'text-blue-600',  bg: 'bg-blue-50',  ring: 'ring-blue-200' },
+                  { key: 'critical', label: 'Critical', color: 'text-red-700',   bg: 'bg-red-100',  ring: 'ring-red-300' },
+                  { key: 'high',     label: 'High',     color: 'text-red-600',   bg: 'bg-red-50',   ring: 'ring-red-200' },
+                  { key: 'medium',   label: 'Medium',   color: 'text-amber-600', bg: 'bg-amber-50', ring: 'ring-amber-200' },
+                  { key: 'low',      label: 'Low',      color: 'text-blue-600',  bg: 'bg-blue-50',  ring: 'ring-blue-200' },
                 ].map(({ key, label, color, bg, ring }) => (
                   <div key={key} className={`${bg} ring-1 ${ring} rounded-xl p-4 text-center`}>
                     <p className={`text-3xl font-extrabold ${color}`}>{settings.severity_thresholds[key as keyof typeof settings.severity_thresholds]}+</p>
@@ -366,8 +370,9 @@ export function Settings() {
               </div>
 
               <SectionTitle icon={AlertOctagon} title="Severity Score Thresholds" subtitle="Minimum risk score to assign a severity level" />
-              <div className="grid grid-cols-3 gap-4 mb-5">
+              <div className="grid grid-cols-4 gap-4 mb-5">
                 {[
+                  { label: 'Critical (min score)', val: sevCritical, set: setSevCritical, color: 'border-red-400 focus:ring-red-500' },
                   { label: 'High (min score)',   val: sevHigh,   set: setSevHigh,   color: 'border-red-300 focus:ring-red-400' },
                   { label: 'Medium (min score)', val: sevMedium, set: setSevMedium, color: 'border-amber-300 focus:ring-amber-400' },
                   { label: 'Low (min score)',    val: sevLow,    set: setSevLow,    color: 'border-blue-300 focus:ring-blue-400' },

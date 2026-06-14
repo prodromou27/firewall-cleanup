@@ -1,22 +1,25 @@
+import animate from 'tailwindcss-animate'
+
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: ['class'],
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
       colors: {
-        // Signature brand — deep indigo, used for primary actions & accents
+        // Signature brand — blue, used for primary actions & accents
         brand: {
-          50: '#eef2ff',
-          100: '#e0e7ff',
-          200: '#c7d2fe',
-          300: '#a5b4fc',
-          400: '#818cf8',
-          500: '#6366f1',
-          600: '#4f46e5',
-          700: '#4338ca',
-          800: '#3730a3',
-          900: '#312e81',
-          950: '#1e1b4b',
+          50: '#eff6ff',
+          100: '#dbeafe',
+          200: '#bfdbfe',
+          300: '#93c5fd',
+          400: '#60a5fa',
+          500: '#3b82f6',
+          600: '#2563eb',
+          700: '#1d4ed8',
+          800: '#1e40af',
+          900: '#1e3a8a',
+          950: '#172554',
         },
         // Ink — slate scale for text & dark surfaces (sidebar)
         ink: {
@@ -32,13 +35,67 @@ export default {
           900: '#0f172a',
           950: '#020617',
         },
-        // Accent — cyan, for highlights / data viz
-        accent: {
-          400: '#22d3ee',
-          500: '#06b6d4',
-          600: '#0891b2',
+        // Success — green, for healthy / pass / positive states & data viz
+        success: {
+          400: '#34d399',
+          500: '#10b981',
+          600: '#059669',
         },
         canvas: '#f4f5f9',
+
+        // ── shadcn/ui semantic tokens (mapped to CSS vars in index.css) ──
+        border: 'hsl(var(--border))',
+        input: 'hsl(var(--input))',
+        ring: 'hsl(var(--ring))',
+        background: 'hsl(var(--background))',
+        foreground: 'hsl(var(--foreground))',
+        primary: {
+          DEFAULT: 'hsl(var(--primary))',
+          foreground: 'hsl(var(--primary-foreground))',
+        },
+        secondary: {
+          DEFAULT: 'hsl(var(--secondary))',
+          foreground: 'hsl(var(--secondary-foreground))',
+        },
+        destructive: {
+          DEFAULT: 'hsl(var(--destructive))',
+          foreground: 'hsl(var(--destructive-foreground))',
+        },
+        muted: {
+          DEFAULT: 'hsl(var(--muted))',
+          foreground: 'hsl(var(--muted-foreground))',
+        },
+        accent: {
+          DEFAULT: 'hsl(var(--accent))',
+          foreground: 'hsl(var(--accent-foreground))',
+        },
+        popover: {
+          DEFAULT: 'hsl(var(--popover))',
+          foreground: 'hsl(var(--popover-foreground))',
+        },
+        card: {
+          DEFAULT: 'hsl(var(--card))',
+          foreground: 'hsl(var(--card-foreground))',
+        },
+      },
+      borderRadius: {
+        lg: 'var(--radius)',
+        md: 'calc(var(--radius) - 2px)',
+        sm: 'calc(var(--radius) - 4px)',
+      },
+      keyframes: {
+        'accordion-down': {
+          from: { height: '0' },
+          to: { height: 'var(--radix-accordion-content-height)' },
+        },
+        'accordion-up': {
+          from: { height: 'var(--radix-accordion-content-height)' },
+          to: { height: '0' },
+        },
+      },
+      animation: {
+        'accordion-down': 'accordion-down 0.2s ease-out',
+        'accordion-up': 'accordion-up 0.2s ease-out',
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
@@ -51,10 +108,10 @@ export default {
         soft: '0 2px 8px -2px rgba(15,23,42,0.08)',
       },
       backgroundImage: {
-        'brand-gradient': 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)',
+        'brand-gradient': 'linear-gradient(135deg, #2563eb 0%, #3b82f6 100%)',
         'header-fade': 'linear-gradient(180deg, #ffffff 0%, #fbfbfd 100%)',
       },
     },
   },
-  plugins: [],
+  plugins: [animate],
 }

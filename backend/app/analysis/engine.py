@@ -189,7 +189,7 @@ def run_analysis(policy_id: str, db: Session) -> str:
         nested_groups  = sum(
             1 for o in group_objects
             if any(
-                any("group" in (obj_map.get(m, {}).get("object_type", "")) for m in o.get("members", []))
+                "group" in (obj_map.get(m, {}).get("object_type", "")) for m in o.get("members", [])
             )
         )
 

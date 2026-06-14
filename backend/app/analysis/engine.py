@@ -133,6 +133,9 @@ def run_analysis(policy_id: str, db: Session) -> str:
         # 20. Service objects with large port ranges
         findings.extend(_analyze_service_ranges(objects))
 
+        # 21. Import quality summary (parse completeness, hit-data availability)
+        findings.extend(_analyze_import_quality(rules, objects, policy))
+
         # Save findings
         finding_count = 0
         high_count = 0
@@ -140,6 +143,7 @@ def run_analysis(policy_id: str, db: Session) -> str:
             finding_orm = Finding(
                 id=str(uuid.uuid4()),
                 policy_id=policy_id,
+                analysis_run_id=run.id,
                 vendor=policy.vendor,
                 finding_type=f["finding_type"],
                 severity=f.get("severity", "Informational"),
@@ -1197,3 +1201,90 @@ def _analyze_service_ranges(objects: List[dict]) -> List[dict]:
                 "recommendation": _RL.get("service_range"),
             })
     return findings
+
+
+def _analyze_import_quality(
+    rules: List[dict], objects: List[dict], policy
+) -> List[dict]:
+    """Produce a single informational finding summarising parse completeness.
+
+    This explains why some findings (zero-hit, NAT, etc.) may be unavailable or
+    reported with reduced confidence, per spec 4.7 / 4.14. It is purely a
+    review aid and contains no remediation action.
+    """
+    total_rules = len(rules)
+    total_objects = len(objects)
+    service_objs = sum(1 for o in objects if o.get("object_type") in ("service", "service-group"))
+    group_objs = sum(1 for o in objects if "group" in (o.get("object_type") or ""))
+    nat_rules = sum(1 for r in rules if r.get("nat_enabled"))
+
+    rules_with_hits = sum(1 for r in rules if r.get("hit_count") is not None)
+    rules_with_last_hit = sum(1 for r in rules if r.get("last_hit"))
+    hit_data_available = rules_with_hits > 0
+    last_hit_available = rules_with_last_hit > 0
+
+    notes = []
+    confidence_impact = []
+    if not hit_data_available:
+        notes.append(
+            "No hit-count data was found in the imported configuration. "
+            "Zero-hit and low-usage findings cannot be generated for this policy."
+        )
+        confidence_impact.append("Usage-based findings unavailable (no hit counts).")
+    elif rules_with_hits < total_rules:
+        notes.append(
+            f"Hit-count data is available for {rules_with_hits} of {total_rules} rules. "
+            "Usage findings are limited to rules with recorded hit data."
+        )
+        confidence_impact.append("Partial hit-count coverage reduces usage-finding completeness.")
+    if not last_hit_available:
+        notes.append(
+            "No last-hit timestamps were found, so time-based inactivity findings "
+            "(90/180/365 days) cannot be generated."
+        )
+    if nat_rules == 0:
+        notes.append(
+            "No NAT data was detected. NAT-specific findings are not generated for this policy."
+        )
+
+    description = (
+        f"Parsed {total_rules} rule(s), {total_objects} object(s) "
+        f"({service_objs} service object(s), {group_objs} group(s)), and "
+        f"{nat_rules} NAT-enabled rule(s) from this {policy.vendor or 'firewall'} "
+        "configuration. "
+    )
+    if notes:
+        description += "Import notes: " + " ".join(notes)
+    else:
+        description += (
+            "Hit-count, last-hit, NAT, and object data were all available, so the full "
+            "set of findings could be generated at standard confidence."
+        )
+
+    return [{
+        "finding_type": "import_quality",
+        "severity": "Informational",
+        "confidence": "High",
+        "title": "Import quality and data availability summary",
+        "description": description,
+        "affected_rules": [],
+        "affected_objects": [],
+        "evidence": {
+            "rules_parsed": total_rules,
+            "objects_parsed": total_objects,
+            "service_objects_parsed": service_objs,
+            "groups_parsed": group_objs,
+            "nat_rules_parsed": nat_rules,
+            "hit_count_available": hit_data_available,
+            "rules_with_hit_count": rules_with_hits,
+            "last_hit_available": last_hit_available,
+            "rules_with_last_hit": rules_with_last_hit,
+            "confidence_impact": confidence_impact or ["None — full data available."],
+        },
+        "recommendation": (
+            "Review the import quality summary to understand which findings are "
+            "available for this policy. Where hit-count, last-hit, or NAT data is "
+            "missing, consider exporting the configuration with usage statistics "
+            "included so a more complete review can be performed."
+        ),
+    }]

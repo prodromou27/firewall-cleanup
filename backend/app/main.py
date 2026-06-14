@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from app.config import settings
 from app.database import engine, Base
 from app.api import upload, policies, findings, objects, reports, settings as settings_api
-from app.api import customers, devices, revisions, compliance, auth as auth_api
+from app.api import customers, devices, revisions, compliance, auth as auth_api, users as users_api
 from app.security.auth import require_api_key
 import app.models  # ensure models are registered
 
@@ -355,6 +355,7 @@ async def api_key_middleware(request: Request, call_next):
 # ── Routers ───────────────────────────────────────────────────────────────────
 
 app.include_router(auth_api.router)
+app.include_router(users_api.router)
 app.include_router(customers.router)
 app.include_router(devices.router)
 app.include_router(revisions.router)

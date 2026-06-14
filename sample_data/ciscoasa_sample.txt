@@ -1,0 +1,31 @@
+: Saved
+ASA Version 9.8(2)
+hostname edge-asa
+names
+name 10.10.10.5 MAIL-SERVER
+!
+object network WEB-SERVER
+ host 192.168.1.10
+object network DMZ-NET
+ subnet 192.168.2.0 255.255.255.0
+object service HTTPS-ALT
+ service tcp destination eq 8443
+!
+object-group network WEB-FARM
+ network-object host 192.168.1.10
+ network-object 192.168.2.0 255.255.255.0
+ group-object DMZ-GROUP
+object-group service WEB-PORTS tcp
+ port-object eq www
+ port-object eq https
+ port-object range 8000 8100
+!
+access-list OUTSIDE_IN remark Allow inbound web to DMZ
+access-list OUTSIDE_IN extended permit tcp any object WEB-SERVER eq https
+access-list OUTSIDE_IN extended permit tcp any 192.168.2.0 255.255.255.0 object-group WEB-PORTS
+access-list OUTSIDE_IN extended deny ip any any log
+access-list INSIDE_OUT extended permit ip object-group WEB-FARM any
+access-list INSIDE_OUT extended permit udp host 10.10.10.5 any eq domain inactive
+!
+access-group OUTSIDE_IN in interface outside
+access-group INSIDE_OUT in interface inside

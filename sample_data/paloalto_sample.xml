@@ -1,0 +1,82 @@
+<config version="10.1.0">
+  <devices>
+    <entry name="localhost.localdomain">
+      <vsys>
+        <entry name="vsys1">
+          <address>
+            <entry name="web-server">
+              <ip-netmask>192.168.1.10/32</ip-netmask>
+              <description>Public web server</description>
+            </entry>
+            <entry name="dmz-net">
+              <ip-netmask>192.168.2.0/24</ip-netmask>
+            </entry>
+            <entry name="partner-range">
+              <ip-range>203.0.113.10-203.0.113.20</ip-range>
+            </entry>
+          </address>
+          <address-group>
+            <entry name="web-farm">
+              <static>
+                <member>web-server</member>
+                <member>dmz-net</member>
+              </static>
+            </entry>
+          </address-group>
+          <service>
+            <entry name="tcp-8443">
+              <protocol><tcp><port>8443</port></tcp></protocol>
+            </entry>
+          </service>
+          <service-group>
+            <entry name="web-svc-group">
+              <members>
+                <member>tcp-8443</member>
+                <member>service-https</member>
+              </members>
+            </entry>
+          </service-group>
+          <rulebase>
+            <security>
+              <rules>
+                <entry name="allow-web-inbound" uuid="11111111-aaaa">
+                  <from><member>untrust</member></from>
+                  <to><member>dmz</member></to>
+                  <source><member>any</member></source>
+                  <destination><member>web-server</member></destination>
+                  <service><member>service-https</member></service>
+                  <application><member>web-browsing</member><member>ssl</member></application>
+                  <action>allow</action>
+                  <log-end>yes</log-end>
+                  <description>Inbound HTTPS to web server</description>
+                  <tag><member>production</member></tag>
+                </entry>
+                <entry name="deny-all">
+                  <from><member>any</member></from>
+                  <to><member>any</member></to>
+                  <source><member>any</member></source>
+                  <destination><member>any</member></destination>
+                  <service><member>any</member></service>
+                  <application><member>any</member></application>
+                  <action>deny</action>
+                  <disabled>no</disabled>
+                </entry>
+                <entry name="legacy-temp-rule">
+                  <from><member>trust</member></from>
+                  <to><member>untrust</member></to>
+                  <source><member>web-farm</member></source>
+                  <destination><member>any</member></destination>
+                  <service><member>any</member></service>
+                  <application><member>any</member></application>
+                  <action>allow</action>
+                  <disabled>yes</disabled>
+                  <description>temp rule - remove after migration</description>
+                </entry>
+              </rules>
+            </security>
+          </rulebase>
+        </entry>
+      </vsys>
+    </entry>
+  </devices>
+</config>

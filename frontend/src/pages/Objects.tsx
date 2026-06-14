@@ -1,7 +1,15 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useSearchParams, useParams } from 'react-router-dom'
 import { useCustomer } from '../contexts/CustomerContext'
-import { Package, Search } from 'lucide-react'
+import { Package, Search, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react'
+import {
+  useReactTable,
+  getCoreRowModel,
+  getSortedRowModel,
+  flexRender,
+  createColumnHelper,
+  type SortingState,
+} from '@tanstack/react-table'
 import { getObjects, getPolicies } from '../api/client'
 import type { FirewallObject, Policy } from '../types'
 import { clsx } from 'clsx'
@@ -30,6 +38,36 @@ function ObjectTypeChip({ type }: { type: string }) {
   )
 }
 
+function StatusBadges({ obj }: { obj: FirewallObject }) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      {obj.is_unused && (
+        <span className="text-xs font-semibold text-orange-700 bg-orange-100 px-2 py-0.5 rounded">Unused</span>
+      )}
+      {obj.is_duplicate && (
+        <span className="text-xs font-semibold text-purple-700 bg-purple-100 px-2 py-0.5 rounded">Duplicate</span>
+      )}
+      {obj.is_empty_group && (
+        <span className="text-xs font-semibold text-red-700 bg-red-100 px-2 py-0.5 rounded">Empty</span>
+      )}
+      {obj.is_large_group && (
+        <span className="text-xs font-semibold text-blue-700 bg-blue-100 px-2 py-0.5 rounded">Large</span>
+      )}
+      {!obj.is_unused && !obj.is_duplicate && !obj.is_empty_group && !obj.is_large_group && (
+        <span className="text-xs text-gray-400">In use</span>
+      )}
+    </div>
+  )
+}
+
+function valueText(obj: FirewallObject): string {
+  return obj.value || (obj.object_type.includes('service') && obj.protocol
+    ? `${obj.protocol}/${obj.port_start}-${obj.port_end}`
+    : '')
+}
+
+const col = createColumnHelper<FirewallObject>()
+
 export function Objects() {
   const [searchParams, setSearchParams] = useSearchParams()
   const params = useParams<{ customerId?: string }>()
@@ -41,6 +79,7 @@ export function Objects() {
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [policies, setPolicies] = useState<Policy[]>([])
+  const [sorting, setSorting] = useState<SortingState>([])
 
   const policyId = searchParams.get('policy_id') || ''
   const objectType = searchParams.get('object_type') || ''
@@ -76,7 +115,55 @@ export function Objects() {
     setPage(1)
   }
 
-  const displayed = objects
+  const columns = useMemo(() => [
+    col.accessor('object_name', {
+      header: 'Name',
+      cell: info => <span className="font-medium text-gray-900 text-sm">{info.getValue()}</span>,
+    }),
+    col.accessor('object_type', {
+      header: 'Type',
+      cell: info => <ObjectTypeChip type={info.getValue()} />,
+    }),
+    col.accessor(row => valueText(row), {
+      id: 'value',
+      header: 'Value / Details',
+      cell: info => (
+        <span className="text-gray-600 text-xs font-mono">{info.getValue() || '—'}</span>
+      ),
+    }),
+    col.accessor(row => (row.members ? row.members.length : 0), {
+      id: 'members',
+      header: 'Members',
+      cell: info => {
+        const obj = info.row.original
+        return obj.members && obj.members.length > 0
+          ? <span className="text-gray-500 text-xs" title={obj.members.join(', ')}>{obj.members.length} members</span>
+          : <span className="text-gray-500 text-xs">—</span>
+      },
+    }),
+    col.accessor(row => row.comment || '', {
+      id: 'comment',
+      header: 'Comment',
+      cell: info => (
+        <span className="text-gray-400 text-xs max-w-[200px] truncate block">{info.getValue() || '—'}</span>
+      ),
+    }),
+    col.display({
+      id: 'status',
+      header: 'Status',
+      cell: info => <StatusBadges obj={info.row.original} />,
+    }),
+  ], [])
+
+  const table = useReactTable({
+    data: objects,
+    columns,
+    state: { sorting },
+    onSortingChange: setSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+  })
+
   const pageCount = Math.ceil(total / 100)
 
   return (
@@ -133,7 +220,7 @@ export function Objects() {
 
       {loading ? (
         <div className="flex justify-center py-16"><div className="animate-spin w-8 h-8 border-b-2 border-blue-600 rounded-full" /></div>
-      ) : displayed.length === 0 ? (
+      ) : objects.length === 0 ? (
         <div className="card text-center py-12">
           <Package className="w-10 h-10 text-gray-300 mx-auto mb-3" />
           <p className="text-gray-500">No objects match the current filters.</p>
@@ -142,47 +229,40 @@ export function Objects() {
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
           <table className="data-table">
             <thead>
-              <tr>
-                {['Name', 'Type', 'Value / Details', 'Members', 'Comment', 'Status'].map(h => (
-                  <th key={h}>{h}</th>
-                ))}
-              </tr>
+              {table.getHeaderGroups().map(hg => (
+                <tr key={hg.id}>
+                  {hg.headers.map(header => {
+                    const canSort = header.column.getCanSort()
+                    const sorted = header.column.getIsSorted()
+                    return (
+                      <th
+                        key={header.id}
+                        onClick={canSort ? header.column.getToggleSortingHandler() : undefined}
+                        className={clsx(canSort && 'cursor-pointer select-none hover:text-blue-600')}
+                        title={canSort ? 'Sort' : undefined}
+                      >
+                        <span className="flex items-center gap-1">
+                          {flexRender(header.column.columnDef.header, header.getContext())}
+                          {canSort && (
+                            sorted === 'asc' ? <ArrowUp className="w-3 h-3" />
+                              : sorted === 'desc' ? <ArrowDown className="w-3 h-3" />
+                              : <ArrowUpDown className="w-3 h-3 opacity-30" />
+                          )}
+                        </span>
+                      </th>
+                    )
+                  })}
+                </tr>
+              ))}
             </thead>
             <tbody>
-              {displayed.map(obj => (
-                <tr key={obj.id} className={clsx('hover:bg-gray-50', obj.is_unused && 'bg-orange-50')}>
-                  <td className="px-4 py-2.5 font-medium text-gray-900 text-sm">{obj.object_name}</td>
-                  <td className="px-4 py-2.5"><ObjectTypeChip type={obj.object_type} /></td>
-                  <td className="px-4 py-2.5 text-gray-600 text-xs font-mono">
-                    {obj.value || (obj.object_type.includes('service') && obj.protocol
-                      ? `${obj.protocol}/${obj.port_start}-${obj.port_end}`
-                      : '—')}
-                  </td>
-                  <td className="px-4 py-2.5 text-gray-500 text-xs">
-                    {obj.members && obj.members.length > 0
-                      ? <span title={obj.members.join(', ')}>{obj.members.length} members</span>
-                      : '—'}
-                  </td>
-                  <td className="px-4 py-2.5 text-gray-400 text-xs max-w-[200px] truncate">{obj.comment || '—'}</td>
-                  <td className="px-4 py-2.5">
-                    <div className="flex flex-wrap gap-1">
-                      {obj.is_unused && (
-                        <span className="text-xs font-semibold text-orange-700 bg-orange-100 px-2 py-0.5 rounded">Unused</span>
-                      )}
-                      {obj.is_duplicate && (
-                        <span className="text-xs font-semibold text-purple-700 bg-purple-100 px-2 py-0.5 rounded">Duplicate</span>
-                      )}
-                      {obj.is_empty_group && (
-                        <span className="text-xs font-semibold text-red-700 bg-red-100 px-2 py-0.5 rounded">Empty</span>
-                      )}
-                      {obj.is_large_group && (
-                        <span className="text-xs font-semibold text-blue-700 bg-blue-100 px-2 py-0.5 rounded">Large</span>
-                      )}
-                      {!obj.is_unused && !obj.is_duplicate && !obj.is_empty_group && !obj.is_large_group && (
-                        <span className="text-xs text-gray-400">In use</span>
-                      )}
-                    </div>
-                  </td>
+              {table.getRowModel().rows.map(row => (
+                <tr key={row.id} className={clsx('hover:bg-gray-50', row.original.is_unused && 'bg-orange-50')}>
+                  {row.getVisibleCells().map(cell => (
+                    <td key={cell.id} className="px-4 py-2.5">
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </td>
+                  ))}
                 </tr>
               ))}
             </tbody>
@@ -190,7 +270,10 @@ export function Objects() {
 
           {pageCount > 1 && (
             <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 text-sm">
-              <span className="text-gray-500">Page {page} of {pageCount} ({total} objects)</span>
+              <span className="text-gray-500">
+                Page {page} of {pageCount} ({total} objects)
+                <span className="text-gray-400 ml-2">· sorting applies to this page</span>
+              </span>
               <div className="flex gap-2">
                 <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="btn-secondary py-1 px-3">Prev</button>
                 <button onClick={() => setPage(p => Math.min(pageCount, p + 1))} disabled={page === pageCount} className="btn-secondary py-1 px-3">Next</button>

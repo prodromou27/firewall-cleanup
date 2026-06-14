@@ -10,10 +10,11 @@ export function SeverityBadge({ severity, size = 'md' }: Props) {
     'inline-flex items-center font-semibold rounded',
     size === 'sm' ? 'text-xs px-2 py-0.5' : 'text-sm px-2.5 py-0.5',
     {
+      'bg-red-600 text-white ring-1 ring-red-700': severity === 'Critical',
       'bg-red-100 text-red-800': severity === 'High',
-      'bg-yellow-100 text-yellow-800': severity === 'Medium',
-      'bg-blue-100 text-blue-800': severity === 'Low',
-      'bg-gray-100 text-gray-700': severity === 'Informational',
+      'bg-amber-100 text-amber-800': severity === 'Medium',
+      'bg-sky-100 text-sky-800': severity === 'Low',
+      'bg-slate-100 text-slate-600': severity === 'Informational',
     }
   )
   return <span className={cls}>{severity}</span>

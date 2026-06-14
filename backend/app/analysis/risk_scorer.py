@@ -93,7 +93,9 @@ def score_rule(rule: dict, obj_map: Dict[str, dict]) -> Tuple[int, Dict[str, int
 
 
 def score_to_severity(score: int) -> str:
-    if score >= settings.severity_high_threshold:
+    if score >= settings.severity_critical_threshold:
+        return "Critical"
+    elif score >= settings.severity_high_threshold:
         return "High"
     elif score >= settings.severity_medium_threshold:
         return "Medium"

@@ -332,5 +332,5 @@ def _refresh_customer_counters(customer_id: str, db):
     c.total_findings = db.query(func.count(Finding.id)).filter(
         Finding.policy_id.in_(pids)).scalar() if pids else 0
     c.high_findings = db.query(func.count(Finding.id)).filter(
-        Finding.policy_id.in_(pids), Finding.severity == "High").scalar() if pids else 0
+        Finding.policy_id.in_(pids), Finding.severity.in_(["High", "Critical"])).scalar() if pids else 0
     db.commit()

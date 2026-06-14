@@ -159,7 +159,7 @@ def run_analysis(policy_id: str, db: Session) -> str:
             )
             db.add(finding_orm)
             finding_count += 1
-            if f.get("severity") == "High":
+            if f.get("severity") in ("High", "Critical"):
                 high_count += 1
 
         policy.finding_count = finding_count
@@ -240,7 +240,7 @@ def run_analysis(policy_id: str, db: Session) -> str:
         readiness_score = int(100 * rules_with_hits / max(1, total_rules))
 
         # ── Health score: inverse risk proxy ─────────────────────────────────
-        sev_weights = {"High": 10, "Medium": 5, "Low": 2, "Informational": 0}
+        sev_weights = {"Critical": 18, "High": 10, "Medium": 5, "Low": 2, "Informational": 0}
         total_sev = sum(sev_weights.get(f.get("severity", "Informational"), 0) for f in findings)
         health_score = max(0, 100 - min(100, total_sev))
 
@@ -434,12 +434,35 @@ def _analyze_permissive(rules: List[dict], obj_map: dict) -> List[dict]:
             issues.append("any service")
 
         if issues:
+            # Severity reflects how much access the rule actually grants:
+            #  - Any source AND Any destination AND Any service = allow-everything → Critical
+            #  - Any source AND Any destination (any-to-any) → Critical
+            #  - Any source/dest combined with Any service → High
+            #  - Any source OR Any destination alone → High
+            #  - Any service only (with specific src/dst) → Medium
             if any_src and any_dst:
+                severity = "Critical"
+            elif (any_src or any_dst) and any_svc:
                 severity = "High"
             elif any_src or any_dst:
                 severity = "High"
             else:
                 severity = "Medium"
+
+            sev_phrase = {
+                "Critical": (
+                    "This is effectively an any-to-any allow rule, which grants the "
+                    "broadest possible access and represents a significant security risk."
+                ),
+                "High": (
+                    "Overly broad rules significantly increase the attack surface and "
+                    "make the policy harder to audit and maintain."
+                ),
+                "Medium": (
+                    "Overly broad services increase the attack surface and should be "
+                    "restricted to the minimum required ports."
+                ),
+            }[severity]
 
             findings.append({
                 "finding_type": "overly_permissive",
@@ -447,9 +470,7 @@ def _analyze_permissive(rules: List[dict], obj_map: dict) -> List[dict]:
                 "confidence": "High",
                 "title": f"Rule {rule_id} is overly permissive ({', '.join(issues)})",
                 "description": (
-                    f"{rule_name} uses {', '.join(issues)}. "
-                    "Overly broad rules increase the attack surface and make the policy "
-                    "harder to audit and maintain."
+                    f"{rule_name} uses {', '.join(issues)}. " + sev_phrase
                 ),
                 "affected_rules": [rule.get("id")],
                 "evidence": {
@@ -485,15 +506,25 @@ def _analyze_risky_services(rules: List[dict], obj_map: dict) -> List[dict]:
         rule_id = rule.get("rule_id") or rule.get("rule_number", "?")
         rule_name = rule.get("rule_name") or f"Rule {rule_id}"
 
+        # Broadly exposed risky service (any source or any destination) is High;
+        # a risky service from/to a restricted scope is Medium.
+        broadly_exposed = has_any_source(rule, obj_map) or has_any_destination(rule, obj_map)
+        severity = "High" if broadly_exposed else "Medium"
+        exposure_note = (
+            " This rule exposes the risky service broadly (any source or any "
+            "destination), which substantially increases the risk."
+            if broadly_exposed else ""
+        )
+
         findings.append({
             "finding_type": "risky_service",
-            "severity": "Medium",
+            "severity": severity,
             "confidence": "High",
             "title": f"Rule {rule_id} uses risky service(s): {', '.join(risky.keys())}",
             "description": (
                 f"{rule_name} allows traffic on services considered risky: "
                 f"{', '.join(risky.keys())}. These services may expose sensitive "
-                "systems to attack if access is not properly restricted."
+                "systems to attack if access is not properly restricted." + exposure_note
             ),
             "affected_rules": [rule.get("id")],
             "evidence": {
@@ -877,7 +908,7 @@ def _analyze_vpn_rules(rules: List[dict], obj_map: dict) -> List[dict]:
 
         findings.append({
             "finding_type": "vpn_access",
-            "severity": "High",
+            "severity": "Critical" if (any_src and any_dst) else "High",
             "confidence": "High",
             "title": f"Rule {rule_id} grants broad VPN access ({', '.join(broad)})",
             "description": (

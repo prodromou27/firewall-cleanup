@@ -53,11 +53,11 @@ function NavItem({ to, label, icon: Icon, active, muted }: NavItemProps) {
       )}
     >
       {active && (
-        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-blue-400 rounded-r" />
+        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-brand-400 rounded-r" />
       )}
       <span className={clsx(
         'flex-shrink-0 w-5 h-5 flex items-center justify-center rounded transition-colors',
-        active ? 'text-blue-400' : muted ? 'text-slate-600 group-hover:text-slate-400' : 'text-slate-500 group-hover:text-slate-300'
+        active ? 'text-brand-400' : muted ? 'text-slate-600 group-hover:text-slate-400' : 'text-slate-500 group-hover:text-slate-300'
       )}>
         <Icon className="w-3.5 h-3.5" />
       </span>
@@ -209,7 +209,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen bg-[#f5f5f5] overflow-hidden">
+    <div className="flex h-screen bg-canvas overflow-hidden">
 
       {/* ── Sidebar ───────────────────────────────────────────── */}
       <aside

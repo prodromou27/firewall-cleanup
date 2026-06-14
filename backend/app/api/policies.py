@@ -56,6 +56,7 @@ def _policy_risk_score(p: FirewallPolicy, db: Session,
         )
         _sev_map = {s: c for s, c in sev_counts}
     finding_score = min(50, (
+        (_sev_map.get("Critical", 0) * 8) +
         (_sev_map.get("High", 0) * 5) +
         (_sev_map.get("Medium", 0) * 2) +
         (_sev_map.get("Low", 0) * 0.5)
@@ -152,7 +153,7 @@ def get_dashboard_stats(
     ).scalar()
     total_findings = _finding_filter(db.query(func.count(Finding.id))).scalar()
     high_findings = _finding_filter(
-        db.query(func.count(Finding.id)).filter(Finding.severity == "High")
+        db.query(func.count(Finding.id)).filter(Finding.severity.in_(["High", "Critical"]))
     ).scalar()
 
     findings_by_type = (
@@ -208,6 +209,7 @@ def get_dashboard_stats(
             return 0
         sev_map = _bulk_sev.get(p.id, {})
         finding_score = min(50, (
+            (sev_map.get("Critical", 0) * 8) +
             (sev_map.get("High", 0) * 5) +
             (sev_map.get("Medium", 0) * 2) +
             (sev_map.get("Low", 0) * 0.5)
@@ -344,6 +346,7 @@ def get_policy_risk_score(
         "policy_id": policy_id,
         "risk_score": _policy_risk_score(p, db, _rules=rules, _sev_map=sev_map),
         "breakdown": {
+            "critical_findings": sev_map.get("Critical", 0),
             "high_findings": sev_map.get("High", 0),
             "medium_findings": sev_map.get("Medium", 0),
             "low_findings": sev_map.get("Low", 0),
@@ -875,7 +878,7 @@ def _refresh_customer_counters(customer_id: str, db):
     c.total_findings = db.query(func.count(Finding.id)).filter(
         Finding.policy_id.in_(pids)).scalar() if pids else 0
     c.high_findings = db.query(func.count(Finding.id)).filter(
-        Finding.policy_id.in_(pids), Finding.severity == "High").scalar() if pids else 0
+        Finding.policy_id.in_(pids), Finding.severity.in_(["High", "Critical"])).scalar() if pids else 0
     db.commit()
 
 

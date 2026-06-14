@@ -78,10 +78,11 @@ function CleanupRow({ icon: Icon, label, count, max, to }: {
 /* ── Severity block ──────────────────────────────────────── */
 function SevBlock({ severity, count, to }: { severity: string; count: number; to: string }) {
   const cfg: Record<string, string> = {
+    Critical: 'bg-red-600 border-red-700 text-white',
     High: 'bg-red-50 border-red-100 text-red-700',
     Medium: 'bg-amber-50 border-amber-100 text-amber-700',
-    Low: 'bg-blue-50 border-blue-100 text-blue-700',
-    Informational: 'bg-gray-50 border-gray-200 text-gray-500',
+    Low: 'bg-sky-50 border-sky-100 text-sky-700',
+    Informational: 'bg-slate-50 border-slate-200 text-slate-500',
   }
   return (
     <Link to={to} className={`flex flex-col items-center justify-center rounded-xl border py-3 hover:shadow-sm transition-all ${cfg[severity] || cfg.Informational}`}>
@@ -311,7 +312,7 @@ export function Dashboard() {
               <Link to={`/findings${filterBase}`} className="text-xs text-blue-600 hover:text-blue-800 font-medium">View all</Link>
             </div>
             <div className="grid grid-cols-2 gap-2 mb-4">
-              {['High','Medium','Low','Informational'].map(sev => (
+              {['Critical','High','Medium','Low','Informational'].map(sev => (
                 <SevBlock key={sev} severity={sev} count={sevMap[sev] || 0}
                   to={findingsLink(`severity=${sev}`)} />
               ))}

@@ -180,6 +180,7 @@ def customer_stats(customer_id: str, db: Session = Depends(get_db)):
         "enabled_rules": enabled_rules,
         "disabled_rules": disabled_rules,
         "total_findings": total_findings,
+        "critical_findings": sev_map.get("Critical", 0),
         "high_findings": sev_map.get("High", 0),
         "medium_findings": sev_map.get("Medium", 0),
         "low_findings": sev_map.get("Low", 0),

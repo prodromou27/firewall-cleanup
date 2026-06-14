@@ -1173,7 +1173,7 @@ def sync_device(device: FirewallDevice, db: Session) -> dict:
         finding_count = db.query(Finding).filter(Finding.policy_id == policy_id).count()
         high_count    = db.query(Finding).filter(
             Finding.policy_id == policy_id,
-            Finding.severity == "High",
+            Finding.severity.in_(["High", "Critical"]),
         ).count()
         _save_revision(policy_id, device.id, parsed, finding_count, high_count, db)
 
@@ -1306,7 +1306,7 @@ def sync_device(device: FirewallDevice, db: Session) -> dict:
                 top_findings = [
                     {"type": f.finding_type, "title": f.title, "severity": f.severity}
                     for f in db.query(Finding)
-                    .filter(Finding.policy_id == policy_id, Finding.severity == "High")
+                    .filter(Finding.policy_id == policy_id, Finding.severity.in_(["High", "Critical"]))
                     .limit(5)
                     .all()
                 ]

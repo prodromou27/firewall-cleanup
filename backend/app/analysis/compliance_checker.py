@@ -69,7 +69,7 @@ def _count_by_type(findings: list, *types: str) -> int:
     return len(_findings_by_type(findings, *types))
 
 def _high_findings(findings: list) -> list:
-    return [f for f in findings if f.severity == "High"]
+    return [f for f in findings if f.severity in ("High", "Critical")]
 
 def _last_rule(rules: list) -> Optional[FirewallRule]:
     """Return the last enabled rule (should be a deny-all)."""

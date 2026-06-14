@@ -7,35 +7,37 @@
     --sidebar-width: 220px;
   }
   body {
-    @apply bg-[#f5f5f5] text-gray-900 antialiased;
-    font-feature-settings: "rlig" 1, "calt" 1;
+    @apply bg-canvas text-ink-900 antialiased font-sans;
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1, "cv05" 1;
   }
   h1, h2, h3, h4 {
-    @apply font-semibold tracking-tight;
+    @apply font-display font-semibold tracking-tight text-ink-900;
   }
-  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar { width: 7px; height: 7px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { @apply bg-gray-300 rounded-full; }
-  ::-webkit-scrollbar-thumb:hover { @apply bg-gray-400; }
+  ::-webkit-scrollbar-thumb { @apply bg-ink-200 rounded-full; }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-ink-300; }
+  ::selection { @apply bg-brand-600/15 text-brand-900; }
 }
 
 @layer components {
 
   /* ── Buttons ───────────────────────────────────────────────── */
   .btn-primary {
-    @apply inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800
-      text-white text-sm font-medium px-3.5 py-2 rounded-lg
+    @apply inline-flex items-center gap-1.5 bg-brand-600 hover:bg-brand-700
+      text-white text-sm font-semibold px-3.5 py-2 rounded-lg shadow-sm
+      shadow-brand-600/20 ring-1 ring-inset ring-white/10
       transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed
       active:scale-[0.98] select-none;
   }
   .btn-secondary {
-    @apply inline-flex items-center gap-1.5 bg-white hover:bg-gray-50
-      text-gray-700 hover:text-gray-900 text-sm font-medium px-3.5 py-2 rounded-lg
-      border border-gray-200 transition-all duration-150 active:scale-[0.98] select-none;
+    @apply inline-flex items-center gap-1.5 bg-white hover:bg-ink-50
+      text-ink-700 hover:text-ink-900 text-sm font-medium px-3.5 py-2 rounded-lg
+      border border-ink-200 shadow-card transition-all duration-150 active:scale-[0.98] select-none;
   }
   .btn-ghost {
-    @apply inline-flex items-center gap-1.5 text-gray-500 hover:text-gray-900
-      hover:bg-gray-100 text-sm font-medium px-3 py-1.5 rounded-lg
+    @apply inline-flex items-center gap-1.5 text-ink-500 hover:text-ink-900
+      hover:bg-ink-100 text-sm font-medium px-3 py-1.5 rounded-lg
       transition-all duration-150 select-none;
   }
   .btn-danger {
@@ -49,29 +51,32 @@
 
   /* ── Cards ─────────────────────────────────────────────────── */
   .card {
-    @apply bg-white rounded-xl border border-gray-200 p-5;
+    @apply bg-white rounded-xl border border-ink-200/70 shadow-card p-5;
   }
   .card-sm {
-    @apply bg-white rounded-lg border border-gray-200 p-4;
+    @apply bg-white rounded-lg border border-ink-200/70 shadow-card p-4;
   }
   .card-inset {
-    @apply bg-gray-50 rounded-lg border border-gray-200 p-4;
+    @apply bg-ink-50 rounded-lg border border-ink-200/70 p-4;
   }
   .card-hover {
-    @apply card cursor-pointer hover:border-gray-300 hover:shadow-sm
-      transition-all duration-150;
+    @apply card cursor-pointer hover:border-brand-300 hover:shadow-card-hover
+      hover:-translate-y-0.5 transition-all duration-200;
   }
 
   /* ── Page structure ─────────────────────────────────────────── */
   .page-header {
-    @apply bg-white border-b border-gray-200 px-7 py-4 flex items-center
-      justify-between sticky top-0 z-10;
+    @apply bg-header-fade border-b border-ink-200/70 px-7 py-4 flex items-center
+      justify-between sticky top-0 z-10 backdrop-blur-sm;
   }
   .page-title {
-    @apply text-[17px] font-semibold text-gray-900 tracking-tight;
+    @apply font-display text-[19px] font-bold text-ink-900 tracking-tight;
   }
   .page-subtitle {
-    @apply text-sm text-gray-400 mt-0.5;
+    @apply text-sm text-ink-400 mt-0.5;
+  }
+  .page-eyebrow {
+    @apply text-[10px] font-bold text-brand-600 uppercase tracking-[0.18em] mb-1;
   }
   .page-body {
     @apply px-7 py-5;
@@ -79,13 +84,21 @@
 
   /* ── Stat cards ─────────────────────────────────────────────── */
   .stat-card {
-    @apply bg-white rounded-xl border border-gray-200 p-5 flex flex-col gap-1.5;
+    @apply relative bg-white rounded-xl border border-ink-200/70 shadow-card
+      p-5 flex flex-col gap-1.5 overflow-hidden
+      hover:shadow-card-hover transition-shadow duration-200;
   }
+  .stat-card::before {
+    content: "";
+    @apply absolute left-0 top-0 h-full w-[3px] bg-brand-gradient opacity-0
+      transition-opacity duration-200;
+  }
+  .stat-card:hover::before { @apply opacity-100; }
   .stat-value {
-    @apply text-2xl font-bold tracking-tight text-gray-900;
+    @apply font-display text-[26px] font-bold tracking-tight text-ink-900 tabular-nums;
   }
   .stat-label {
-    @apply text-[11px] font-semibold text-gray-400 uppercase tracking-wider;
+    @apply text-[11px] font-semibold text-ink-400 uppercase tracking-wider;
   }
 
   /* ── Tables ─────────────────────────────────────────────────── */
@@ -93,22 +106,25 @@
     @apply w-full text-sm;
   }
   .data-table thead {
-    @apply bg-gray-50 border-b border-gray-100;
+    @apply bg-ink-50/80 border-b border-ink-200/70;
   }
   .data-table thead th {
-    @apply px-4 py-2.5 text-left text-[11px] font-semibold text-gray-400
+    @apply px-4 py-2.5 text-left text-[11px] font-semibold text-ink-400
       uppercase tracking-wider;
   }
   .data-table tbody tr {
-    @apply border-b border-gray-50 hover:bg-gray-50/80 transition-colors duration-75;
+    @apply border-b border-ink-100 hover:bg-brand-50/40 transition-colors duration-75;
   }
   .data-table tbody td {
-    @apply px-4 py-3 text-sm text-gray-700;
+    @apply px-4 py-3 text-sm text-ink-700;
   }
 
   /* ── Severity badges ─────────────────────────────────────────── */
   .badge {
     @apply inline-flex items-center text-xs font-semibold px-2 py-0.5 rounded-md;
+  }
+  .badge-critical {
+    @apply badge bg-red-600 text-white ring-1 ring-red-700 shadow-sm shadow-red-600/30;
   }
   .badge-high {
     @apply badge bg-red-50 text-red-700 ring-1 ring-red-200/80;
@@ -132,12 +148,12 @@
   }
   .input-sm {
     @apply border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white
-      focus:outline-none focus:ring-2 focus:ring-gray-900/20 focus:border-gray-400
+      focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-400
       transition-all placeholder:text-gray-400;
   }
   .select-sm {
     @apply border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white
-      focus:outline-none focus:ring-2 focus:ring-gray-900/20 focus:border-gray-400
+      focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-400
       transition-all;
   }
   .input-search {
@@ -150,10 +166,10 @@
       rounded-full border cursor-pointer select-none transition-all duration-100;
   }
   .chip-active {
-    @apply bg-gray-900 text-white border-gray-900;
+    @apply bg-brand-600 text-white border-brand-600 shadow-sm shadow-brand-600/25;
   }
   .chip-inactive {
-    @apply bg-white text-gray-600 border-gray-200 hover:border-gray-400 hover:text-gray-900;
+    @apply bg-white text-ink-600 border-ink-200 hover:border-brand-300 hover:text-brand-700;
   }
 
   /* ── Section labels ──────────────────────────────────────────── */

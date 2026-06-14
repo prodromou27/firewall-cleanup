@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     risk_temp_keyword: int = 10
 
     # Severity thresholds
+    severity_critical_threshold: int = 90
     severity_high_threshold: int = 75
     severity_medium_threshold: int = 50
     severity_low_threshold: int = 25

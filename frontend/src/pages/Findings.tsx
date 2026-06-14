@@ -95,14 +95,16 @@ const PRIORITY_COLORS: Record<string, string> = {
 }
 
 const SEVERITY_COLORS: Record<string, string> = {
+  Critical: 'bg-red-600 text-white border-red-700',
   High: 'bg-red-100 text-red-700 border-red-200',
-  Medium: 'bg-yellow-100 text-yellow-700 border-yellow-200',
-  Low: 'bg-blue-100 text-blue-700 border-blue-200',
-  Informational: 'bg-gray-100 text-gray-600 border-gray-200',
+  Medium: 'bg-amber-100 text-amber-700 border-amber-200',
+  Low: 'bg-sky-100 text-sky-700 border-sky-200',
+  Informational: 'bg-slate-100 text-slate-600 border-slate-200',
 }
 
 // Quick preset filters
 const PRESETS = [
+  { label: '🛑 Critical Severity', params: { severity: 'Critical' } },
   { label: '🔴 High Severity', params: { severity: 'High' } },
   { label: '⚡ Zero-Hit Rules', params: { finding_type: 'zero_hit_rule' } },
   { label: '🔓 Overly Permissive', params: { finding_type: 'overly_permissive' } },
@@ -548,8 +550,8 @@ function FindingRow({ finding, onUpdate, selected, onSelect }: {
   }
 
   const sevBg: Record<string, string> = {
-    High: 'border-l-red-500', Medium: 'border-l-yellow-500',
-    Low: 'border-l-blue-500', Informational: 'border-l-gray-300',
+    Critical: 'border-l-red-600', High: 'border-l-red-500', Medium: 'border-l-amber-500',
+    Low: 'border-l-sky-500', Informational: 'border-l-slate-300',
   }
 
   const hasRules = (finding.affected_rules_data?.length ?? 0) > 0
@@ -962,7 +964,7 @@ export function Findings() {
           ))}
         </select>
 
-        {(['High', 'Medium', 'Low', 'Informational'] as const).map(sev => (
+        {(['Critical', 'High', 'Medium', 'Low', 'Informational'] as const).map(sev => (
           <button
             key={sev}
             onClick={() => setFilter('severity', severity === sev ? '' : sev)}

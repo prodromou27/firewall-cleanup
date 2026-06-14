@@ -204,6 +204,7 @@ def generate_json_report(
         },
         "summary": {
             "total_findings": len(findings),
+            "critical": sum(1 for f in findings if f.severity == "Critical"),
             "high": sum(1 for f in findings if f.severity == "High"),
             "medium": sum(1 for f in findings if f.severity == "Medium"),
             "low": sum(1 for f in findings if f.severity == "Low"),
@@ -458,6 +459,7 @@ def generate_customer_summary_report(
 # ── HTML builder ───────────────────────────────────────────────────────────────
 
 SEVERITY_COLORS = {
+    "Critical": "#b91c1c",
     "High": "#dc2626",
     "Medium": "#d97706",
     "Low": "#2563eb",
@@ -465,6 +467,7 @@ SEVERITY_COLORS = {
 }
 
 SEVERITY_BG = {
+    "Critical": "#fecaca",
     "High": "#fee2e2",
     "Medium": "#fef3c7",
     "Low": "#dbeafe",
@@ -474,6 +477,7 @@ SEVERITY_BG = {
 
 def _build_html_report(policy, rules, findings) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M UTC")
+    critical = [f for f in findings if f.severity == "Critical"]
     high   = [f for f in findings if f.severity == "High"]
     medium = [f for f in findings if f.severity == "Medium"]
     low    = [f for f in findings if f.severity == "Low"]
@@ -530,6 +534,7 @@ def _build_html_report(policy, rules, findings) -> str:
 
     # Risk level bar
     total = len(findings) or 1
+    critical_pct = len(critical) * 100 // total
     high_pct   = len(high)   * 100 // total
     medium_pct = len(medium) * 100 // total
     low_pct    = len(low)    * 100 // total
@@ -652,6 +657,7 @@ def _build_html_report(policy, rules, findings) -> str:
 
   <!-- Summary -->
   <div class="summary-grid">
+    <div class="summary-card"><div class="num" style="color:#b91c1c">{len(critical)}</div><div class="lbl">Critical Risk</div></div>
     <div class="summary-card"><div class="num c-high">{len(high)}</div><div class="lbl">High Risk</div></div>
     <div class="summary-card"><div class="num c-medium">{len(medium)}</div><div class="lbl">Medium Risk</div></div>
     <div class="summary-card"><div class="num c-low">{len(low)}</div><div class="lbl">Low Risk</div></div>
@@ -662,12 +668,14 @@ def _build_html_report(policy, rules, findings) -> str:
   <div style="background:white;border:1px solid #e5e7eb;border-radius:10px;padding:18px 20px;margin-bottom:24px">
     <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:8px">Risk Distribution</div>
     <div class="risk-bar">
+      {'<span style="flex:'+str(len(critical))+';background:#b91c1c" title="Critical"></span>' if critical else ''}
       {'<span style="flex:'+str(len(high))+';background:#dc2626" title="High"></span>' if high else ''}
       {'<span style="flex:'+str(len(medium))+';background:#d97706" title="Medium"></span>' if medium else ''}
       {'<span style="flex:'+str(len(low))+';background:#3b82f6" title="Low"></span>' if low else ''}
       {'<span style="flex:'+str(len(info))+';background:#d1d5db" title="Informational"></span>' if info else ''}
     </div>
     <div style="display:flex;gap:16px;font-size:11px;color:#6b7280">
+      <span><span style="color:#b91c1c;font-weight:700">{len(critical)}</span> Critical ({critical_pct}%)</span>
       <span><span style="color:#dc2626;font-weight:700">{len(high)}</span> High ({high_pct}%)</span>
       <span><span style="color:#d97706;font-weight:700">{len(medium)}</span> Medium ({medium_pct}%)</span>
       <span><span style="color:#3b82f6;font-weight:700">{len(low)}</span> Low ({low_pct}%)</span>
@@ -730,10 +738,11 @@ def _write_summary_sheet(ws, policy, findings):
     ws["A4"] = f"Report Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
     ws["A6"] = "Summary"; ws["A6"].font = Font(bold=True)
     ws["A7"] = "Total Findings"; ws["B7"] = len(findings)
-    ws["A8"] = "High";          ws["B8"] = sum(1 for f in findings if f.severity == "High")
-    ws["A9"] = "Medium";        ws["B9"] = sum(1 for f in findings if f.severity == "Medium")
-    ws["A10"] = "Low";          ws["B10"] = sum(1 for f in findings if f.severity == "Low")
-    ws["A11"] = "Informational";ws["B11"] = sum(1 for f in findings if f.severity == "Informational")
+    ws["A8"] = "Critical";      ws["B8"] = sum(1 for f in findings if f.severity == "Critical")
+    ws["A9"] = "High";          ws["B9"] = sum(1 for f in findings if f.severity == "High")
+    ws["A10"] = "Medium";        ws["B10"] = sum(1 for f in findings if f.severity == "Medium")
+    ws["A11"] = "Low";          ws["B11"] = sum(1 for f in findings if f.severity == "Low")
+    ws["A12"] = "Informational";ws["B12"] = sum(1 for f in findings if f.severity == "Informational")
     ws["A13"] = "Disclaimer"; ws["A13"].font = Font(bold=True)
     ws["A14"] = DISCLAIMER; ws["A14"].alignment = Alignment(wrap_text=True)
     ws.column_dimensions["A"].width = 30

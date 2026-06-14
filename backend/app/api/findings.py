@@ -109,9 +109,9 @@ def list_findings(
 
     from sqlalchemy import case
     sev_order = case(
-        {"High": 0, "Medium": 1, "Low": 2, "Informational": 3},
+        {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "Informational": 4},
         value=Finding.severity,
-        else_=4,
+        else_=5,
     )
 
     if export:

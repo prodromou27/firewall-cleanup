@@ -20,6 +20,11 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 _WEBHOOK_EVENTS_ALL = ["sync_completed", "sync_error", "high_finding"]
 
+# Settings keys whose values are secrets and must never appear in exports/logs.
+# They are still restorable: the import endpoint accepts them, this export just
+# omits their values so backups can't leak credentials.
+_SECRET_SETTING_KEYS = {"nvd_api_key"}
+
 
 class SettingsUpdate(BaseModel):
     inactivity_threshold_low: Optional[int] = None
@@ -106,8 +111,7 @@ def get_settings(
     sev_low      = _get_threshold(db, "severity_low_threshold",      app_settings.severity_low_threshold)
 
     # Security status (no sensitive values exposed)
-    auth_enabled = bool(app_settings.api_key.strip())
-    secret_set   = bool(app_settings.secret_key.strip())
+    secret_set = bool(app_settings.secret_key.strip())
 
     return {
         "inactivity_threshold_low":    inact_low,
@@ -141,11 +145,12 @@ def get_settings(
         "nvd_api_key_set":          bool(_get_db_setting(db, "nvd_api_key")),
         # Syslog listener status
         "syslog_listener": _get_syslog_status(),
-        # Security posture
+        # Security posture — booleans only, never any secret value or prefix.
         "security": {
-            "auth_enabled":     auth_enabled,
-            "secret_key_set":   secret_set,
-            "api_key_prefix":   app_settings.api_key[:8] + "…" if auth_enabled else None,
+            # Per-user session authentication is always enforced (no global key).
+            "auth_enabled":   True,
+            "auth_mode":      "session",
+            "secret_key_set": secret_set,
         },
         # App info
         "app_version": "2.1.0",
@@ -225,11 +230,25 @@ def export_settings_json(
     db: Session = Depends(get_db),
     user: User = Depends(require_capability(CAP_DOWNLOAD_BACKUP)),
 ):
-    """Export all DB-stored settings as a JSON file for backup/migration."""
+    """Export DB-stored settings as a JSON file for backup/migration.
+
+    Secret values (e.g. the NVD API key) are NEVER written to the export. The
+    key is still listed so an operator can see it was configured, but its value
+    is redacted — re-enter it after restoring.
+    """
     rows = db.query(AppSettings).all()
+    settings_out = {}
+    redacted = []
+    for r in rows:
+        if r.key in _SECRET_SETTING_KEYS:
+            if r.value:
+                redacted.append(r.key)
+            continue
+        settings_out[r.key] = r.value
     data = {
         "exported_at": datetime.now().isoformat(),
-        "settings": {r.key: r.value for r in rows},
+        "settings": settings_out,
+        "redacted_secret_keys": redacted,
     }
     buf_bytes = json.dumps(data, indent=2).encode()
     filename = f"policyinsight_settings_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"

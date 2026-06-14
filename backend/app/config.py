@@ -16,11 +16,9 @@ class Settings(BaseSettings):
     # WARNING: changing this key will invalidate ALL stored credentials.
     secret_key: str = ""
 
-    # API_KEY: bearer token that the frontend must send in X-API-Key header.
-    # Generate once and store in .env:
-    #   python -c "import secrets; print(secrets.token_urlsafe(32))"
-    # Leave empty ("") to disable auth enforcement (dev mode only).
-    api_key: str = ""
+    # NOTE: The legacy global API_KEY has been removed. Authentication is now
+    # per-user via server-side sessions (see app.security.identity). Any API_KEY
+    # left in .env is simply ignored.
 
     # CORS allowed origins — comma-separated list.
     # Default: localhost only. In production set to your actual frontend URL.

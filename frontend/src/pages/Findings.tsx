@@ -5,7 +5,7 @@ import {
   ChevronDown, ChevronUp, MessageSquare, Check, Filter,
   CheckSquare, Square, AlertTriangle, Shield, Clock, Copy,
   Eye, EyeOff, Layers, ZapOff, Wifi, Activity, Download, X,
-  Send, User,
+  Send, User, FileText,
 } from 'lucide-react'
 import {
   getFindings, updateFinding, bulkUpdateFindings, getPolicies,
@@ -51,6 +51,8 @@ const FINDING_TYPES: Record<string, string> = {
   large_group: 'Large Group',
   broad_network: 'Broad Network',
   service_range: 'Large Port Range',
+  // Import / data quality
+  import_quality: 'Import Quality',
 }
 
 const FINDING_ICONS: Record<string, React.ReactNode> = {
@@ -62,6 +64,7 @@ const FINDING_ICONS: Record<string, React.ReactNode> = {
   no_logging: <Eye className="w-3.5 h-3.5" />,
   risky_service: <Wifi className="w-3.5 h-3.5" />,
   low_usage_rule: <Activity className="w-3.5 h-3.5" />,
+  import_quality: <FileText className="w-3.5 h-3.5" />,
 }
 
 // Full spec-aligned status list (Section 15)
@@ -294,24 +297,26 @@ function AffectedRulesPanel({ finding }: { finding: Finding }) {
     return (
       <div>
         <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-1.5">
-          <Copy className="w-3.5 h-3.5" /> Duplicate Rules
+          <Copy className="w-3.5 h-3.5" /> Duplicate Rule Group ({rules.length} rules)
         </h4>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {rules.slice(0, 2).map((rule, i) => (
+          {rules.map((rule, i) => (
             <div key={rule.id}>
               <div className="text-xs font-bold text-purple-600 uppercase tracking-wide mb-2">
-                {i === 0 ? 'Rule A (Keep)' : 'Rule B (Candidate for removal)'}
+                {i === 0 ? 'Reference rule' : `Duplicate match ${i}`}
               </div>
               <RuleCard
                 rule={rule}
-                badge={i === 0 ? 'ORIGINAL' : 'DUPLICATE'}
+                badge={i === 0 ? 'REFERENCE' : 'DUPLICATE'}
                 badgeColor={i === 0 ? 'bg-purple-100 text-purple-700 border-purple-300' : 'bg-gray-100 text-gray-600 border-gray-300'}
               />
             </div>
           ))}
         </div>
         <p className="text-xs text-gray-400 mt-2 italic">
-          Removing duplicates requires engineer validation and change approval.
+          These rules match the same effective traffic. Review each to confirm whether
+          it is still required; any consolidation requires engineer validation and
+          change approval.
         </p>
       </div>
     )

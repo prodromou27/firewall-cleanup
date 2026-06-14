@@ -22,6 +22,7 @@ from app.security.identity import (
     SESSION_COOKIE_NAME,
 )
 from app.security.audit import audit_log
+from app.security.throttle import login_throttle
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -49,16 +50,32 @@ def _user_public(db: Session, user: User) -> dict:
 @router.post("/login")
 def login(body: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
     ip = _client_ip(request)
-    user = db.query(User).filter(User.email == body.email.lower()).first()
+    email = body.email.lower()
+
+    # Brute-force throttle: reject early if this (ip, email) is locked out.
+    wait = login_throttle.retry_after(ip, email)
+    if wait > 0:
+        audit_log("auth.login_throttled", email=email, source_ip=ip, retry_after=wait)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed login attempts. Try again later.",
+            headers={"Retry-After": str(wait)},
+        )
+
+    user = db.query(User).filter(User.email == email).first()
 
     # Constant-ish path: always run verify to reduce user-enumeration timing.
     valid = bool(user) and user.is_active and verify_password(body.password, user.password_hash)
     if not valid:
-        audit_log("auth.login_failed", email=body.email.lower(), source_ip=ip)
+        login_throttle.record_failure(ip, email)
+        audit_log("auth.login_failed", email=email, source_ip=ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password.",
         )
+
+    # Successful auth clears the failure counter for this (ip, email).
+    login_throttle.reset(ip, email)
 
     raw_token = create_session(
         db, user, source_ip=ip, user_agent=request.headers.get("user-agent"),

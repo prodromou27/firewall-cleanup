@@ -268,19 +268,58 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# ── CORS — restricted to configured origins only ──────────────────────────────
-_allowed_origins = [o.strip() for o in settings.allowed_origins.split(",") if o.strip()]
+# ── CORS — restricted to an explicit allow-list of origins ─────────────────────
+# Session auth uses cookies, so cross-origin requests must send credentials.
+# That requires an EXPLICIT origin list — the "*" wildcard is incompatible with
+# credentialed requests and would be a security hole, so we drop it if present.
+_allowed_origins = [
+    o.strip() for o in settings.allowed_origins.split(",")
+    if o.strip() and o.strip() != "*"
+]
+if not _allowed_origins:
+    logger.warning(
+        "ALLOWED_ORIGINS is empty (or only '*') — cross-origin browser requests "
+        "will be rejected. Set ALLOWED_ORIGINS to your frontend URL(s)."
+    )
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
-    allow_credentials=False,      # credentials=True + wildcard is forbidden by browsers anyway
+    allow_credentials=True,       # cookies ride along on cross-origin requests
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Accept", "Authorization"],
 )
 
 
 # ── Security headers middleware ───────────────────────────────────────────────
+
+# Swagger/ReDoc load their bundle + fonts from jsdelivr; the SPA pulls webfonts
+# from Google Fonts. Allow exactly those origins and nothing else.
+_CSP_DOCS = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "img-src 'self' data: https://fastapi.tiangolo.com; "
+    "font-src 'self' data:; "
+    "worker-src 'self' blob:; "
+    "frame-ancestors 'none'"
+)
+# App CSP. 'unsafe-inline'/'unsafe-eval' are required by the Vite dev server
+# (HMR injects inline scripts and uses eval) and inline styles; connect-src
+# allows the HMR websocket. Tighten script-src for a production build behind a
+# real bundler if desired.
+_CSP_APP = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+    "font-src 'self' data: https://fonts.gstatic.com; "
+    "img-src 'self' data:; "
+    "connect-src 'self' ws: wss:; "
+    "frame-ancestors 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'"
+)
+
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
@@ -289,9 +328,24 @@ async def security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["X-XSS-Protection"] = "1; mode=block"
-    # Remove server banner
-    if "server" in response.headers:
-        del response.headers["server"]
+    # HSTS: browsers ignore this over plain HTTP, so it's safe to always send;
+    # it takes effect once the app is served over TLS.
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    # Disable powerful browser features the app never uses.
+    response.headers["Permissions-Policy"] = (
+        "accelerometer=(), camera=(), geolocation=(), gyroscope=(), "
+        "magnetometer=(), microphone=(), payment=(), usb=()"
+    )
+    # Content-Security-Policy — docs pages need a looser policy than the app.
+    path = request.url.path
+    if path in {"/docs", "/redoc"} or path.startswith("/redoc") or path == "/openapi.json":
+        response.headers["Content-Security-Policy"] = _CSP_DOCS
+    else:
+        response.headers["Content-Security-Policy"] = _CSP_APP
+    # NOTE: uvicorn writes its own `Server: uvicorn` banner at the protocol
+    # layer, after ASGI middleware runs, so it can't be stripped here. Suppress
+    # it at launch with `uvicorn --no-server-header` (or hide it behind a
+    # reverse proxy) in production.
     return response
 
 

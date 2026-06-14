@@ -5,6 +5,10 @@ from typing import Optional
 from app.database import get_db
 from app.models.policy import FirewallObject, FirewallPolicy
 from app.models.finding import Finding
+from app.models.user import User
+from app.security.identity import (
+    get_current_user, require_customer_access, accessible_customer_ids,
+)
 
 router = APIRouter(prefix="/api/objects", tags=["objects"])
 
@@ -44,22 +48,38 @@ def list_objects(
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     q = db.query(FirewallObject)
+
+    # Per-user tenant scope: the set of customers this user may access.
+    allowed = accessible_customer_ids(db, user)  # None => global (all)
 
     # Resolve policy IDs for scope
     scoped_policy_ids: Optional[list] = None
     if policy_id:
+        # Confirm the user can access the policy's owning customer.
+        pol = db.query(FirewallPolicy).filter(FirewallPolicy.id == policy_id).first()
+        if not pol:
+            return {"total": 0, "page": page, "page_size": page_size, "objects": []}
+        require_customer_access(db, user, pol.customer_id)
         q = q.filter(FirewallObject.policy_id == policy_id)
         scoped_policy_ids = [policy_id]
-    elif customer_id:
-        scoped_policy_ids = [
-            p.id for p in db.query(FirewallPolicy)
-            .filter(FirewallPolicy.customer_id == customer_id).all()
-        ]
-        if not scoped_policy_ids:
-            return {"total": 0, "page": page, "page_size": page_size, "objects": []}
-        q = q.filter(FirewallObject.policy_id.in_(scoped_policy_ids))
+    else:
+        pol_q = db.query(FirewallPolicy.id)
+        if allowed is not None:
+            if not allowed:
+                return {"total": 0, "page": page, "page_size": page_size, "objects": []}
+            pol_q = pol_q.filter(FirewallPolicy.customer_id.in_(allowed))
+        if customer_id:
+            if allowed is not None and customer_id not in allowed:
+                raise HTTPException(status_code=403, detail="Access denied: you are not authorized for this customer.")
+            pol_q = pol_q.filter(FirewallPolicy.customer_id == customer_id)
+        if allowed is not None or customer_id:
+            scoped_policy_ids = [pid for (pid,) in pol_q.all()]
+            if not scoped_policy_ids:
+                return {"total": 0, "page": page, "page_size": page_size, "objects": []}
+            q = q.filter(FirewallObject.policy_id.in_(scoped_policy_ids))
 
     if object_type:
         q = q.filter(FirewallObject.object_type == object_type)
@@ -108,10 +128,13 @@ def get_object(
     object_id: str,
     customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     obj = db.query(FirewallObject).filter(FirewallObject.id == object_id).first()
     if not obj:
         raise HTTPException(status_code=404, detail="Object not found")
+    pol = db.query(FirewallPolicy).filter(FirewallPolicy.id == obj.policy_id).first()
+    require_customer_access(db, user, pol.customer_id if pol else None)
     if customer_id:
         from app.api.tenant import assert_policy_customer
         assert_policy_customer(obj.policy_id, customer_id, db)

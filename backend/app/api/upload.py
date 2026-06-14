@@ -12,6 +12,9 @@ from app.parsers import get_parser
 from app.analysis.engine import run_analysis
 from app.config import settings
 from app.security.audit import audit_log
+from app.models.user import User
+from app.security.identity import require_capability, require_customer_access
+from app.security.rbac import CAP_UPLOAD
 import logging
 
 router = APIRouter(prefix="/api/upload", tags=["upload"])
@@ -56,9 +59,12 @@ async def upload_policy(
     notes: Optional[str] = Form(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_UPLOAD)),
 ):
     """Upload a firewall policy file under a specific customer tenant."""
     # ── Input validation ──────────────────────────────────────────────────────
+    # Tenant isolation: the user must be authorized for the target customer.
+    require_customer_access(db, user, customer_id)
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
@@ -198,6 +204,7 @@ async def upload_policy(
 
     audit_log(
         "policy.upload",
+        user_id=user.id,
         policy_id=policy.id,
         customer_id=customer_id,
         vendor=vendor,

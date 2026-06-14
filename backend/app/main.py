@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from app.config import settings
 from app.database import engine, Base
 from app.api import upload, policies, findings, objects, reports, settings as settings_api
-from app.api import customers, devices, revisions, compliance
+from app.api import customers, devices, revisions, compliance, auth as auth_api
 from app.security.auth import require_api_key
 import app.models  # ensure models are registered
 
@@ -224,6 +224,36 @@ async def lifespan(app: FastAPI):
     except Exception as _mig_exc:
         logger.error("Credential migration failed: %s", _mig_exc)
 
+    # ── Bootstrap initial admin user (Phase 1 auth) ───────────────────────────
+    try:
+        from app.database import SessionLocal
+        from app.models.user import User, ROLE_SYSTEM_ADMIN
+        from app.security.passwords import hash_password
+        _adb = SessionLocal()
+        try:
+            email = (settings.bootstrap_admin_email or "").strip().lower()
+            password = (settings.bootstrap_admin_password or "").strip()
+            user_count = _adb.query(User).count()
+            if user_count == 0 and email and password:
+                _adb.add(User(
+                    email=email,
+                    full_name="System Administrator",
+                    password_hash=hash_password(password),
+                    role=ROLE_SYSTEM_ADMIN,
+                    is_active=True,
+                ))
+                _adb.commit()
+                logger.info("Bootstrap: created initial system_admin user '%s'. Change the password after first login.", email)
+            elif user_count == 0:
+                logger.warning(
+                    "No users exist and BOOTSTRAP_ADMIN_EMAIL/PASSWORD are not set — "
+                    "login is unavailable until an admin user is created."
+                )
+        finally:
+            _adb.close()
+    except Exception as _boot_exc:
+        logger.error("Admin bootstrap failed: %s", _boot_exc)
+
     yield
     task.cancel()
     try:
@@ -287,6 +317,10 @@ async def api_key_middleware(request: Request, call_next):
     # Health check is always public
     if path in _PUBLIC_PATHS:
         return await call_next(request)
+    # Auth endpoints manage their own session-based authentication and must be
+    # reachable without the legacy global API key (e.g. the login form).
+    if path.startswith("/api/auth/"):
+        return await call_next(request)
     # API docs — allow only when accessed with a valid key OR in dev mode (no key configured)
     if path in {"/docs", "/openapi.json", "/redoc"} or path.startswith("/redoc"):
         provided_key = request.headers.get("X-API-Key", "")
@@ -301,6 +335,14 @@ async def api_key_middleware(request: Request, call_next):
     if request.method == "OPTIONS":
         return await call_next(request)
 
+    # Session-cookie auth: if a session cookie is present, let the request through
+    # so the per-endpoint dependencies (get_current_user / require_capability /
+    # require_customer_access) perform the real, fine-grained enforcement. The
+    # legacy global X-API-Key remains accepted during the transition.
+    from app.security.identity import SESSION_COOKIE_NAME
+    if request.cookies.get(SESSION_COOKIE_NAME):
+        return await call_next(request)
+
     provided_key = request.headers.get("X-API-Key", "")
     if provided_key != configured_key:
         return JSONResponse(
@@ -312,6 +354,7 @@ async def api_key_middleware(request: Request, call_next):
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 
+app.include_router(auth_api.router)
 app.include_router(customers.router)
 app.include_router(devices.router)
 app.include_router(revisions.router)

@@ -33,9 +33,25 @@ from app.models.policy import FirewallPolicy
 from app.models.revision import PolicyRevision
 from app.security.crypto import encrypt_credential, decrypt_credential
 from app.security.audit import audit_log
+from app.models.user import User
+from app.security.identity import (
+    get_current_user, require_capability, require_customer_access, accessible_customer_ids,
+)
+from app.security.rbac import (
+    CAP_MANAGE_DEVICES, CAP_STORE_CREDENTIALS, CAP_RUN_SYNC, CAP_DELETE_DATA,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/devices", tags=["devices"])
+
+
+def _get_device_authz(device_id: str, db: Session, user: User) -> FirewallDevice:
+    """Fetch a device and enforce that the user may access its customer (tenant)."""
+    d = db.query(FirewallDevice).filter(FirewallDevice.id == device_id).first()
+    if not d:
+        raise HTTPException(status_code=404, detail="Device not found")
+    require_customer_access(db, user, d.customer_id)
+    return d
 
 # Allowed vendor values
 _ALLOWED_VENDORS = {"FortiGate", "CheckPoint", "PaloAlto", "CiscoASA", "HuaweiUSG"}
@@ -317,17 +333,40 @@ def _build_connector_for_device(d: FirewallDevice):
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.get("")
-def list_devices(customer_id: Optional[str] = None, db: Session = Depends(get_db)):
+def list_devices(
+    customer_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     q = db.query(FirewallDevice)
     if customer_id:
+        require_customer_access(db, user, customer_id)
         q = q.filter(FirewallDevice.customer_id == customer_id)
+    else:
+        # No explicit customer filter — restrict to the user's accessible tenants.
+        allowed = accessible_customer_ids(db, user)
+        if allowed is not None:
+            q = q.filter(FirewallDevice.customer_id.in_(allowed)) if allowed else q.filter(False)
     return [_device_dict(d) for d in q.order_by(FirewallDevice.created_at).all()]
 
 
 @router.post("", status_code=201)
-def create_device(body: DeviceCreate, db: Session = Depends(get_db)):
+def create_device(
+    body: DeviceCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_MANAGE_DEVICES)),
+):
+    require_customer_access(db, user, body.customer_id)
     if not db.query(Customer).filter(Customer.id == body.customer_id).first():
         raise HTTPException(status_code=404, detail="Customer not found")
+
+    # Storing device credentials requires a dedicated capability.
+    from app.security.rbac import has_capability
+    if (body.password or body.api_token) and not has_capability(user.role, CAP_STORE_CREDENTIALS):
+        raise HTTPException(
+            status_code=403,
+            detail="Your role is not permitted to store device credentials.",
+        )
 
     data = body.model_dump()
     # Encrypt sensitive fields before persisting
@@ -339,27 +378,38 @@ def create_device(body: DeviceCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(d)
 
-    audit_log("device.create", device_id=d.id, customer_id=d.customer_id,
+    audit_log("device.create", user_id=user.id, device_id=d.id, customer_id=d.customer_id,
               name=d.name, vendor=d.vendor, host=d.host)
     return _device_dict(d)
 
 
 @router.get("/{device_id}")
-def get_device(device_id: str, db: Session = Depends(get_db)):
-    d = db.query(FirewallDevice).filter(FirewallDevice.id == device_id).first()
-    if not d:
-        raise HTTPException(status_code=404, detail="Device not found")
+def get_device(
+    device_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    d = _get_device_authz(device_id, db, user)
     return _device_dict(d)
 
 
 @router.patch("/{device_id}")
-def update_device(device_id: str, body: DeviceUpdate, db: Session = Depends(get_db)):
-    d = db.query(FirewallDevice).filter(FirewallDevice.id == device_id).first()
-    if not d:
-        raise HTTPException(status_code=404, detail="Device not found")
+def update_device(
+    device_id: str,
+    body: DeviceUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_MANAGE_DEVICES)),
+):
+    d = _get_device_authz(device_id, db, user)
 
     updates = body.model_dump(exclude_none=True)
-    # Encrypt credential fields if being updated
+    # Encrypt credential fields if being updated — gated by capability.
+    from app.security.rbac import has_capability
+    if ("api_token" in updates or "password" in updates) and not has_capability(user.role, CAP_STORE_CREDENTIALS):
+        raise HTTPException(
+            status_code=403,
+            detail="Your role is not permitted to store device credentials.",
+        )
     if "api_token" in updates:
         updates["api_token"] = encrypt_credential(updates["api_token"])
     if "password" in updates:
@@ -370,17 +420,19 @@ def update_device(device_id: str, body: DeviceUpdate, db: Session = Depends(get_
     db.commit()
     db.refresh(d)
 
-    audit_log("device.update", device_id=d.id, fields=list(updates.keys()))
+    audit_log("device.update", user_id=user.id, device_id=d.id, fields=list(updates.keys()))
     return _device_dict(d)
 
 
 @router.delete("/{device_id}")
-def delete_device(device_id: str, db: Session = Depends(get_db)):
-    d = db.query(FirewallDevice).filter(FirewallDevice.id == device_id).first()
-    if not d:
-        raise HTTPException(status_code=404, detail="Device not found")
+def delete_device(
+    device_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_DELETE_DATA)),
+):
+    d = _get_device_authz(device_id, db, user)
 
-    audit_log("device.delete", device_id=d.id, name=d.name, customer_id=d.customer_id)
+    audit_log("device.delete", user_id=user.id, device_id=d.id, name=d.name, customer_id=d.customer_id)
 
     # ── Cascade-delete all policies created by this device ───────────────────
     # This covers rules, objects, findings, finding comments, analysis runs,
@@ -473,7 +525,11 @@ def _tls_reachable(host: str, port: int, verify_ssl: bool, timeout: int = 8) -> 
 # ── Test connection ───────────────────────────────────────────────────────────
 
 @router.post("/{device_id}/test")
-def test_device(device_id: str, db: Session = Depends(get_db)):
+def test_device(
+    device_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_RUN_SYNC)),
+):
     """
     Staged connectivity test — returns per-phase diagnostics + vendor discovery info.
 
@@ -488,8 +544,9 @@ def test_device(device_id: str, db: Session = Depends(get_db)):
     d = db.query(FirewallDevice).filter(FirewallDevice.id == device_id).first()
     if not d:
         raise HTTPException(status_code=404, detail="Device not found")
+    require_customer_access(db, user, d.customer_id)
 
-    audit_log("device.test_connection", device_id=d.id, host=d.host, vendor=d.vendor)
+    audit_log("device.test_connection", user_id=user.id, device_id=d.id, host=d.host, vendor=d.vendor)
 
     # Determine effective port and whether this is an SSH-based connection
     port = d.port or (22 if d.vendor == "HuaweiUSG" else 443)
@@ -951,41 +1008,44 @@ def sync_device_endpoint(
     device_id: str,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_RUN_SYNC)),
 ):
     """Trigger a live policy sync. Runs in background; returns immediately."""
-    d = db.query(FirewallDevice).filter(FirewallDevice.id == device_id).first()
-    if not d:
-        raise HTTPException(status_code=404, detail="Device not found")
+    d = _get_device_authz(device_id, db, user)
     if d.sync_status == "running":
         raise HTTPException(status_code=409, detail="Sync already in progress")
 
     d.sync_status = "running"
     db.commit()
 
-    audit_log("sync.trigger", device_id=d.id, name=d.name, customer_id=d.customer_id)
+    audit_log("sync.trigger", user_id=user.id, device_id=d.id, name=d.name, customer_id=d.customer_id)
     background_tasks.add_task(_run_sync_bg, device_id)
     return {"message": "Sync started", "device_id": device_id}
 
 
 @router.post("/{device_id}/reset-sync")
-def reset_sync_status(device_id: str, db: Session = Depends(get_db)):
+def reset_sync_status(
+    device_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_RUN_SYNC)),
+):
     """Force-reset a device stuck in 'running' state back to 'never' or 'error'."""
-    d = db.query(FirewallDevice).filter(FirewallDevice.id == device_id).first()
-    if not d:
-        raise HTTPException(status_code=404, detail="Device not found")
+    d = _get_device_authz(device_id, db, user)
     prev_status = d.sync_status
     d.sync_status = "error" if d.last_sync_at else "never"
     d.last_error = "Sync was manually reset (was stuck in 'running' state)"
     db.commit()
-    audit_log("sync.reset", device_id=d.id, prev_status=prev_status, new_status=d.sync_status)
+    audit_log("sync.reset", user_id=user.id, device_id=d.id, prev_status=prev_status, new_status=d.sync_status)
     return {"message": f"Sync status reset from '{prev_status}' to '{d.sync_status}'", "device_id": device_id}
 
 
 @router.get("/{device_id}/sync-status")
-def get_sync_status(device_id: str, db: Session = Depends(get_db)):
-    d = db.query(FirewallDevice).filter(FirewallDevice.id == device_id).first()
-    if not d:
-        raise HTTPException(status_code=404, detail="Device not found")
+def get_sync_status(
+    device_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    d = _get_device_authz(device_id, db, user)
     return {
         "sync_status": d.sync_status,
         "last_sync_at": d.last_sync_at.isoformat() if d.last_sync_at else None,
@@ -995,7 +1055,11 @@ def get_sync_status(device_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/{device_id}/trends")
-def get_device_trends(device_id: str, db: Session = Depends(get_db)):
+def get_device_trends(
+    device_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     """
     Trend analysis across all revision history for a device.
     Returns suggestions based on observed patterns over time.
@@ -1006,9 +1070,7 @@ def get_device_trends(device_id: str, db: Session = Depends(get_db)):
     from app.models.policy import FirewallRule
     from app.models.finding import Finding
 
-    d = db.query(FirewallDevice).filter(FirewallDevice.id == device_id).first()
-    if not d:
-        raise HTTPException(status_code=404, detail="Device not found")
+    d = _get_device_authz(device_id, db, user)
 
     if not d.last_policy_id:
         return {"revision_count": 0, "suggestions": [], "change_activity": [], "revision_timeline": [], "finding_trend": []}
@@ -1218,6 +1280,7 @@ def get_device_vulnerabilities(
     device_id: str,
     refresh: bool = False,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """
     Query the NIST NVD for known CVEs affecting this device's OS version.
@@ -1225,9 +1288,7 @@ def get_device_vulnerabilities(
 
     Pass ?refresh=true to force a fresh NVD lookup.
     """
-    d = db.query(FirewallDevice).filter(FirewallDevice.id == device_id).first()
-    if not d:
-        raise HTTPException(status_code=404, detail="Device not found")
+    d = _get_device_authz(device_id, db, user)
 
     from app.analysis.cve_checker import get_device_cves
     from app.models.customer import Customer

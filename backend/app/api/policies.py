@@ -17,6 +17,21 @@ router = APIRouter(prefix="/api/policies", tags=["policies"])
 logger = logging.getLogger(__name__)
 
 from app.api.tenant import assert_policy_customer  # noqa: E402 — after router init
+from app.models.user import User
+from app.security.identity import (
+    get_current_user, require_capability, require_customer_access, accessible_customer_ids,
+)
+from app.security.rbac import CAP_VIEW_GLOBAL, CAP_DELETE_DATA, CAP_UPLOAD
+from app.security.audit import audit_log
+
+
+def _authz_policy(policy_id: str, db: Session, user: User) -> FirewallPolicy:
+    """Fetch a policy and enforce the user may access its owning customer (tenant)."""
+    policy = db.query(FirewallPolicy).filter(FirewallPolicy.id == policy_id).first()
+    if not policy:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    require_customer_access(db, user, policy.customer_id)
+    return policy
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -90,10 +105,16 @@ def list_policies(
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     q = db.query(FirewallPolicy)
     if customer_id:
+        require_customer_access(db, user, customer_id)
         q = q.filter(FirewallPolicy.customer_id == customer_id)
+    else:
+        allowed = accessible_customer_ids(db, user)
+        if allowed is not None:
+            q = q.filter(FirewallPolicy.customer_id.in_(allowed)) if allowed else q.filter(False)
     if vendor:
         q = q.filter(FirewallPolicy.vendor == vendor)
     total = q.count()
@@ -115,17 +136,33 @@ def list_policies(
 def get_dashboard_stats(
     customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    """Global dashboard statistics, optionally scoped to a single customer."""
+    """Global dashboard statistics, optionally scoped to a single customer.
+
+    Tenant isolation: a non-global user only ever sees aggregates over the
+    customers they are assigned to. Global (system_admin) users see everything.
+    """
     from app.models.customer import Customer
 
-    # Base policy id set when customer-scoped
-    scoped_policy_ids: Optional[list] = None
+    allowed_customer_ids = accessible_customer_ids(db, user)  # None == all
+
+    # Determine the customer-id set this request may aggregate over.
     if customer_id:
+        require_customer_access(db, user, customer_id)
+        effective_customer_ids = [customer_id]
+    elif allowed_customer_ids is not None:
+        effective_customer_ids = allowed_customer_ids
+    else:
+        effective_customer_ids = None  # global, no scoping
+
+    # Base policy id set when scoped to a specific customer set
+    scoped_policy_ids: Optional[list] = None
+    if effective_customer_ids is not None:
         scoped_policy_ids = [
-            p.id for p in db.query(FirewallPolicy)
-            .filter(FirewallPolicy.customer_id == customer_id).all()
-        ]
+            p.id for p in db.query(FirewallPolicy.id)
+            .filter(FirewallPolicy.customer_id.in_(effective_customer_ids)).all()
+        ] if effective_customer_ids else []
 
     def _policy_filter(q):
         if scoped_policy_ids is not None:
@@ -142,7 +179,12 @@ def get_dashboard_stats(
             return q.filter(Finding.policy_id.in_(scoped_policy_ids))
         return q
 
-    total_customers = db.query(func.count(Customer.id)).scalar()
+    def _customer_filter(q):
+        if effective_customer_ids is not None:
+            return q.filter(Customer.id.in_(effective_customer_ids)) if effective_customer_ids else q.filter(False)
+        return q
+
+    total_customers = _customer_filter(db.query(func.count(Customer.id))).scalar()
     total_policies = _policy_filter(db.query(func.count(FirewallPolicy.id))).scalar()
     total_rules = _rule_filter(db.query(func.count(FirewallRule.id))).scalar()
     enabled_rules = _rule_filter(
@@ -170,7 +212,7 @@ def get_dashboard_stats(
     )
 
     top_customers = (
-        db.query(Customer)
+        _customer_filter(db.query(Customer))
         .order_by(Customer.high_findings.desc())
         .limit(5).all()
     )
@@ -268,10 +310,9 @@ def get_policy(
     policy_id: str,
     customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    policy = db.query(FirewallPolicy).filter(FirewallPolicy.id == policy_id).first()
-    if not policy:
-        raise HTTPException(status_code=404, detail="Policy not found")
+    policy = _authz_policy(policy_id, db, user)
     if customer_id:
         assert_policy_customer(policy_id, customer_id, db)
     return _policy_detail(policy, db)
@@ -282,16 +323,16 @@ def delete_policy(
     policy_id: str,
     customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_DELETE_DATA)),
 ):
-    policy = db.query(FirewallPolicy).filter(FirewallPolicy.id == policy_id).first()
-    if not policy:
-        raise HTTPException(status_code=404, detail="Policy not found")
+    policy = _authz_policy(policy_id, db, user)
     if customer_id:
         assert_policy_customer(policy_id, customer_id, db)
     cid = policy.customer_id
     db.delete(policy)
     db.commit()
     _refresh_customer_counters(cid, db)
+    audit_log("policy.delete", user_id=user.id, policy_id=policy_id, customer_id=cid)
     return {"message": "Policy deleted"}
 
 
@@ -301,15 +342,15 @@ def reanalyze_policy(
     background_tasks: BackgroundTasks,
     customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_UPLOAD)),
 ):
-    policy = db.query(FirewallPolicy).filter(FirewallPolicy.id == policy_id).first()
-    if not policy:
-        raise HTTPException(status_code=404, detail="Policy not found")
+    policy = _authz_policy(policy_id, db, user)
     if customer_id:
         assert_policy_customer(policy_id, customer_id, db)
     policy.analysis_status = "pending"
     db.commit()
     background_tasks.add_task(_run_bg, policy_id, policy.customer_id)
+    audit_log("policy.reanalyze", user_id=user.id, policy_id=policy_id, customer_id=policy.customer_id)
     return {"message": "Re-analysis started"}
 
 
@@ -318,11 +359,10 @@ def get_policy_risk_score(
     policy_id: str,
     customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """Return the computed risk score and breakdown for a policy."""
-    p = db.query(FirewallPolicy).filter(FirewallPolicy.id == policy_id).first()
-    if not p:
-        raise HTTPException(status_code=404, detail="Policy not found")
+    p = _authz_policy(policy_id, db, user)
     if customer_id:
         assert_policy_customer(policy_id, customer_id, db)
 
@@ -360,22 +400,28 @@ def get_policy_risk_score(
 
 
 @router.get("/{policy_id}/health")
-def get_policy_health(policy_id: str, db: Session = Depends(get_db)):
+def get_policy_health(
+    policy_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     """
     Run the Firewall Health & Best Practice Assessment.
 
     Returns configuration health checks, NAT review, and attack surface analysis.
     SAFETY NOTE: Read-only analysis. No firewall configuration is modified.
     """
-    p = db.query(FirewallPolicy).filter(FirewallPolicy.id == policy_id).first()
-    if not p:
-        raise HTTPException(status_code=404, detail="Policy not found")
+    p = _authz_policy(policy_id, db, user)
     from app.analysis.health_assessor import run_health_assessment
     return run_health_assessment(policy_id, db)
 
 
 @router.get("/{policy_id}/scorecard")
-def get_policy_scorecard(policy_id: str, db: Session = Depends(get_db)):
+def get_policy_scorecard(
+    policy_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     """
     Return a Hygiene Scorecard for a policy.
 
@@ -385,9 +431,7 @@ def get_policy_scorecard(policy_id: str, db: Session = Depends(get_db)):
 
     SAFETY NOTE: Read-only analysis. No firewall rules are modified.
     """
-    p = db.query(FirewallPolicy).filter(FirewallPolicy.id == policy_id).first()
-    if not p:
-        raise HTTPException(status_code=404, detail="Policy not found")
+    p = _authz_policy(policy_id, db, user)
 
     rules   = db.query(FirewallRule).filter(FirewallRule.policy_id == policy_id).all()
     objects = db.query(FirewallObject).filter(FirewallObject.policy_id == policy_id).all()
@@ -587,7 +631,11 @@ def get_policy_scorecard(policy_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/{policy_id}/permissive-analysis")
-def get_permissive_analysis(policy_id: str, db: Session = Depends(get_db)):
+def get_permissive_analysis(
+    policy_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     """
     Analyze overly permissive rules and return specific hardening suggestions.
 
@@ -597,9 +645,7 @@ def get_permissive_analysis(policy_id: str, db: Session = Depends(get_db)):
     SAFETY NOTE: All suggestions require engineer validation and change-approval
     before implementation. The tool never modifies firewall rules.
     """
-    p = db.query(FirewallPolicy).filter(FirewallPolicy.id == policy_id).first()
-    if not p:
-        raise HTTPException(status_code=404, detail="Policy not found")
+    p = _authz_policy(policy_id, db, user)
 
     rules = db.query(FirewallRule).filter(
         FirewallRule.policy_id == policy_id,
@@ -718,7 +764,9 @@ def get_rules(
     sort_dir: Optional[str] = None,       # asc|desc
     export: Optional[bool] = None,        # return CSV
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
+    _authz_policy(policy_id, db, user)
     q = db.query(FirewallRule).filter(FirewallRule.policy_id == policy_id)
 
     if search:
@@ -834,7 +882,13 @@ def _rules_csv(rules, finding_counts, finding_types) -> StreamingResponse:
 
 
 @router.get("/{policy_id}/rules/{rule_id}")
-def get_rule(policy_id: str, rule_id: str, db: Session = Depends(get_db)):
+def get_rule(
+    policy_id: str,
+    rule_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    _authz_policy(policy_id, db, user)
     rule = db.query(FirewallRule).filter(
         FirewallRule.policy_id == policy_id,
         FirewallRule.id == rule_id,

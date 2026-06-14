@@ -10,6 +10,9 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.settings import AppSettings
 from app.config import settings as app_settings
+from app.models.user import User
+from app.security.identity import get_current_user, require_capability
+from app.security.rbac import CAP_MANAGE_SETTINGS, CAP_DOWNLOAD_BACKUP
 from pydantic import BaseModel
 from typing import Optional, List
 
@@ -83,7 +86,10 @@ def _get_threshold(db: Session, key: str, default: int) -> int:
 
 
 @router.get("")
-def get_settings(db: Session = Depends(get_db)):
+def get_settings(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     webhook_events_raw = _get_db_setting(db, "webhook_events")
     try:
         webhook_events = json.loads(webhook_events_raw) if webhook_events_raw else _WEBHOOK_EVENTS_ALL
@@ -147,7 +153,11 @@ def get_settings(db: Session = Depends(get_db)):
 
 
 @router.patch("")
-def update_settings(body: SettingsUpdate, db: Session = Depends(get_db)):
+def update_settings(
+    body: SettingsUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_MANAGE_SETTINGS)),
+):
     updated = []
 
     if body.webhook_url is not None:
@@ -179,7 +189,9 @@ def update_settings(body: SettingsUpdate, db: Session = Depends(get_db)):
 # ── Backup endpoint ────────────────────────────────────────────────────────────
 
 @router.get("/backup/database")
-def download_database_backup():
+def download_database_backup(
+    user: User = Depends(require_capability(CAP_DOWNLOAD_BACKUP)),
+):
     """
     Stream a copy of the SQLite database for backup purposes.
     The file is copied to a temp path first so there's no read contention.
@@ -209,7 +221,10 @@ def download_database_backup():
 
 
 @router.get("/backup/settings")
-def export_settings_json(db: Session = Depends(get_db)):
+def export_settings_json(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_DOWNLOAD_BACKUP)),
+):
     """Export all DB-stored settings as a JSON file for backup/migration."""
     rows = db.query(AppSettings).all()
     data = {
@@ -227,7 +242,11 @@ def export_settings_json(db: Session = Depends(get_db)):
 
 
 @router.post("/backup/settings/restore")
-def import_settings_json(payload: dict, db: Session = Depends(get_db)):
+def import_settings_json(
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_MANAGE_SETTINGS)),
+):
     """
     Restore DB settings from a previously exported JSON payload.
     Payload format: { "settings": { "key": "value", ... } }

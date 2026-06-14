@@ -19,6 +19,9 @@ from app.database import get_db
 from app.models.policy import FirewallPolicy, FirewallRule
 from app.models.finding import Finding
 from app.api.tenant import assert_policy_customer
+from app.models.user import User
+from app.security.identity import get_current_user, require_capability, require_customer_access
+from app.security.rbac import CAP_DOWNLOAD_REPORT, CAP_GENERATE_REPORT
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
@@ -75,9 +78,10 @@ def generate_html_report(
     include_rules: bool = True,
     customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_DOWNLOAD_REPORT)),
 ):
     policy, rules, findings = _load_report_data(
-        policy_id, db, severities, finding_types, statuses, finding_ids, customer_id
+        policy_id, db, severities, finding_types, statuses, finding_ids, customer_id, user
     )
     rules_data = rules if include_rules else []
     html = _build_html_report(policy, rules_data, findings)
@@ -94,6 +98,7 @@ def generate_excel_report(
     include_rules: bool = True,
     customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_DOWNLOAD_REPORT)),
 ):
     try:
         import openpyxl
@@ -102,7 +107,7 @@ def generate_excel_report(
         raise HTTPException(status_code=500, detail="openpyxl not installed")
 
     policy, rules, findings = _load_report_data(
-        policy_id, db, severities, finding_types, statuses, finding_ids, customer_id
+        policy_id, db, severities, finding_types, statuses, finding_ids, customer_id, user
     )
 
     wb = openpyxl.Workbook()
@@ -138,9 +143,10 @@ def generate_csv_report(
     finding_ids: Optional[str] = None,
     customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_DOWNLOAD_REPORT)),
 ):
     policy, rules, findings = _load_report_data(
-        policy_id, db, severities, finding_types, statuses, finding_ids, customer_id
+        policy_id, db, severities, finding_types, statuses, finding_ids, customer_id, user
     )
 
     output = io.StringIO()
@@ -178,9 +184,10 @@ def generate_json_report(
     include_rules: bool = True,
     customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_DOWNLOAD_REPORT)),
 ):
     policy, rules, findings = _load_report_data(
-        policy_id, db, severities, finding_types, statuses, finding_ids, customer_id
+        policy_id, db, severities, finding_types, statuses, finding_ids, customer_id, user
     )
 
     data = {
@@ -264,10 +271,13 @@ def _load_report_data(
     statuses: Optional[str] = None,
     finding_ids: Optional[str] = None,
     customer_id: Optional[str] = None,
+    user: Optional[User] = None,
 ):
     policy = db.query(FirewallPolicy).filter(FirewallPolicy.id == policy_id).first()
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found")
+    if user is not None:
+        require_customer_access(db, user, policy.customer_id)
     if customer_id:
         assert_policy_customer(policy_id, customer_id, db)
 
@@ -301,6 +311,7 @@ def generate_customer_summary_report(
     finding_types: Optional[str] = None,
     statuses: Optional[str] = None,
     db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_DOWNLOAD_REPORT)),
 ):
     """
     Multi-policy summary report for an entire customer.
@@ -311,6 +322,7 @@ def generate_customer_summary_report(
     from app.models.policy import FirewallRule
     from sqlalchemy import func
 
+    require_customer_access(db, user, customer_id)
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
@@ -883,11 +895,13 @@ def build_report_v2(
     format: str = Query("html", regex="^(html|excel|csv|json)$"),
     customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_GENERATE_REPORT)),
 ):
     """Build a fully customisable report from the given configuration."""
     policy = db.query(FirewallPolicy).filter(FirewallPolicy.id == policy_id).first()
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found")
+    require_customer_access(db, user, policy.customer_id)
     if customer_id:
         assert_policy_customer(policy_id, customer_id, db)
 

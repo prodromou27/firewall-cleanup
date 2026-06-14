@@ -349,6 +349,54 @@ async def security_headers(request: Request, call_next):
     return response
 
 
+# ── CSRF protection middleware ────────────────────────────────────────────────
+
+# Session auth rides on a cookie the browser attaches automatically, so a
+# malicious third-party page could forge state-changing requests (CSRF). The
+# cookie is already SameSite=Lax (which blocks cross-site mutating requests in
+# modern browsers); this middleware is defense-in-depth on top of that: every
+# mutating request must carry an Origin (or, failing that, a Referer) that
+# matches an allow-listed origin or the app's own origin. Safe/idempotent
+# methods are never checked.
+_CSRF_SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
+_ALLOWED_ORIGIN_SET = set(_allowed_origins)
+
+
+def _request_self_origin(request: Request) -> str:
+    """The app's own origin (scheme://host[:port]) — a same-origin request is
+    never a CSRF vector. Honors X-Forwarded-* so it works behind a TLS proxy.
+    """
+    fwd_proto = request.headers.get("x-forwarded-proto")
+    scheme = fwd_proto.split(",")[0].strip() if fwd_proto else request.url.scheme
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+    return f"{scheme}://{host}" if host else ""
+
+
+@app.middleware("http")
+async def csrf_protect(request: Request, call_next):
+    if request.method not in _CSRF_SAFE_METHODS and request.url.path.startswith("/api/"):
+        origin = request.headers.get("origin")
+        if not origin:
+            # No Origin header — derive one from Referer if present.
+            referer = request.headers.get("referer")
+            if referer:
+                from urllib.parse import urlparse
+                p = urlparse(referer)
+                if p.scheme and p.netloc:
+                    origin = f"{p.scheme}://{p.netloc}"
+        # A browser performing a CSRF attack always sends an Origin on a
+        # cross-site mutating fetch/XHR. If one is present, it must be trusted.
+        # (Absent Origin+Referer ⇒ not a browser CSRF vector — e.g. server-side
+        # API client — so we let endpoint auth handle it.)
+        if origin:
+            if origin not in _ALLOWED_ORIGIN_SET and origin != _request_self_origin(request):
+                return JSONResponse(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    content={"detail": "Cross-origin request rejected (CSRF protection)."},
+                )
+    return await call_next(request)
+
+
 # ── Session authentication middleware ─────────────────────────────────────────
 
 # Paths reachable without an authenticated session.

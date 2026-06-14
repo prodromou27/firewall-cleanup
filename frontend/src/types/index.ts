@@ -106,8 +106,12 @@ export interface FirewallObject {
   port_start: number | null
   port_end: number | null
   members: string[]
+  member_count?: number
   comment: string
   is_unused: boolean
+  is_duplicate?: boolean
+  is_empty_group?: boolean
+  is_large_group?: boolean
 }
 
 export type FindingSeverity = 'High' | 'Medium' | 'Low' | 'Informational'

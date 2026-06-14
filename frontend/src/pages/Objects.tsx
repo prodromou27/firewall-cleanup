@@ -6,6 +6,13 @@ import { getObjects, getPolicies } from '../api/client'
 import type { FirewallObject, Policy } from '../types'
 import { clsx } from 'clsx'
 
+const CATEGORIES = [
+  { value: 'unused', label: '📦 Unused' },
+  { value: 'duplicates', label: '🧬 Duplicates' },
+  { value: 'empty_groups', label: '🫙 Empty Groups' },
+  { value: 'large_groups', label: '📚 Large Groups' },
+]
+
 function ObjectTypeChip({ type }: { type: string }) {
   const colors: Record<string, string> = {
     host: 'bg-blue-100 text-blue-700',
@@ -34,10 +41,10 @@ export function Objects() {
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [policies, setPolicies] = useState<Policy[]>([])
-  const [showUnused, setShowUnused] = useState(false)
 
   const policyId = searchParams.get('policy_id') || ''
   const objectType = searchParams.get('object_type') || ''
+  const category = searchParams.get('category') || ''
 
   const load = useCallback(() => {
     setLoading(true)
@@ -46,14 +53,14 @@ export function Objects() {
     else if (customerId) p.customer_id = customerId
     if (objectType) p.object_type = objectType
     if (search) p.search = search
-    if (showUnused) p.unused_only = true
+    if (category) p.category = category
     getObjects(p as Record<string, string | number>)
       .then(r => {
         setObjects(r.objects)
         setTotal(r.total)
       })
       .finally(() => setLoading(false))
-  }, [page, policyId, customerId, objectType, search, showUnused])
+  }, [page, policyId, customerId, objectType, search, category])
 
   useEffect(() => { load() }, [load])
   useEffect(() => {
@@ -109,14 +116,19 @@ export function Objects() {
             placeholder="Search objects..." />
         </div>
 
-        <button
-          onClick={() => { setShowUnused(u => !u); setPage(1) }}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
-            showUnused ? 'bg-orange-600 text-white border-orange-600' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-          }`}
-        >
-          📦 Unused only
-        </button>
+        <div className="flex flex-wrap gap-1.5 items-center">
+          {CATEGORIES.map(c => (
+            <button
+              key={c.value}
+              onClick={() => { setFilter('category', category === c.value ? '' : c.value) }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                category === c.value ? 'bg-orange-600 text-white border-orange-600' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {loading ? (
@@ -153,11 +165,23 @@ export function Objects() {
                   </td>
                   <td className="px-4 py-2.5 text-gray-400 text-xs max-w-[200px] truncate">{obj.comment || '—'}</td>
                   <td className="px-4 py-2.5">
-                    {obj.is_unused ? (
-                      <span className="text-xs font-semibold text-orange-700 bg-orange-100 px-2 py-0.5 rounded">Unused</span>
-                    ) : (
-                      <span className="text-xs text-gray-400">In use</span>
-                    )}
+                    <div className="flex flex-wrap gap-1">
+                      {obj.is_unused && (
+                        <span className="text-xs font-semibold text-orange-700 bg-orange-100 px-2 py-0.5 rounded">Unused</span>
+                      )}
+                      {obj.is_duplicate && (
+                        <span className="text-xs font-semibold text-purple-700 bg-purple-100 px-2 py-0.5 rounded">Duplicate</span>
+                      )}
+                      {obj.is_empty_group && (
+                        <span className="text-xs font-semibold text-red-700 bg-red-100 px-2 py-0.5 rounded">Empty</span>
+                      )}
+                      {obj.is_large_group && (
+                        <span className="text-xs font-semibold text-blue-700 bg-blue-100 px-2 py-0.5 rounded">Large</span>
+                      )}
+                      {!obj.is_unused && !obj.is_duplicate && !obj.is_empty_group && !obj.is_large_group && (
+                        <span className="text-xs text-gray-400">In use</span>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

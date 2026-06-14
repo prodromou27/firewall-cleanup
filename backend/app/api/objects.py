@@ -9,6 +9,30 @@ from app.models.finding import Finding
 router = APIRouter(prefix="/api/objects", tags=["objects"])
 
 
+# Object hygiene categories that map to existing finding types.
+# Keeps the Objects page consistent with the analysis engine.
+_CATEGORY_FINDING_TYPE = {
+    "unused": "unused_object",
+    "duplicates": "duplicate_object",
+    "empty_groups": "empty_group",
+    "large_groups": "large_group",
+}
+
+
+def _object_ids_for_finding_type(
+    db: Session, finding_type: str, scoped_policy_ids: Optional[list]
+) -> set:
+    """Collect object IDs referenced by findings of a given type, within scope."""
+    ids: set = set()
+    fq = db.query(Finding).filter(Finding.finding_type == finding_type)
+    if scoped_policy_ids:
+        fq = fq.filter(Finding.policy_id.in_(scoped_policy_ids))
+    for f in fq.all():
+        for oid in (f.affected_objects or []):
+            ids.add(oid)
+    return ids
+
+
 @router.get("")
 def list_objects(
     policy_id: Optional[str] = None,
@@ -16,6 +40,7 @@ def list_objects(
     object_type: Optional[str] = None,
     search: Optional[str] = None,
     unused_only: Optional[bool] = None,
+    category: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db),
@@ -44,19 +69,26 @@ def list_objects(
             | FirewallObject.value.ilike(f"%{search}%")
         )
 
-    # Compute unused object IDs from findings
-    unused_ids: set = set()
-    findings_q = db.query(Finding).filter(Finding.finding_type == "unused_object")
-    if scoped_policy_ids:
-        findings_q = findings_q.filter(Finding.policy_id.in_(scoped_policy_ids))
-    for f in findings_q.all():
-        for oid in (f.affected_objects or []):
-            unused_ids.add(oid)
+    # Build hygiene category sets from findings (single source of truth = engine)
+    unused_ids = _object_ids_for_finding_type(db, "unused_object", scoped_policy_ids)
+    duplicate_ids = _object_ids_for_finding_type(db, "duplicate_object", scoped_policy_ids)
+    empty_group_ids = _object_ids_for_finding_type(db, "empty_group", scoped_policy_ids)
+    large_group_ids = _object_ids_for_finding_type(db, "large_group", scoped_policy_ids)
 
-    # Filter by unused if requested
+    flag_sets = {
+        "unused": unused_ids,
+        "duplicates": duplicate_ids,
+        "empty_groups": empty_group_ids,
+        "large_groups": large_group_ids,
+    }
+
+    # Apply category filter (unused_only kept for backward compatibility)
     if unused_only:
-        if unused_ids:
-            q = q.filter(FirewallObject.id.in_(unused_ids))
+        category = category or "unused"
+    if category in flag_sets:
+        target = flag_sets[category]
+        if target:
+            q = q.filter(FirewallObject.id.in_(target))
         else:
             return {"total": 0, "page": page, "page_size": page_size, "objects": []}
 
@@ -67,7 +99,7 @@ def list_objects(
         "total": total,
         "page": page,
         "page_size": page_size,
-        "objects": [_obj_dict(o, unused_ids) for o in objects],
+        "objects": [_obj_dict(o, flag_sets) for o in objects],
     }
 
 
@@ -83,10 +115,13 @@ def get_object(
     if customer_id:
         from app.api.tenant import assert_policy_customer
         assert_policy_customer(obj.policy_id, customer_id, db)
-    return _obj_dict(obj, set())
+    return _obj_dict(obj, {})
 
 
-def _obj_dict(o: FirewallObject, unused_ids: set) -> dict:
+def _obj_dict(o: FirewallObject, flag_sets: dict) -> dict:
+    """flag_sets maps category name -> set of object IDs (unused/duplicates/etc.)."""
+    members = o.members or []
+    oid = o.id
     return {
         "id": o.id,
         "policy_id": o.policy_id,
@@ -96,7 +131,11 @@ def _obj_dict(o: FirewallObject, unused_ids: set) -> dict:
         "protocol": o.protocol,
         "port_start": o.port_start,
         "port_end": o.port_end,
-        "members": o.members or [],
+        "members": members,
+        "member_count": len(members),
         "comment": o.comment,
-        "is_unused": o.id in unused_ids,
+        "is_unused": oid in flag_sets.get("unused", set()),
+        "is_duplicate": oid in flag_sets.get("duplicates", set()),
+        "is_empty_group": oid in flag_sets.get("empty_groups", set()),
+        "is_large_group": oid in flag_sets.get("large_groups", set()),
     }

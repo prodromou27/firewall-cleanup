@@ -108,6 +108,12 @@ def run_analysis(policy_id: str, db: Session) -> str:
         # 6c. Missing explicit logged cleanup (deny-all) rule (policy-level)
         findings.extend(_analyze_cleanup_rule(rules, obj_map))
 
+        # 6d. Rule-order optimization (busy rules sitting below unused ones)
+        findings.extend(_analyze_rule_order(rules))
+
+        # 6e. Oversized rule sections (maintainability)
+        findings.extend(_analyze_section_size(rules))
+
         # 7. No logging
         findings.extend(_analyze_no_logging(rules, obj_map))
 
@@ -795,6 +801,88 @@ def _analyze_lateral_movement(rules: List[dict], obj_map: dict) -> List[dict]:
                 "any_service": any_svc,
             },
             "recommendation": _RL.get("lateral_movement_risk"),
+        })
+    return findings
+
+
+# Rule-order optimization thresholds (tunable).
+_BUSY_HIT_THRESHOLD = 1000      # a rule is "busy" at/above this hit count
+_ZERO_ABOVE_THRESHOLD = 10      # flag if this many zero-hit rules sit above it
+_MAX_REORDER_FINDINGS = 10      # cap per policy to avoid flooding
+
+# Maintainability threshold for a single policy section (Tufin guidance).
+_MAX_SECTION_RULES = 20
+
+
+def _analyze_rule_order(rules: List[dict]) -> List[dict]:
+    """Performance optimization: flag busy rules positioned below many zero-hit
+    rules. Read-only — recommends manual reordering. Skips entirely when hit
+    data is not available.
+    """
+    enabled = [r for r in rules if r.get("enabled", True) and r.get("hit_count") is not None]
+    if len(enabled) < 5:
+        return []  # too little hit data to draw a conclusion
+
+    ordered = sorted(enabled, key=lambda r: (r.get("rule_number") or 0))
+    findings = []
+    zero_above = 0
+    for r in ordered:
+        hits = r.get("hit_count") or 0
+        if hits >= _BUSY_HIT_THRESHOLD and zero_above >= _ZERO_ABOVE_THRESHOLD:
+            rule_id = r.get("rule_id") or r.get("rule_number", "?")
+            rule_name = r.get("rule_name") or f"Rule {rule_id}"
+            findings.append({
+                "finding_type": "rule_order_optimization",
+                "severity": "Low",
+                "confidence": "Medium",
+                "title": f"Rule {rule_id} is heavily used but sits below {zero_above} unused rules",
+                "description": (
+                    f"{rule_name} has {hits:,} hits but is positioned below {zero_above} "
+                    "enabled rules that currently receive no traffic. Because firewalls "
+                    "evaluate rules top-to-bottom, promoting frequently-matched rules above "
+                    "unused ones reduces per-packet evaluation overhead."
+                ),
+                "affected_rules": [r.get("id")],
+                "evidence": {
+                    "rule_id": rule_id,
+                    "hit_count": hits,
+                    "zero_hit_rules_above": zero_above,
+                },
+                "recommendation": _RL.get("rule_order_optimization"),
+            })
+        if hits == 0:
+            zero_above += 1
+    # Report the most impactful reorder candidates first.
+    findings.sort(key=lambda f: -f["evidence"]["hit_count"])
+    return findings[:_MAX_REORDER_FINDINGS]
+
+
+def _analyze_section_size(rules: List[dict]) -> List[dict]:
+    """Maintainability: flag policy sections that exceed the recommended size."""
+    counts: Dict[str, int] = {}
+    for r in rules:
+        section = (r.get("section") or "").strip()
+        if not section:
+            continue
+        counts[section] = counts.get(section, 0) + 1
+
+    findings = []
+    for section, count in counts.items():
+        if count <= _MAX_SECTION_RULES:
+            continue
+        findings.append({
+            "finding_type": "large_rule_section",
+            "severity": "Informational",
+            "confidence": "High",
+            "title": f"Section '{section}' has {count} rules (recommended ≤ {_MAX_SECTION_RULES})",
+            "description": (
+                f"The '{section}' section contains {count} rules. Large sections are harder "
+                "to read, audit, and troubleshoot; industry guidance recommends keeping "
+                f"sections to roughly {_MAX_SECTION_RULES} rules or fewer."
+            ),
+            "affected_rules": [],
+            "evidence": {"section": section, "rule_count": count, "recommended_max": _MAX_SECTION_RULES},
+            "recommendation": _RL.get("large_rule_section"),
         })
     return findings
 

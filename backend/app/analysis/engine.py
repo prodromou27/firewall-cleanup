@@ -99,6 +99,12 @@ def run_analysis(policy_id: str, db: Session) -> str:
         # 6. Shadowed rules
         findings.extend(detect_shadows(rules, obj_map))
 
+        # 6b. Consolidation candidates (same src/dst/action, differing services)
+        findings.extend(_analyze_mergeable_rules(rules))
+
+        # 6c. Missing explicit logged cleanup (deny-all) rule (policy-level)
+        findings.extend(_analyze_cleanup_rule(rules, obj_map))
+
         # 7. No logging
         findings.extend(_analyze_no_logging(rules, obj_map))
 
@@ -715,6 +721,122 @@ def _analyze_cleartext_services(rules: List[dict], obj_map: dict) -> List[dict]:
             "recommendation": _RL.get("cleartext_service"),
         })
     return findings
+
+
+_DENY_ACTIONS = {"deny", "drop", "reject", "block"}
+
+
+def _analyze_mergeable_rules(rules: List[dict]) -> List[dict]:
+    """Detect consolidation candidates: enabled rules that share action, source
+    set, and destination set but differ in services (mergeable via a service
+    group). Exact duplicates (identical services too) are left to the duplicate
+    detector — a group only qualifies here if its services actually vary.
+    """
+    findings = []
+    groups: Dict[tuple, List[dict]] = {}
+    for rule in rules:
+        if not rule.get("enabled", True):
+            continue
+        action = (rule.get("action") or "").lower()
+        src_key = tuple(sorted(rule.get("sources", []) or []))
+        dst_key = tuple(sorted(rule.get("destinations", []) or []))
+        # Skip rules with no addressing info to avoid grouping empties together.
+        if not src_key and not dst_key:
+            continue
+        groups.setdefault((action, src_key, dst_key), []).append(rule)
+
+    for (action, src_key, dst_key), members in groups.items():
+        if len(members) < 2:
+            continue
+        # Require genuine service variety (otherwise it's a pure duplicate set).
+        svc_sets = {tuple(sorted(m.get("services", []) or [])) for m in members}
+        if len(svc_sets) < 2:
+            continue
+
+        rule_ids = [m.get("rule_id") or m.get("rule_number", "?") for m in members]
+        all_services = sorted({s for m in members for s in (m.get("services", []) or [])})
+        findings.append({
+            "finding_type": "mergeable_rules",
+            "severity": "Low",
+            "confidence": "High",
+            "title": f"{len(members)} rules can likely be consolidated (Rules {', '.join(str(r) for r in rule_ids)})",
+            "description": (
+                f"Rules {', '.join(str(r) for r in rule_ids)} share the same action "
+                f"('{action or 'n/a'}'), source, and destination but use different "
+                "services. They can typically be merged into a single rule using a "
+                "service group, reducing policy size and maintenance overhead."
+            ),
+            "affected_rules": [m.get("id") for m in members],
+            "evidence": {
+                "rule_ids": [str(r) for r in rule_ids],
+                "action": action,
+                "shared_sources": list(src_key),
+                "shared_destinations": list(dst_key),
+                "combined_services": all_services,
+            },
+            "recommendation": _RL.get("mergeable_rules"),
+        })
+    return findings
+
+
+def _analyze_cleanup_rule(rules: List[dict], obj_map: dict) -> List[dict]:
+    """Policy-level: flag when there is no explicit, logged final deny-all rule.
+
+    A 'cleanup rule' is an explicit deny/drop of any→any (all services). Without
+    one, denied traffic falls through to the implicit default-deny and is not
+    logged — a monitoring blind spot.
+    """
+    enabled = [r for r in rules if r.get("enabled", True)]
+    if not enabled:
+        return []
+
+    def _is_deny_all(rule: dict) -> bool:
+        action = (rule.get("action") or "").lower()
+        if action not in _DENY_ACTIONS:
+            return False
+        return (
+            has_any_source(rule, obj_map)
+            and has_any_destination(rule, obj_map)
+            and has_any_service(rule, obj_map)
+        )
+
+    cleanup_rules = [r for r in enabled if _is_deny_all(r)]
+    if cleanup_rules:
+        # An explicit cleanup rule exists. If none of them log, recommend logging.
+        if any(r.get("logging_enabled", False) for r in cleanup_rules):
+            return []
+        cr = cleanup_rules[-1]
+        rid = cr.get("rule_id") or cr.get("rule_number", "?")
+        return [{
+            "finding_type": "no_cleanup_rule",
+            "severity": "Low",
+            "confidence": "High",
+            "title": "Cleanup (deny-all) rule does not log dropped traffic",
+            "description": (
+                f"The policy has an explicit deny-all rule (Rule {rid}) but it does not "
+                "have logging enabled, so dropped connections are not recorded. This "
+                "creates a visibility gap for security monitoring and incident response."
+            ),
+            "affected_rules": [cr.get("id")],
+            "evidence": {"cleanup_rule_id": str(rid), "logging_enabled": False},
+            "recommendation": _RL.get("no_cleanup_rule"),
+        }]
+
+    return [{
+        "finding_type": "no_cleanup_rule",
+        "severity": "Medium",
+        "confidence": "High",
+        "title": "Policy has no explicit cleanup (deny-all) rule",
+        "description": (
+            "This policy contains no explicit final deny-all rule. Denied traffic relies "
+            "on the implicit default-deny, which on most platforms is not logged — leaving "
+            "no record of blocked connection attempts for security monitoring or incident "
+            "response."
+        ),
+        "affected_rules": [],
+        "evidence": {"enabled_rule_count": len(enabled), "explicit_cleanup_rule": False},
+        "recommendation": _RL.get("no_cleanup_rule"),
+    }]
 
 
 def _analyze_no_logging(rules: List[dict], obj_map: dict) -> List[dict]:

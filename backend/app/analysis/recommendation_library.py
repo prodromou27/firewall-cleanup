@@ -125,6 +125,21 @@ LIBRARY: dict[str, str] = {
         "remove or consolidate the duplicate through the formal change management process. "
         "Maintaining duplicate rules increases policy complexity without security benefit."
     ),
+    "mergeable_rules": (
+        "These rules share the same source, destination, and action but use different "
+        "services. They can typically be consolidated into a single rule using a service "
+        "group, reducing rule count and simplifying the policy. Review the rules and "
+        "confirm none has a separate business or change-tracking reason to remain "
+        "distinct; if not, consolidation may be performed through the approved change "
+        "management process."
+    ),
+    "no_cleanup_rule": (
+        "This policy has no explicit final deny-all (cleanup) rule that logs dropped "
+        "traffic. Relying on the implicit default-deny means denied connections are not "
+        "logged, creating a visibility gap for security monitoring and incident response. "
+        "Review whether an explicit, logged 'deny any/any' rule should be added at the end "
+        "of the rule base through the approved change management process."
+    ),
     "shadowed_rule": (
         "Review the rule order and confirm whether the shadowed rule is intended to be "
         "unreachable. If the rule should match traffic, adjust the rule order after "

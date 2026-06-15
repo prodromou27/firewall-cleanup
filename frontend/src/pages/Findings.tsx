@@ -50,6 +50,9 @@ const FINDING_TYPES: Record<string, string> = {
   ssh_exposed: 'SSH Exposed',
   database_exposed: 'Database Exposed',
   cleartext_service: 'Cleartext Protocol',
+  // Policy structure
+  mergeable_rules: 'Consolidation Candidate',
+  no_cleanup_rule: 'Missing Cleanup Rule',
   // Object analysis
   unused_object: 'Unused Object',
   duplicate_object: 'Duplicate Object',
@@ -75,6 +78,8 @@ const FINDING_ICONS: Record<string, React.ReactNode> = {
   ssh_exposed: <Shield className="w-3.5 h-3.5" />,
   database_exposed: <Shield className="w-3.5 h-3.5" />,
   cleartext_service: <Wifi className="w-3.5 h-3.5" />,
+  mergeable_rules: <Copy className="w-3.5 h-3.5" />,
+  no_cleanup_rule: <Shield className="w-3.5 h-3.5" />,
 }
 
 // Full spec-aligned status list (Section 15)

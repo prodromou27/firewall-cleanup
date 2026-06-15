@@ -44,6 +44,10 @@ const FINDING_TYPES: Record<string, string> = {
   nat_complexity: 'NAT Rule',
   vpn_access: 'Broad VPN Access',
   negated_object: 'Negated Object',
+  // Exposure
+  rdp_exposed: 'RDP Exposed',
+  ssh_exposed: 'SSH Exposed',
+  database_exposed: 'Database Exposed',
   // Object analysis
   unused_object: 'Unused Object',
   duplicate_object: 'Duplicate Object',
@@ -65,6 +69,9 @@ const FINDING_ICONS: Record<string, React.ReactNode> = {
   risky_service: <Wifi className="w-3.5 h-3.5" />,
   low_usage_rule: <Activity className="w-3.5 h-3.5" />,
   import_quality: <FileText className="w-3.5 h-3.5" />,
+  rdp_exposed: <Shield className="w-3.5 h-3.5" />,
+  ssh_exposed: <Shield className="w-3.5 h-3.5" />,
+  database_exposed: <Shield className="w-3.5 h-3.5" />,
 }
 
 // Full spec-aligned status list (Section 15)

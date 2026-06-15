@@ -12,7 +12,8 @@ from app.analysis.normalizer import (
 from app.analysis.duplicate_detector import detect_duplicates
 from app.analysis.shadow_detector import detect_shadows
 from app.analysis.risk_scorer import score_rule, score_to_severity
-from app.analysis.service_utils import identify_risky_service
+from app.analysis.service_utils import identify_risky_service, normalize_service
+from app.analysis.ip_utils import is_public_network
 from app.analysis import recommendation_library as _RL
 from app.config import settings
 import uuid
@@ -84,6 +85,9 @@ def run_analysis(policy_id: str, db: Session) -> str:
 
         # 4. Risky services
         findings.extend(_analyze_risky_services(rules, obj_map))
+
+        # 4b. Sensitive services exposed to untrusted (any / public) sources
+        findings.extend(_analyze_exposed_services(rules, obj_map))
 
         # 5. Duplicate rules
         findings.extend(detect_duplicates(rules, obj_map))
@@ -537,6 +541,103 @@ def _analyze_risky_services(rules: List[dict], obj_map: dict) -> List[dict]:
             "recommendation": _RL.get("risky_service"),
         })
 
+    return findings
+
+
+# Sensitive TCP services that should never be reachable from untrusted networks,
+# mapped to the finding type used for their curated recommendation.
+_EXPOSED_PORTS = {
+    3389: ("RDP", "rdp_exposed"),
+    22:   ("SSH", "ssh_exposed"),
+    1433: ("Microsoft SQL Server", "database_exposed"),
+    1521: ("Oracle DB", "database_exposed"),
+    3306: ("MySQL", "database_exposed"),
+    5432: ("PostgreSQL", "database_exposed"),
+}
+
+
+def _untrusted_source(rule: dict, obj_map: dict):
+    """Classify a rule's source exposure.
+
+    Returns a tuple (exposure, public_sources):
+      exposure == "any"    → source is any/0.0.0.0/0 (the entire internet)
+      exposure == "public" → source resolves to specific public network(s)
+      exposure is None     → source is internal/private only
+    """
+    if has_any_source(rule, obj_map):
+        return "any", []
+    public = [
+        s.get("value")
+        for s in expand_rule_sources(rule, obj_map)
+        if s.get("value") and is_public_network(s.get("value"))
+    ]
+    if public:
+        return "public", public
+    return None, []
+
+
+def _analyze_exposed_services(rules: List[dict], obj_map: dict) -> List[dict]:
+    """Detect allow rules that expose RDP/SSH/database services to untrusted sources."""
+    findings = []
+    for rule in rules:
+        action = (rule.get("action") or "").lower()
+        if action not in ("accept", "allow", "permit"):
+            continue
+        if not rule.get("enabled", True):
+            continue
+
+        exposure, public_srcs = _untrusted_source(rule, obj_map)
+        if exposure is None:
+            continue
+
+        # Group matched service labels by finding type (one finding per type per rule).
+        matched: Dict[str, set] = {}
+        for svc in expand_rule_services(rule, obj_map):
+            n = normalize_service(svc)
+            if n["protocol"] not in ("tcp", "any"):
+                continue
+            for port, (label, ftype) in _EXPOSED_PORTS.items():
+                if n["port_start"] <= port <= n["port_end"]:
+                    matched.setdefault(ftype, set()).add(label)
+        if not matched:
+            continue
+
+        rule_id = rule.get("rule_id") or rule.get("rule_number", "?")
+        rule_name = rule.get("rule_name") or f"Rule {rule_id}"
+        src_desc = (
+            "any source (the entire internet)"
+            if exposure == "any"
+            else f"public source network(s): {', '.join(public_srcs)}"
+        )
+
+        for ftype, labels in matched.items():
+            svc_list = ", ".join(sorted(labels))
+            # SSH is at least encrypted; RDP/database exposure is more severe.
+            if ftype == "ssh_exposed":
+                severity = "High"
+            else:
+                severity = "Critical" if exposure == "any" else "High"
+            findings.append({
+                "finding_type": ftype,
+                "severity": severity,
+                "confidence": "High",
+                "title": f"Rule {rule_id} exposes {svc_list} to an untrusted source",
+                "description": (
+                    f"{rule_name} permits {svc_list} from {src_desc}. Exposing "
+                    "administrative or database services to untrusted networks significantly "
+                    "increases the attack surface and is a common initial-access vector."
+                ),
+                "affected_rules": [rule.get("id")],
+                "evidence": {
+                    "rule_id": rule_id,
+                    "exposed_services": sorted(labels),
+                    "exposure": exposure,
+                    "sources": rule.get("sources", []),
+                    "destinations": rule.get("destinations", []),
+                    "services": rule.get("services", []),
+                },
+                "recommendation": _RL.get(ftype),
+            })
     return findings
 
 

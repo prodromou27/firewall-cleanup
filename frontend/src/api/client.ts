@@ -61,6 +61,23 @@ export const changePassword = (current_password: string, new_password: string) =
 export const getMe = () =>
   api.get('/auth/me').then(r => r.data.user as CurrentUser)
 
+export interface AuditEvent {
+  id: string
+  ts: string | null
+  event: string
+  user_id: string | null
+  actor_email: string | null
+  customer_id: string | null
+  source_ip: string | null
+  target_type: string | null
+  target_id: string | null
+  detail: Record<string, unknown>
+}
+
+export const getAuditEvents = (params?: Record<string, string | number>) =>
+  api.get('/audit', { params: params as Record<string, string> })
+    .then(r => r.data as { total: number; page: number; page_size: number; events: AuditEvent[] })
+
 // â”€â”€ Customers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const getCustomers = (params?: Record<string, string>) =>
   api.get('/customers', { params }).then(r => r.data)

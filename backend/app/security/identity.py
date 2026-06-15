@@ -20,6 +20,7 @@ from app.security.rbac import has_capability
 
 SESSION_COOKIE_NAME = "pi_session"
 _SESSION_TTL_HOURS = int(getattr(settings, "session_ttl_hours", 12) or 12)
+_IDLE_TIMEOUT_MINUTES = int(getattr(settings, "session_idle_timeout_minutes", 60) or 0)
 
 
 def _hash_token(token: str) -> str:
@@ -50,6 +51,18 @@ def revoke_session(db: Session, raw_token: str) -> None:
         db.commit()
 
 
+def revoke_all_sessions(db: Session, user_id: str, *, except_token: Optional[str] = None) -> int:
+    """Revoke every session for a user (e.g. 'sign out everywhere'). Optionally
+    keep the caller's current session alive. Returns the number revoked.
+    """
+    q = db.query(UserSession).filter(UserSession.user_id == user_id)
+    if except_token:
+        q = q.filter(UserSession.token_hash != _hash_token(except_token))
+    count = q.delete(synchronize_session=False)
+    db.commit()
+    return count
+
+
 def _resolve_user(db: Session, raw_token: Optional[str]) -> Optional[User]:
     if not raw_token:
         return None
@@ -60,15 +73,27 @@ def _resolve_user(db: Session, raw_token: Optional[str]) -> Optional[User]:
     )
     if not row:
         return None
-    if row.expires_at and row.expires_at < datetime.utcnow():
-        # Expired — clean up and reject.
+    now = datetime.utcnow()
+    if row.expires_at and row.expires_at < now:
+        # Absolute TTL elapsed — clean up and reject.
         db.delete(row)
         db.commit()
         return None
+    # Idle timeout: no activity within the idle window revokes the session even
+    # if the absolute TTL has not yet elapsed.
+    if _IDLE_TIMEOUT_MINUTES > 0 and row.last_seen_at:
+        idle_deadline = row.last_seen_at + timedelta(minutes=_IDLE_TIMEOUT_MINUTES)
+        if idle_deadline < now:
+            db.delete(row)
+            db.commit()
+            return None
     user = db.query(User).filter(User.id == row.user_id).first()
     if not user or not user.is_active:
         return None
-    row.last_seen_at = datetime.utcnow()
+    row.last_seen_at = now
+    # Sliding absolute expiry: active sessions are extended up to the TTL from
+    # now, so a continuously-used session is not cut off at the original cap.
+    row.expires_at = now + timedelta(hours=_SESSION_TTL_HOURS)
     db.commit()
     return user
 

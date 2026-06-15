@@ -48,6 +48,7 @@ const FINDING_TYPES: Record<string, string> = {
   rdp_exposed: 'RDP Exposed',
   ssh_exposed: 'SSH Exposed',
   database_exposed: 'Database Exposed',
+  cleartext_service: 'Cleartext Protocol',
   // Object analysis
   unused_object: 'Unused Object',
   duplicate_object: 'Duplicate Object',
@@ -72,6 +73,7 @@ const FINDING_ICONS: Record<string, React.ReactNode> = {
   rdp_exposed: <Shield className="w-3.5 h-3.5" />,
   ssh_exposed: <Shield className="w-3.5 h-3.5" />,
   database_exposed: <Shield className="w-3.5 h-3.5" />,
+  cleartext_service: <Wifi className="w-3.5 h-3.5" />,
 }
 
 // Full spec-aligned status list (Section 15)

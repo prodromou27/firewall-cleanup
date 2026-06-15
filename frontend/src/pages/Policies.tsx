@@ -202,6 +202,7 @@ export function PolicyDetail() {
     rdp_exposed: 'RDP Exposed',
     ssh_exposed: 'SSH Exposed',
     database_exposed: 'Database Exposed',
+    cleartext_service: 'Cleartext Protocol',
     empty_group: 'Empty Groups',
     large_group: 'Large Groups',
     broad_network: 'Broad Networks',

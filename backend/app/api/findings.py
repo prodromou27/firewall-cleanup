@@ -118,8 +118,6 @@ def list_findings(
 
     if policy_id:
         q = q.filter(Finding.policy_id == policy_id)
-    if severity:
-        q = q.filter(Finding.severity == severity)
     if confidence:
         q = q.filter(Finding.confidence == confidence)
     if finding_type:
@@ -132,6 +130,20 @@ def list_findings(
         q = q.filter(Finding.assigned_to == assigned_to)
     if vendor:
         q = q.filter(Finding.vendor == vendor)
+
+    # Severity distribution for the summary bar — computed over all filters
+    # EXCEPT severity itself, so users always see the full breakdown for the
+    # current view and can pivot between severities without losing context.
+    # with_entities reuses q's existing filters but swaps the selected columns.
+    severity_counts = dict(
+        q.with_entities(Finding.severity, func.count(Finding.id))
+        .group_by(Finding.severity)
+        .all()
+    )
+
+    # Now apply the severity filter for the paged result set.
+    if severity:
+        q = q.filter(Finding.severity == severity)
 
     from sqlalchemy import case
     sev_order = case(
@@ -175,6 +187,7 @@ def list_findings(
         "total": total,
         "page": page,
         "page_size": page_size,
+        "severity_counts": severity_counts,
         "findings": [_finding_dict(f, rule_map) for f in findings],
     }
 
@@ -279,8 +292,8 @@ def update_finding(
 
 @router.post("/bulk-update")
 def bulk_update_findings(
-    finding_ids: List[str],
     body: UpdateFindingRequest,
+    finding_ids: List[str] = Query(..., description="IDs of findings to update (repeatable query param)"),
     customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
     user: User = Depends(require_capability(CAP_COMMENT)),

@@ -805,6 +805,7 @@ export function Findings() {
 
   const [findings, setFindings] = useState<Finding[]>([])
   const [total, setTotal] = useState(0)
+  const [severityCounts, setSeverityCounts] = useState<Record<string, number>>({})
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [policies, setPolicies] = useState<Policy[]>([])
@@ -842,7 +843,7 @@ export function Findings() {
     if (findingType) p.finding_type = findingType
     if (status) p.status = status
     getFindings(p)
-      .then(r => { setFindings(r.findings); setTotal(r.total) })
+      .then(r => { setFindings(r.findings); setTotal(r.total); setSeverityCounts(r.severity_counts || {}) })
       .finally(() => setLoading(false))
   }, [page, customerId, policyId, severity, findingType, status])
 
@@ -925,6 +926,27 @@ export function Findings() {
         </button>
       </div>
     <div className="page-body">
+      {/* Severity summary bar — click a card to filter by that severity */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-4">
+        {(['Critical', 'High', 'Medium', 'Low', 'Informational'] as const).map(sev => {
+          const count = severityCounts[sev] || 0
+          const active = severity === sev
+          return (
+            <button
+              key={sev}
+              onClick={() => setFilter('severity', active ? '' : sev)}
+              className={`flex flex-col items-start rounded-xl border px-3 py-2.5 text-left transition-all
+                ${active
+                  ? SEVERITY_COLORS[sev] + ' shadow-sm ring-2 ring-offset-1 ring-blue-400'
+                  : 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-sm'}`}
+            >
+              <span className={`text-2xl font-bold leading-none ${active ? '' : 'text-gray-900'}`}>{count}</span>
+              <span className={`mt-1 text-xs font-semibold ${active ? '' : 'text-gray-500'}`}>{sev}</span>
+            </button>
+          )
+        })}
+      </div>
+
       {/* Quick preset chips */}
       <div className="flex flex-wrap gap-2 mb-3">
         {PRESETS.map(preset => {

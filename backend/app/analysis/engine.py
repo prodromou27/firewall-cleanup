@@ -89,6 +89,9 @@ def run_analysis(policy_id: str, db: Session) -> str:
         # 4b. Sensitive services exposed to untrusted (any / public) sources
         findings.extend(_analyze_exposed_services(rules, obj_map))
 
+        # 4c. Cleartext / unencrypted protocols
+        findings.extend(_analyze_cleartext_services(rules, obj_map))
+
         # 5. Duplicate rules
         findings.extend(detect_duplicates(rules, obj_map))
 
@@ -638,6 +641,75 @@ def _analyze_exposed_services(rules: List[dict], obj_map: dict) -> List[dict]:
                 },
                 "recommendation": _RL.get(ftype),
             })
+    return findings
+
+
+# Cleartext protocols that transmit data/credentials without encryption, mapped
+# to (protocol, display name, encrypted alternative).
+_CLEARTEXT_PORTS = {
+    21:  ("tcp", "FTP", "SFTP or FTPS"),
+    23:  ("tcp", "Telnet", "SSH"),
+    69:  ("udp", "TFTP", "SCP/SFTP"),
+    110: ("tcp", "POP3", "POP3S (TLS)"),
+    143: ("tcp", "IMAP", "IMAPS (TLS)"),
+    161: ("udp", "SNMP v1/v2", "SNMPv3"),
+    389: ("tcp", "LDAP", "LDAPS (TLS)"),
+    512: ("tcp", "rexec", "SSH"),
+    513: ("tcp", "rlogin", "SSH"),
+    514: ("tcp", "rsh", "SSH"),
+}
+
+
+def _analyze_cleartext_services(rules: List[dict], obj_map: dict) -> List[dict]:
+    """Detect allow rules permitting unencrypted (cleartext) protocols."""
+    findings = []
+    for rule in rules:
+        action = (rule.get("action") or "").lower()
+        if action not in ("accept", "allow", "permit"):
+            continue
+        if not rule.get("enabled", True):
+            continue
+
+        matched = {}  # name -> alternative
+        for svc in expand_rule_services(rule, obj_map):
+            n = normalize_service(svc)
+            proto = n["protocol"]
+            for port, (p_proto, name, alt) in _CLEARTEXT_PORTS.items():
+                if proto not in (p_proto, "any"):
+                    continue
+                if n["port_start"] <= port <= n["port_end"]:
+                    matched[name] = alt
+        if not matched:
+            continue
+
+        # Broad exposure raises the stakes for an unencrypted protocol.
+        broad = has_any_source(rule, obj_map)
+        severity = "High" if broad else "Medium"
+        rule_id = rule.get("rule_id") or rule.get("rule_number", "?")
+        rule_name = rule.get("rule_name") or f"Rule {rule_id}"
+        svc_list = ", ".join(sorted(matched.keys()))
+        alts = ", ".join(sorted(set(matched.values())))
+
+        findings.append({
+            "finding_type": "cleartext_service",
+            "severity": severity,
+            "confidence": "High",
+            "title": f"Rule {rule_id} permits cleartext protocol(s): {svc_list}",
+            "description": (
+                f"{rule_name} allows {svc_list}, which transmit data and credentials "
+                "without encryption and can be intercepted on the network path."
+                + (" The rule also uses an any source, broadening the exposure." if broad else "")
+                + f" Consider migrating to an encrypted equivalent ({alts})."
+            ),
+            "affected_rules": [rule.get("id")],
+            "evidence": {
+                "rule_id": rule_id,
+                "cleartext_services": sorted(matched.keys()),
+                "any_source": broad,
+                "services": rule.get("services", []),
+            },
+            "recommendation": _RL.get("cleartext_service"),
+        })
     return findings
 
 

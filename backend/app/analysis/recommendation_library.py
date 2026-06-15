@@ -168,6 +168,15 @@ LIBRARY: dict[str, str] = {
         "engineer validation and formal change approval."
     ),
 
+    "cleartext_service": (
+        "This rule permits a cleartext protocol that transmits credentials and data "
+        "without encryption, exposing them to interception on the path. Confirm the "
+        "business requirement and plan migration to the encrypted equivalent (e.g. SSH "
+        "instead of Telnet, SFTP/FTPS instead of FTP, LDAPS instead of LDAP, SNMPv3 "
+        "instead of SNMP v1/v2). All changes require engineer validation and formal "
+        "change approval before implementation."
+    ),
+
     # ── Import / data quality ───────────────────────────────────────────────────
     "import_quality": (
         "Review the import quality summary to understand which findings are available for "

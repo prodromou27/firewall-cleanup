@@ -217,6 +217,10 @@ export interface DashboardStats {
   high_findings: number
   findings_by_type: Array<{ type: string; count: number }>
   findings_by_severity: Array<{ severity: string; count: number }>
+  exposure_summary?: {
+    total: number
+    by_type: Array<{ type: string; label: string; count: number }>
+  }
   vendor_distribution: Array<{ vendor: string; count: number }>
   top_customers_by_risk: Array<{
     id: string; name: string; high_findings: number

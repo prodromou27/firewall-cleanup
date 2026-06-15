@@ -287,6 +287,36 @@ export function Dashboard() {
           <StatTile value={stats.total_findings} label="Findings"   to={`/findings${filterBase}`} accent />
         </div>
 
+        {/* ── Exposure posture ── */}
+        {stats.exposure_summary && stats.exposure_summary.total > 0 && (
+          <div className="card border-red-200 bg-red-50/40">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-600" />
+                <h2 className="text-sm font-semibold text-gray-900">Exposure Posture</h2>
+              </div>
+              <span className="text-xs font-semibold text-red-700">
+                {stats.exposure_summary.total} exposure finding{stats.exposure_summary.total !== 1 ? 's' : ''}
+              </span>
+            </div>
+            <p className="text-xs text-gray-500 mb-3">
+              Sensitive services reachable from untrusted networks, or unencrypted protocols in use. Review urgently.
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {stats.exposure_summary.by_type.map(e => (
+                <Link
+                  key={e.type}
+                  to={findingsLink(`finding_type=${e.type}`)}
+                  className="flex flex-col items-start rounded-xl border border-red-200 bg-white px-3 py-2.5 hover:shadow-sm hover:border-red-300 transition-all"
+                >
+                  <span className="text-2xl font-bold leading-none text-red-700">{e.count}</span>
+                  <span className="mt-1 text-xs font-semibold text-gray-600">{e.label}</span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* ── Three-panel row ── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 

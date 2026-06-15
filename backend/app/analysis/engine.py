@@ -13,7 +13,7 @@ from app.analysis.duplicate_detector import detect_duplicates
 from app.analysis.shadow_detector import detect_shadows
 from app.analysis.risk_scorer import score_rule, score_to_severity
 from app.analysis.service_utils import identify_risky_service, normalize_service
-from app.analysis.ip_utils import is_public_network
+from app.analysis.ip_utils import is_public_network, is_broad_network
 from app.analysis import recommendation_library as _RL
 from app.config import settings
 import uuid
@@ -92,6 +92,9 @@ def run_analysis(policy_id: str, db: Session) -> str:
 
         # 4c. Cleartext / unencrypted protocols
         findings.extend(_analyze_cleartext_services(rules, obj_map))
+
+        # 4d. Lateral-movement risk (broad internal segment -> broad internal segment)
+        findings.extend(_analyze_lateral_movement(rules, obj_map))
 
         # 5. Duplicate rules
         findings.extend(detect_duplicates(rules, obj_map))
@@ -724,6 +727,76 @@ def _analyze_cleartext_services(rules: List[dict], obj_map: dict) -> List[dict]:
 
 
 _DENY_ACTIONS = {"deny", "drop", "reject", "block"}
+
+# Prefix length at or below which an internal network is considered "broad"
+# (e.g. /16 covers 65k hosts). Tunable.
+_BROAD_INTERNAL_PREFIX = 16
+
+
+def _broad_internal_addrs(expanded: List[dict]) -> List[str]:
+    """Return the values among expanded addresses that are broad PRIVATE
+    networks (large internal supernets). Public ranges and 'any' are excluded —
+    'any' is handled by the overly-permissive detector.
+    """
+    out = []
+    for a in expanded:
+        if a.get("type") in ("any", "unknown", "empty_group"):
+            continue
+        v = a.get("value", "")
+        if not v or is_public_network(v):
+            continue
+        if is_broad_network(v, _BROAD_INTERNAL_PREFIX):
+            out.append(v)
+    return out
+
+
+def _analyze_lateral_movement(rules: List[dict], obj_map: dict) -> List[dict]:
+    """Detect allow rules permitting traffic between two broad internal segments
+    (east-west), which enables lateral movement if a source host is compromised.
+    """
+    findings = []
+    for rule in rules:
+        action = (rule.get("action") or "").lower()
+        if action not in ("accept", "allow", "permit"):
+            continue
+        if not rule.get("enabled", True):
+            continue
+
+        broad_src = _broad_internal_addrs(expand_rule_sources(rule, obj_map))
+        broad_dst = _broad_internal_addrs(expand_rule_destinations(rule, obj_map))
+        if not broad_src or not broad_dst:
+            continue
+
+        any_svc = has_any_service(rule, obj_map)
+        severity = "High" if any_svc else "Medium"
+        rule_id = rule.get("rule_id") or rule.get("rule_number", "?")
+        rule_name = rule.get("rule_name") or f"Rule {rule_id}"
+        svc_note = (
+            " The rule also permits any service, so all ports are reachable across these "
+            "segments." if any_svc else ""
+        )
+        findings.append({
+            "finding_type": "lateral_movement_risk",
+            "severity": severity,
+            "confidence": "Medium",
+            "title": f"Rule {rule_id} permits broad east-west traffic between internal segments",
+            "description": (
+                f"{rule_name} allows traffic from broad internal network(s) "
+                f"({', '.join(broad_src)}) to broad internal network(s) "
+                f"({', '.join(broad_dst)}). Wide internal-to-internal access lets an "
+                "attacker move laterally across the environment after compromising any "
+                "host in the source range." + svc_note
+            ),
+            "affected_rules": [rule.get("id")],
+            "evidence": {
+                "rule_id": rule_id,
+                "broad_sources": broad_src,
+                "broad_destinations": broad_dst,
+                "any_service": any_svc,
+            },
+            "recommendation": _RL.get("lateral_movement_risk"),
+        })
+    return findings
 
 
 def _analyze_mergeable_rules(rules: List[dict]) -> List[dict]:

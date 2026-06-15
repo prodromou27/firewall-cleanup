@@ -50,6 +50,7 @@ const FINDING_TYPES: Record<string, string> = {
   ssh_exposed: 'SSH Exposed',
   database_exposed: 'Database Exposed',
   cleartext_service: 'Cleartext Protocol',
+  lateral_movement_risk: 'Lateral Movement Risk',
   // Policy structure
   mergeable_rules: 'Consolidation Candidate',
   no_cleanup_rule: 'Missing Cleanup Rule',
@@ -80,6 +81,7 @@ const FINDING_ICONS: Record<string, React.ReactNode> = {
   cleartext_service: <Wifi className="w-3.5 h-3.5" />,
   mergeable_rules: <Copy className="w-3.5 h-3.5" />,
   no_cleanup_rule: <Shield className="w-3.5 h-3.5" />,
+  lateral_movement_risk: <AlertTriangle className="w-3.5 h-3.5" />,
 }
 
 // Full spec-aligned status list (Section 15)

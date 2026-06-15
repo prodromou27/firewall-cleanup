@@ -75,4 +75,8 @@ def test_three_rules_two_duplicates():
         make_rule(3, ["Net-10"], ["Server_A"], ["HTTPS-SVC"]),
     ]
     findings = detect_duplicates(rules, OBJ_MAP)
-    assert len(findings) == 3  # (1,2), (1,3), (2,3)
+    # Three identical rules are grouped into a single duplicate-group finding
+    # rather than one finding per pair.
+    assert len(findings) == 1
+    assert findings[0]["finding_type"] == "duplicate_rule"
+    assert len(findings[0]["affected_rules"]) == 3

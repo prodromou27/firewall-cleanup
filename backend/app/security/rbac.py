@@ -31,6 +31,7 @@ CAP_MANAGE_CUSTOMERS = "manage_customers" # create/edit/delete customer (tenant)
 CAP_MANAGE_USERS = "manage_users"         # create/edit users, roles, access
 CAP_VIEW_GLOBAL = "view_global"           # global (all-tenant) dashboard
 CAP_DOWNLOAD_BACKUP = "download_backup"   # download full DB / settings backup
+CAP_VIEW_AUDIT = "view_audit"             # view the audit trail / activity log
 
 _ROLE_CAPS = {
     ROLE_SYSTEM_ADMIN: {"*"},
@@ -38,6 +39,7 @@ _ROLE_CAPS = {
         CAP_VIEW, CAP_UPLOAD, CAP_MANAGE_DEVICES, CAP_STORE_CREDENTIALS,
         CAP_RUN_SYNC, CAP_GENERATE_REPORT, CAP_DOWNLOAD_REPORT, CAP_COMMENT,
         CAP_DELETE_DATA, CAP_MANAGE_SETTINGS, CAP_MANAGE_USERS, CAP_MANAGE_CUSTOMERS,
+        CAP_VIEW_AUDIT,
     },
     ROLE_ENGINEER: {
         CAP_VIEW, CAP_UPLOAD, CAP_MANAGE_DEVICES, CAP_STORE_CREDENTIALS,

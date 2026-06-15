@@ -13,6 +13,7 @@ from app.config import settings
 from app.database import engine, Base
 from app.api import upload, policies, findings, objects, reports, settings as settings_api
 from app.api import customers, devices, revisions, compliance, auth as auth_api, users as users_api
+from app.api import audit as audit_api
 import app.models  # ensure models are registered
 
 # ── Logging configuration ─────────────────────────────────────────────────────
@@ -503,6 +504,7 @@ app.include_router(objects.router)
 app.include_router(reports.router)
 app.include_router(settings_api.router)
 app.include_router(compliance.router)
+app.include_router(audit_api.router)
 
 
 @app.get("/api/health")

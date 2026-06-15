@@ -6,3 +6,4 @@ from app.models.finding import Finding, FindingComment
 from app.models.settings import AppSettings
 from app.models.revision import PolicyRevision
 from app.models.user import User, UserCustomerAccess, UserSession
+from app.models.audit import AuditEvent

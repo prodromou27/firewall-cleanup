@@ -22,6 +22,7 @@ import { Devices } from './pages/Devices'
 import { DeviceHistory } from './pages/DeviceHistory'
 import { PolicyComparison } from './pages/PolicyComparison'
 import { Compliance } from './pages/Compliance'
+import { AuditLog } from './pages/AuditLog'
 
 function AuthenticatedApp() {
   return (
@@ -46,6 +47,7 @@ function AuthenticatedApp() {
             <Route path="/compliance" element={<Compliance />} />
             <Route path="/scorecard" element={<Scorecard />} />
             <Route path="/health" element={<HealthAssessment />} />
+            <Route path="/audit" element={<AuditLog />} />
 
             {/* Customer management */}
             <Route path="/customers" element={<Customers />} />

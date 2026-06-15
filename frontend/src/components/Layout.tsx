@@ -4,7 +4,7 @@ import { clsx } from 'clsx'
 import {
   LayoutDashboard, Users, Upload, List, AlertTriangle,
   Package, FileText, Settings, Server,
-  TrendingUp, Eye, ShieldAlert, Building2, ChevronDown, X, LogOut,
+  TrendingUp, Eye, ShieldAlert, Building2, ChevronDown, X, LogOut, ScrollText,
 } from 'lucide-react'
 import { getCustomers } from '../api/client'
 import { useCustomer } from '../contexts/CustomerContext'
@@ -244,6 +244,8 @@ function UserFooter() {
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation()
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'system_admin' || user?.role === 'tenant_admin'
 
   const isActive = (to: string, exact?: boolean) => {
     if (exact) return location.pathname === to
@@ -287,6 +289,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
         {/* Utility links */}
         <div className="px-1 pb-2 space-y-0.5 border-t border-white/5 pt-2">
+          {isAdmin && (
+            <NavItem to="/audit" label="Audit Trail" icon={ScrollText} active={isActive('/audit')} muted />
+          )}
           {utilityNav.map(({ to, label, icon }) => (
             <NavItem key={to} to={to} label={label} icon={icon} active={isActive(to)} muted />
           ))}

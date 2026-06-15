@@ -121,7 +121,10 @@ export const getFinding = (id: string) =>
 export const updateFinding = (id: string, data: Record<string, string | undefined>) =>
   api.patch(`/findings/${id}`, data).then(r => r.data)
 
-export const bulkUpdateFindings = (ids: string[], data: { status?: string; engineer_comment?: string }) => {
+export const bulkUpdateFindings = (
+  ids: string[],
+  data: { status?: string; engineer_comment?: string; priority?: string; assigned_to?: string },
+) => {
   const params = new URLSearchParams()
   ids.forEach(id => params.append('finding_ids', id))
   return api.post(`/findings/bulk-update?${params.toString()}`, data).then(r => r.data)

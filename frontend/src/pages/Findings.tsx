@@ -820,6 +820,8 @@ export function Findings() {
   const [policies, setPolicies] = useState<Policy[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkStatus, setBulkStatus] = useState('')
+  const [bulkPriority, setBulkPriority] = useState('')
+  const [bulkAssignee, setBulkAssignee] = useState('')
   const [bulkSaving, setBulkSaving] = useState(false)
 
   const toggleSelect = (id: string, checked: boolean) => {
@@ -829,12 +831,18 @@ export function Findings() {
     if (selected.size === findings.length) setSelected(new Set())
     else setSelected(new Set(findings.map(f => f.id)))
   }
+  const bulkAssigneeTrim = bulkAssignee.trim()
+  const hasBulkChange = !!(bulkStatus || bulkPriority || bulkAssigneeTrim)
   const applyBulk = async () => {
-    if (!bulkStatus || selected.size === 0) return
+    if (!hasBulkChange || selected.size === 0) return
     setBulkSaving(true)
     try {
-      await bulkUpdateFindings(Array.from(selected), { status: bulkStatus })
-      setSelected(new Set()); setBulkStatus(''); load()
+      const data: { status?: string; priority?: string; assigned_to?: string } = {}
+      if (bulkStatus) data.status = bulkStatus
+      if (bulkPriority) data.priority = bulkPriority
+      if (bulkAssigneeTrim) data.assigned_to = bulkAssigneeTrim
+      await bulkUpdateFindings(Array.from(selected), data)
+      setSelected(new Set()); setBulkStatus(''); setBulkPriority(''); setBulkAssignee(''); load()
     } finally { setBulkSaving(false) }
   }
 
@@ -1068,9 +1076,23 @@ export function Findings() {
                 <option value="">Set status…</option>
                 {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
+              <select
+                value={bulkPriority}
+                onChange={e => setBulkPriority(e.target.value)}
+                className="border border-blue-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Set priority…</option>
+                {PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+              <input
+                value={bulkAssignee}
+                onChange={e => setBulkAssignee(e.target.value)}
+                placeholder="Assign to…"
+                className="border border-blue-300 rounded-lg px-3 py-1.5 text-sm bg-white w-36 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
               <button
                 onClick={applyBulk}
-                disabled={!bulkStatus || bulkSaving}
+                disabled={!hasBulkChange || bulkSaving}
                 className="flex items-center gap-1.5 text-sm px-4 py-1.5 rounded-lg font-medium bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 <Check className="w-3.5 h-3.5" />

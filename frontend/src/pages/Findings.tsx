@@ -12,6 +12,7 @@ import {
   addFindingComment, getFindingComments, getFindingsExportUrl,
 } from '../api/client'
 import { SeverityBadge, StatusBadge } from '../components/ui/SeverityBadge'
+import { useAuth } from '../contexts/AuthContext'
 import type { Finding, Policy, AffectedRuleData, FindingComment } from '../types'
 
 /** Backend stores array fields as JSON strings in SQLite — handle both formats. */
@@ -810,6 +811,7 @@ export function Findings() {
   const [searchParams, setSearchParams] = useSearchParams()
   const params = useParams<{ customerId?: string }>()
   const { activeCustomer } = useCustomer()
+  const { user } = useAuth()
   const customerId = params.customerId || searchParams.get('customer_id') || activeCustomer?.id || ''
 
   const [findings, setFindings] = useState<Finding[]>([])
@@ -851,6 +853,7 @@ export function Findings() {
   const status = searchParams.get('status') || ''
   const policyId = searchParams.get('policy_id') || ''
   const priority = searchParams.get('priority') || ''
+  const assignedTo = searchParams.get('assigned_to') || ''
 
   const load = useCallback(() => {
     setLoading(true)
@@ -861,10 +864,11 @@ export function Findings() {
     if (findingType) p.finding_type = findingType
     if (status) p.status = status
     if (priority) p.priority = priority
+    if (assignedTo) p.assigned_to = assignedTo
     getFindings(p)
       .then(r => { setFindings(r.findings); setTotal(r.total); setSeverityCounts(r.severity_counts || {}) })
       .finally(() => setLoading(false))
-  }, [page, customerId, policyId, severity, findingType, status, priority])
+  }, [page, customerId, policyId, severity, findingType, status, priority, assignedTo])
 
   useEffect(() => { load() }, [load])
   useEffect(() => {
@@ -894,7 +898,9 @@ export function Findings() {
     setSearchParams(p); setPage(1)
   }
 
-  const hasFilters = !!(severity || findingType || status || policyId || priority)
+  const hasFilters = !!(severity || findingType || status || policyId || priority || assignedTo)
+  const mineActive = !!(assignedTo && user?.email && assignedTo === user.email)
+  const toggleMine = () => setFilter('assigned_to', mineActive ? '' : (user?.email || ''))
 
   // Build export — fetch with auth header then trigger blob download
   const [exporting, setExporting] = useState(false)
@@ -908,6 +914,7 @@ export function Findings() {
       if (findingType) params.finding_type = findingType
       if (status) params.status = status
       if (priority) params.priority = priority
+      if (assignedTo) params.assigned_to = assignedTo
       const url = getFindingsExportUrl(params)
       const res = await fetch(url, { credentials: 'include' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -985,6 +992,18 @@ export function Findings() {
             </button>
           )
         })}
+        {user?.email && (
+          <button
+            onClick={toggleMine}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all
+              ${mineActive
+                ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
+                : 'bg-white border-gray-200 text-gray-600 hover:border-blue-300 hover:text-blue-700'}`}
+          >
+            <User className="w-3 h-3" /> Assigned to me
+            {mineActive && <X className="w-3 h-3 ml-0.5" />}
+          </button>
+        )}
       </div>
 
       {/* Detailed filters */}

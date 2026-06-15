@@ -48,15 +48,23 @@ def test_full_shadow():
     assert "2" in findings[0]["title"]
 
 
-def test_no_shadow_different_dest():
-    """Rules with different destinations should not shadow each other."""
+def test_partial_shadow_different_dest():
+    """Source + service overlap but destination differs -> partial shadow.
+
+    Rule 2's source Host-5 (10.10.5.20) is contained by Rule 1's Net-16
+    (10.10.0.0/16), and Rule 1's 'any' service contains HTTPS, but Rule 2's
+    destination Net-16 is broader than Rule 1's Server, so it is not fully
+    contained. Two of three dimensions overlap -> a partial-shadow finding.
+    """
     rules = [
         make_rule(1, ["Net-16"], ["Server"], ["any-svc"]),
         make_rule(2, ["Host-5"], ["Net-16"], ["HTTPS-SVC"]),
     ]
     findings = detect_shadows(rules, OBJ_MAP)
-    # Net-16 (dest) is broader than Server, so not contained by Server
-    assert len(findings) == 0
+    assert len(findings) == 1
+    assert findings[0]["finding_type"] == "shadowed_rule"
+    assert findings[0]["evidence"]["conflict_type"] == "partial"
+    assert "partially shadowed" in findings[0]["title"]
 
 
 def test_disabled_rule_not_shadowed():

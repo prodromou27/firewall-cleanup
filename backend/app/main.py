@@ -258,14 +258,20 @@ async def lifespan(app: FastAPI):
 
 # ── App ───────────────────────────────────────────────────────────────────────
 
+# Interactive docs are exposed only when docs_enabled (non-production, or
+# explicitly enabled). In production they (and the OpenAPI schema) return 404.
+_docs_on = settings.docs_enabled
+if not _docs_on:
+    logger.info("Interactive API docs disabled (environment=%s).", settings.environment)
+
 app = FastAPI(
     title="PolicyInsight",
     description="Multi-tenant firewall policy analysis and live monitoring for FortiGate and Check Point.",
     version="2.1.0",
     lifespan=lifespan,
-    # Disable automatic docs exposure in production (can be re-enabled per env)
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url="/docs" if _docs_on else None,
+    redoc_url="/redoc" if _docs_on else None,
+    openapi_url="/openapi.json" if _docs_on else None,
 )
 
 # ── CORS — restricted to an explicit allow-list of origins ─────────────────────
@@ -442,6 +448,36 @@ async def session_auth_middleware(request: Request, call_next):
             status_code=status.HTTP_401_UNAUTHORIZED,
             content={"detail": "Authentication required"},
         )
+    return await call_next(request)
+
+
+# ── Rate limiting middleware (outermost) ──────────────────────────────────────
+
+# Registered last so it runs FIRST — abusive bursts are rejected before they
+# reach auth/session resolution or DB work.
+from app.security.ratelimit import _RateLimiter
+
+_api_rate_limiter = _RateLimiter(int(getattr(settings, "rate_limit_per_minute", 300) or 0))
+
+
+def _client_key(request: Request) -> str:
+    # Honor a proxy's forwarded client IP when present, else the socket peer.
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    if request.url.path.startswith("/api/") and request.method != "OPTIONS":
+        allowed, retry_after = _api_rate_limiter.allow(_client_key(request))
+        if not allowed:
+            return JSONResponse(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                content={"detail": "Rate limit exceeded. Slow down and retry shortly."},
+                headers={"Retry-After": str(retry_after)},
+            )
     return await call_next(request)
 
 

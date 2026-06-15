@@ -17,6 +17,7 @@ from app.security.passwords import verify_password
 from app.security.identity import (
     create_session,
     revoke_session,
+    revoke_all_sessions,
     get_current_user,
     accessible_customer_ids,
     SESSION_COOKIE_NAME,
@@ -102,6 +103,15 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
     revoke_session(db, raw_token)
     response.delete_cookie(SESSION_COOKIE_NAME, path="/")
     return {"message": "Logged out"}
+
+
+@router.post("/logout-all")
+def logout_all(request: Request, response: Response, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Sign out of every session for the current user (all devices)."""
+    revoked = revoke_all_sessions(db, user.id)
+    response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    audit_log("auth.logout_all", user_id=user.id, email=user.email, sessions_revoked=revoked)
+    return {"message": "Signed out of all sessions.", "sessions_revoked": revoked}
 
 
 @router.get("/me")

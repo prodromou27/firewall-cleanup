@@ -24,9 +24,27 @@ class Settings(BaseSettings):
     # Default: localhost only. In production set to your actual frontend URL.
     allowed_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
+    # Deployment environment. When set to "production", interactive API docs
+    # (/docs, /redoc, /openapi.json) are disabled unless enable_docs is True.
+    environment: str = "development"
+    enable_docs: bool = False
+
+    # General per-client API rate limit (requests per minute, per source IP).
+    # In-process token bucket — effective for single-process deployments; back
+    # with a shared store (Redis) for multi-worker/multi-node. Set 0 to disable.
+    rate_limit_per_minute: int = 300
+
     # ── User authentication (Phase 1) ─────────────────────────────────────────
-    # Session lifetime in hours for the HttpOnly session cookie.
+    # Session lifetime in hours for the HttpOnly session cookie (absolute cap).
     session_ttl_hours: int = 12
+    # Idle timeout: a session with no activity for this many minutes is revoked
+    # even if the absolute TTL has not elapsed. Set 0 to disable idle expiry.
+    session_idle_timeout_minutes: int = 60
+
+    @property
+    def docs_enabled(self) -> bool:
+        """Docs are on in non-production environments, or when explicitly enabled."""
+        return self.enable_docs or self.environment.strip().lower() != "production"
     # Set cookies with the Secure flag (HTTPS only). Leave False for local dev
     # over http://localhost; set True in production behind TLS.
     cookie_secure: bool = False

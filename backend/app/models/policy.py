@@ -130,6 +130,8 @@ class AnalysisRun(Base):
     completed_at = Column(DateTime, nullable=True)
     status = Column(String, default="running")
     findings_created = Column(Integer, default=0)
+    # JSON-encoded {severity: count} snapshot at completion time, for trend charts.
+    severity_snapshot = Column(Text, nullable=True)
     error = Column(Text, nullable=True)
     run_by = Column(String, default="engineer")
 

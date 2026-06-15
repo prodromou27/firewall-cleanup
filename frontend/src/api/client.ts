@@ -96,6 +96,11 @@ export const deletePolicy = (id: string) =>
 export const reanalyzePolicy = (id: string) =>
   api.post(`/policies/${id}/reanalyze`).then(r => r.data)
 
+export const getFindingsTrend = (customerId?: string, days = 90) =>
+  api.get('/policies/findings-trend', {
+    params: { days, ...(customerId ? { customer_id: customerId } : {}) },
+  }).then(r => r.data as { days: number; points: Array<{ date: string; total: number; runs: number; Critical: number; High: number; Medium: number; Low: number; Informational: number }> })
+
 export const getDashboardStats = (customerId?: string) =>
   api.get('/policies/stats', { params: customerId ? { customer_id: customerId } : undefined }).then(r => r.data)
 

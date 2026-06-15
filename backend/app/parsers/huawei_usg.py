@@ -74,6 +74,20 @@ def _strip_quotes(s: str) -> str:
     return s.strip().strip('"').strip("'")
 
 
+def _huawei_port_range(port_str: str) -> Tuple[int, int]:
+    """Parse a Huawei destination-port spec into (start, end).
+
+    Handles single ports ('443'), ranges ('1024 2048' / '1024-2048' /
+    '1024 to 2048'), and 'any'/empty (full range).
+    """
+    if not port_str or port_str.strip().lower() == "any":
+        return 0, 65535
+    nums = re.findall(r"\d+", port_str)
+    if not nums:
+        return 0, 65535
+    return int(nums[0]), int(nums[-1])
+
+
 # ── main parser ───────────────────────────────────────────────────────────────
 
 class HuaweiUSGParser(BaseParser):
@@ -401,6 +415,11 @@ class HuaweiUSGParser(BaseParser):
                 kind = m.group(2)
                 members: List[str] = []
                 protos: List[str] = []
+                # Structured fields from the first concrete service line, so the
+                # analysis engine can reason about ports (not just a display string).
+                proto1: Optional[str] = None
+                ps1: Optional[int] = None
+                pe1: Optional[int] = None
                 i += 1
                 while i < len(lines):
                     inner = lines[i]
@@ -427,18 +446,33 @@ class HuaweiUSGParser(BaseParser):
                         dst_port = sm.group(3) or "any"
                         entry = f"{proto}/{dst_port}"
                         members.append(entry); protos.append(entry)
+                        if proto1 is None:
+                            proto1 = proto.lower()
+                            ps1, pe1 = _huawei_port_range(dst_port)
                     elif gm:
                         members.append(gm.group(1))
                     elif dm:
-                        entry = f"{dm.group(1).upper()}/{dm.group(2).strip()}"
+                        proto = dm.group(1).upper()
+                        port = dm.group(2).strip()
+                        entry = f"{proto}/{port}"
                         members.append(entry); protos.append(entry)
+                        if proto1 is None:
+                            proto1 = proto.lower()
+                            ps1, pe1 = _huawei_port_range(port)
                     i += 1
-                objects.append({
+                obj = {
                     "object_type": "service_group" if kind == "group" else "service",
                     "name":        name,
                     "members":     members,
                     "value":       ", ".join(protos[:1]) if protos else "",
-                })
+                }
+                # Concrete single-service objects carry structured port data so
+                # downstream port-based detectors work.
+                if kind != "group" and proto1:
+                    obj["protocol"] = proto1
+                    obj["port_start"] = ps1
+                    obj["port_end"] = pe1
+                objects.append(obj)
                 continue
             i += 1
         return objects
@@ -1023,7 +1057,9 @@ class HuaweiUSGParser(BaseParser):
         expected schema (mirrors the normalized object model in the spec).
         """
         otype = o.get("object_type", "host")
-        name  = o.get("name", "")
+        # Internal address/service/zone objects use "name"; NAT objects use
+        # "object_name" — accept either so no object ends up nameless.
+        name  = o.get("name") or o.get("object_name", "")
         value = o.get("value", "")
         members = o.get("members", [])
 
@@ -1053,8 +1089,9 @@ class HuaweiUSGParser(BaseParser):
             "members":       members,
             "comment":       o.get("comments", ""),
             "raw_data":      o.get("raw_data", {}),
-            # ORM columns not used by Huawei parser
-            "protocol": None,
-            "port_start": None,
-            "port_end": None,
+            # Structured service fields (set for concrete service objects so the
+            # analysis engine can reason about protocol/ports).
+            "protocol":   o.get("protocol"),
+            "port_start": o.get("port_start"),
+            "port_end":   o.get("port_end"),
         }

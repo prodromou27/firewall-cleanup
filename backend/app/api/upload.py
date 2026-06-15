@@ -25,7 +25,7 @@ _ALLOWED_EXTENSIONS = {".conf", ".txt", ".json", ".csv", ".log", ".cfg", ".xml"}
 
 # Per-vendor extension allow-list.
 _VENDOR_EXTENSIONS = {
-    "CheckPoint": {".csv"},
+    "CheckPoint": {".json", ".txt"},
     "FortiGate":  {".conf", ".txt", ".json", ".cfg"},
     "PaloAlto":   {".xml", ".json", ".conf"},
     "CiscoASA":   {".txt", ".conf", ".cfg"},

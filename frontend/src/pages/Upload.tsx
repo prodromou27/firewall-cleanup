@@ -101,14 +101,14 @@ export function Upload() {
   const isCheckPoint = selectedVendor === 'CheckPoint'
   const fileHint: Record<string, string> = {
     FortiGate:   '.conf or .json (FortiOS config export)',
-    CheckPoint:  '.csv (SmartConsole policy export)',
+    CheckPoint:  '.json (management API / policy package export)',
     PaloAlto:    '.xml (Panorama / device config export)',
     CiscoASA:    '.txt or .cfg (show running-config output)',
     HuaweiUSG:   '.txt or .cfg (display current-configuration output)',
   }
   const fileAccept: Record<string, string> = {
     FortiGate:   '.conf,.txt,.json,.cfg',
-    CheckPoint:  '.csv',
+    CheckPoint:  '.json,.txt',
     PaloAlto:    '.xml,.json',
     CiscoASA:    '.txt,.conf,.cfg',
     HuaweiUSG:   '.txt,.cfg,.conf',

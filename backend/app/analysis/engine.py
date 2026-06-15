@@ -17,6 +17,7 @@ from app.analysis.ip_utils import is_public_network
 from app.analysis import recommendation_library as _RL
 from app.config import settings
 import uuid
+import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -264,6 +265,9 @@ def run_analysis(policy_id: str, db: Session) -> str:
         run.status = "completed"
         run.completed_at = datetime.utcnow()
         run.findings_created = finding_count
+        # Severity snapshot for trend charting (counts at this run's completion).
+        _sev_snapshot = Counter(f.get("severity", "Informational") for f in findings)
+        run.severity_snapshot = json.dumps(dict(_sev_snapshot))
 
         db.commit()
         logger.info(f"Analysis complete for policy {policy_id}: {finding_count} findings")

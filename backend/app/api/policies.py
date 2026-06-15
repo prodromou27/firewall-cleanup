@@ -323,6 +323,69 @@ def get_dashboard_stats(
     }
 
 
+@router.get("/findings-trend")
+def get_findings_trend(
+    customer_id: Optional[str] = None,
+    days: int = Query(90, ge=7, le=365),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Findings-over-time trend from completed analysis runs, bucketed by day.
+
+    Tenant-isolated identically to the dashboard: a non-global user only sees
+    runs for policies of customers they may access. Each completed run
+    contributes its findings count (and severity snapshot, when available) to
+    the day it completed.
+    """
+    from datetime import datetime, timedelta
+
+    allowed = accessible_customer_ids(db, user)  # None == all customers
+    if customer_id:
+        require_customer_access(db, user, customer_id)
+
+    policy_q = db.query(FirewallPolicy.id)
+    if allowed is not None:
+        if not allowed:
+            return {"days": days, "points": []}
+        policy_q = policy_q.filter(FirewallPolicy.customer_id.in_(allowed))
+    if customer_id:
+        policy_q = policy_q.filter(FirewallPolicy.customer_id == customer_id)
+    scoped_ids = [pid for (pid,) in policy_q.all()]
+    if not scoped_ids:
+        return {"days": days, "points": []}
+
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    runs = (
+        db.query(AnalysisRun)
+        .filter(
+            AnalysisRun.policy_id.in_(scoped_ids),
+            AnalysisRun.status == "completed",
+            AnalysisRun.completed_at.isnot(None),
+            AnalysisRun.completed_at >= cutoff,
+        )
+        .order_by(AnalysisRun.completed_at.asc())
+        .all()
+    )
+
+    _SEVS = ["Critical", "High", "Medium", "Low", "Informational"]
+    buckets: dict = {}
+    for r in runs:
+        day = r.completed_at.date().isoformat()
+        b = buckets.setdefault(day, {"date": day, "total": 0, "runs": 0,
+                                     **{s: 0 for s in _SEVS}})
+        b["total"] += r.findings_created or 0
+        b["runs"] += 1
+        if r.severity_snapshot:
+            try:
+                snap = json.loads(r.severity_snapshot)
+                for s in _SEVS:
+                    b[s] += int(snap.get(s, 0))
+            except (ValueError, TypeError):
+                pass
+
+    return {"days": days, "points": [buckets[k] for k in sorted(buckets)]}
+
+
 @router.get("/{policy_id}")
 def get_policy(
     policy_id: str,

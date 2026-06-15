@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, CartesianGrid } from 'recharts'
 import {
   Shield, AlertTriangle, FileText, Users, ArrowRight,
   Activity, Ban, Eye, Layers, RefreshCw, Server, ChevronDown,
   TrendingUp, Package,
 } from 'lucide-react'
-import { getDashboardStats, getCustomers } from '../api/client'
+import { getDashboardStats, getCustomers, getFindingsTrend } from '../api/client'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useCustomer } from '../contexts/CustomerContext'
 import type { DashboardStats, Customer, RiskHeatmapEntry } from '../types'
@@ -170,6 +170,7 @@ export function Dashboard() {
   const navigate = useNavigate()
   const { activeCustomer, setActiveCustomer } = useCustomer()
   const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [trend, setTrend] = useState<Array<{ date: string; total: number }>>([])
   const [loading, setLoading] = useState(true)
   const [customers, setCustomers] = useState<Customer[]>([])
   // Use global customer context; fall back to URL param for backwards compat
@@ -183,6 +184,9 @@ export function Dashboard() {
     setLoading(true)
     getDashboardStats(selectedCustomer || undefined)
       .then(setStats).catch(console.error).finally(() => setLoading(false))
+    getFindingsTrend(selectedCustomer || undefined, 90)
+      .then(r => setTrend(r.points.map(p => ({ date: p.date, total: p.total }))))
+      .catch(() => setTrend([]))
   }, [selectedCustomer])
 
   const handleCustomerChange = (id: string) => {
@@ -396,6 +400,37 @@ export function Dashboard() {
             </div>
           </div>
         </div>
+
+        {/* ── Findings trend over time ── */}
+        {trend.length >= 2 && (
+          <div className="card">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-sm font-semibold text-gray-900">Findings Identified Over Time</h2>
+                <p className="text-xs text-gray-400 mt-0.5">Findings produced by analysis runs, by day (last 90 days)</p>
+              </div>
+              <TrendingUp className="w-4 h-4 text-gray-300" />
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <AreaChart data={trend} margin={{ left: 0, right: 16, top: 4 }}>
+                <defs>
+                  <linearGradient id="trendFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#2563eb" stopOpacity={0.25} />
+                    <stop offset="100%" stopColor="#2563eb" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false}
+                  tickFormatter={(d: string) => d.slice(5)} />
+                <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} width={36} />
+                <Tooltip
+                  contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb', boxShadow: '0 4px 6px -1px rgba(0,0,0,.1)' }}
+                />
+                <Area type="monotone" dataKey="total" name="Findings" stroke="#2563eb" strokeWidth={2} fill="url(#trendFill)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        )}
 
         {/* ── Bar chart + Heatmap ── */}
         {topTypeData.length > 0 && (

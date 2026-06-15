@@ -924,7 +924,7 @@ def _analyze_vpn_rules(rules: List[dict], obj_map: dict) -> List[dict]:
                 "any_destination": any_dst,
                 "any_service": any_svc,
             },
-            "recommendation": _RL.get("vpn_broad_access"),
+            "recommendation": _RL.get("vpn_access"),
         })
     return findings
 
@@ -958,7 +958,7 @@ def _analyze_negated_objects(rules: List[dict]) -> List[dict]:
                 "negated_sources": neg_srcs,
                 "negated_destinations": neg_dsts,
             },
-            "recommendation": _RL.get("negated_objects"),
+            "recommendation": _RL.get("negated_object"),
         })
     return findings
 
@@ -1312,10 +1312,5 @@ def _analyze_import_quality(
             "rules_with_last_hit": rules_with_last_hit,
             "confidence_impact": confidence_impact or ["None — full data available."],
         },
-        "recommendation": (
-            "Review the import quality summary to understand which findings are "
-            "available for this policy. Where hit-count, last-hit, or NAT data is "
-            "missing, consider exporting the configuration with usage statistics "
-            "included so a more complete review can be performed."
-        ),
+        "recommendation": _RL.get("import_quality"),
     }]

@@ -75,12 +75,12 @@ LIBRARY: dict[str, str] = {
         "and documented. Verify the associated security rule permits only the intended "
         "translated traffic. All NAT changes require engineer validation and change approval."
     ),
-    "vpn_broad_access": (
+    "vpn_access": (
         "Restrict VPN access rules to the minimum required source and destination. "
         "Replace broad network objects with specific host or subnet objects. Ensure VPN "
         "access is reviewed periodically as part of access recertification."
     ),
-    "negated_objects": (
+    "negated_object": (
         "Review rules using negated objects to confirm the intended traffic match is correct. "
         "Negated objects are counterintuitive and may produce unexpected permit/deny decisions. "
         "Consider rewriting the rule using explicit positive objects where possible."
@@ -149,9 +149,11 @@ LIBRARY: dict[str, str] = {
         "rule order. Consolidate or reorder to make intent explicit."
     ),
     "rdp_exposed": (
-        "RDP (port 3389) should never be directly exposed to untrusted networks. "
-        "Remove or restrict this rule immediately. Replace with VPN-gated access or a "
-        "jump host. This finding requires urgent review by the responsible engineer."
+        "RDP (port 3389) directly exposed to untrusted networks is a critical risk. "
+        "Review this rule urgently and confirm whether the exposure is genuinely required. "
+        "If no valid business requirement exists, raise a high-priority change request to "
+        "restrict the source to authorised management hosts or move access behind a VPN or "
+        "jump host. All changes require engineer validation and formal change approval."
     ),
     "ssh_exposed": (
         "SSH exposure to untrusted networks should be restricted to known source IPs. "
@@ -160,8 +162,18 @@ LIBRARY: dict[str, str] = {
     ),
     "database_exposed": (
         "Database ports should never be directly exposed to untrusted networks. "
-        "Remove or restrict this rule and route database access through an application "
-        "tier or VPN. This finding requires urgent review by the responsible engineer."
+        "Review this rule urgently and confirm whether the exposure is genuinely required. "
+        "If no valid business requirement exists, raise a high-priority change request to "
+        "restrict access or route it through an application tier or VPN. All changes require "
+        "engineer validation and formal change approval."
+    ),
+
+    # ── Import / data quality ───────────────────────────────────────────────────
+    "import_quality": (
+        "Review the import quality summary to understand which findings are available for "
+        "this policy. Where hit-count, last-hit, or NAT data is missing, consider exporting "
+        "the configuration with usage statistics included so a more complete review can be "
+        "performed."
     ),
 }
 

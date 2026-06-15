@@ -125,6 +125,14 @@ LIBRARY: dict[str, str] = {
         "remove or consolidate the duplicate through the formal change management process. "
         "Maintaining duplicate rules increases policy complexity without security benefit."
     ),
+    "lateral_movement_risk": (
+        "This rule permits traffic between two broad internal network segments, which "
+        "enables lateral (east-west) movement across the environment if any host in the "
+        "source range is compromised. Review whether such wide internal access is required; "
+        "if not, restrict the source and destination to the specific hosts or subnets that "
+        "need to communicate, and segment the network through the approved change management "
+        "process."
+    ),
     "mergeable_rules": (
         "These rules share the same source, destination, and action but use different "
         "services. They can typically be consolidated into a single rule using a service "

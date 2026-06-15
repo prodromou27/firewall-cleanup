@@ -75,6 +75,24 @@ def is_broad_network(value: str, threshold: int = 16) -> bool:
     return prefix <= threshold
 
 
+def is_public_network(value: str) -> bool:
+    """True if the value includes public (internet-routable) address space.
+
+    'any' (0.0.0.0/0) is treated as public. RFC1918 private ranges, loopback,
+    and link-local are not. Unparseable / named objects return False so that
+    only sources we can positively confirm as public are flagged.
+    """
+    if not value:
+        return False
+    if is_any(value):
+        return True
+    net = parse_ip_network(value)
+    if net is None:
+        return False
+    # is_private is True only when the entire network is within private space.
+    return not net.is_private
+
+
 def parse_ip_range(start: str, end: str):
     """Return list of networks covering an IP range."""
     try:

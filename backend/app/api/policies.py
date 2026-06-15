@@ -206,6 +206,23 @@ def get_dashboard_stats(
         _finding_filter(db.query(Finding.severity, func.count(Finding.id)))
         .group_by(Finding.severity).all()
     )
+
+    # Exposure posture — derived from findings_by_type (no extra query). Surfaces
+    # the highest-signal "reachable from untrusted networks / unencrypted" findings.
+    _EXPOSURE_LABELS = [
+        ("rdp_exposed", "RDP exposed"),
+        ("ssh_exposed", "SSH exposed"),
+        ("database_exposed", "Database exposed"),
+        ("cleartext_service", "Cleartext protocols"),
+    ]
+    _ftype_counts = {t: c for t, c in findings_by_type}
+    exposure_summary = {
+        "total": sum(_ftype_counts.get(t, 0) for t, _ in _EXPOSURE_LABELS),
+        "by_type": [
+            {"type": t, "label": lbl, "count": _ftype_counts.get(t, 0)}
+            for t, lbl in _EXPOSURE_LABELS if _ftype_counts.get(t, 0) > 0
+        ],
+    }
     vendor_dist = (
         _policy_filter(db.query(FirewallPolicy.vendor, func.count(FirewallPolicy.id)))
         .group_by(FirewallPolicy.vendor).all()
@@ -290,6 +307,7 @@ def get_dashboard_stats(
         "high_findings": high_findings,
         "findings_by_type": [{"type": t, "count": c} for t, c in findings_by_type],
         "findings_by_severity": [{"severity": s, "count": c} for s, c in findings_by_severity],
+        "exposure_summary": exposure_summary,
         "vendor_distribution": [{"vendor": v, "count": c} for v, c in vendor_dist],
         "top_customers_by_risk": [
             {

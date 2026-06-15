@@ -842,6 +842,7 @@ export function Findings() {
   const findingType = searchParams.get('finding_type') || ''
   const status = searchParams.get('status') || ''
   const policyId = searchParams.get('policy_id') || ''
+  const priority = searchParams.get('priority') || ''
 
   const load = useCallback(() => {
     setLoading(true)
@@ -851,10 +852,11 @@ export function Findings() {
     if (severity) p.severity = severity
     if (findingType) p.finding_type = findingType
     if (status) p.status = status
+    if (priority) p.priority = priority
     getFindings(p)
       .then(r => { setFindings(r.findings); setTotal(r.total); setSeverityCounts(r.severity_counts || {}) })
       .finally(() => setLoading(false))
-  }, [page, customerId, policyId, severity, findingType, status])
+  }, [page, customerId, policyId, severity, findingType, status, priority])
 
   useEffect(() => { load() }, [load])
   useEffect(() => {
@@ -884,7 +886,7 @@ export function Findings() {
     setSearchParams(p); setPage(1)
   }
 
-  const hasFilters = !!(severity || findingType || status || policyId)
+  const hasFilters = !!(severity || findingType || status || policyId || priority)
 
   // Build export — fetch with auth header then trigger blob download
   const [exporting, setExporting] = useState(false)
@@ -897,6 +899,7 @@ export function Findings() {
       if (severity) params.severity = severity
       if (findingType) params.finding_type = findingType
       if (status) params.status = status
+      if (priority) params.priority = priority
       const url = getFindingsExportUrl(params)
       const res = await fetch(url, { credentials: 'include' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -1022,6 +1025,15 @@ export function Findings() {
         >
           <option value="">All Statuses</option>
           {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+
+        <select
+          value={priority}
+          onChange={e => setFilter('priority', e.target.value)}
+          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-gray-50 focus:bg-white"
+        >
+          <option value="">All Priorities</option>
+          {PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
         </select>
 
         {hasFilters && (

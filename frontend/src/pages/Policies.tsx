@@ -206,6 +206,8 @@ export function PolicyDetail() {
     lateral_movement_risk: 'Lateral Movement Risk',
     mergeable_rules: 'Consolidation Candidate',
     no_cleanup_rule: 'Missing Cleanup Rule',
+    rule_order_optimization: 'Rule Order Optimization',
+    large_rule_section: 'Oversized Section',
     empty_group: 'Empty Groups',
     large_group: 'Large Groups',
     broad_network: 'Broad Networks',

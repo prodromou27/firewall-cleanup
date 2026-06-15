@@ -125,6 +125,21 @@ LIBRARY: dict[str, str] = {
         "remove or consolidate the duplicate through the formal change management process. "
         "Maintaining duplicate rules increases policy complexity without security benefit."
     ),
+    "rule_order_optimization": (
+        "This frequently-matched rule is positioned below a number of rules that receive "
+        "no traffic. Firewalls evaluate rules top-to-bottom, so placing high-traffic rules "
+        "above unused ones reduces per-packet evaluation overhead and improves performance. "
+        "Review the rule order and, if no dependency requires the current position, consider "
+        "promoting this rule. Reordering must be performed manually through the approved "
+        "change management process — this tool does not modify rule order."
+    ),
+    "large_rule_section": (
+        "This policy section contains a large number of rules, which makes the rule base "
+        "harder to read, audit, and troubleshoot. Industry guidance recommends keeping "
+        "sections to roughly 20 rules or fewer. Review whether the section can be divided "
+        "into smaller, purpose-specific sections through the approved change management "
+        "process."
+    ),
     "lateral_movement_risk": (
         "This rule permits traffic between two broad internal network segments, which "
         "enables lateral (east-west) movement across the environment if any host in the "

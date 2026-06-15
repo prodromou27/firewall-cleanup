@@ -54,6 +54,8 @@ const FINDING_TYPES: Record<string, string> = {
   // Policy structure
   mergeable_rules: 'Consolidation Candidate',
   no_cleanup_rule: 'Missing Cleanup Rule',
+  rule_order_optimization: 'Rule Order Optimization',
+  large_rule_section: 'Oversized Section',
   // Object analysis
   unused_object: 'Unused Object',
   duplicate_object: 'Duplicate Object',
@@ -82,6 +84,8 @@ const FINDING_ICONS: Record<string, React.ReactNode> = {
   mergeable_rules: <Copy className="w-3.5 h-3.5" />,
   no_cleanup_rule: <Shield className="w-3.5 h-3.5" />,
   lateral_movement_risk: <AlertTriangle className="w-3.5 h-3.5" />,
+  rule_order_optimization: <Activity className="w-3.5 h-3.5" />,
+  large_rule_section: <Layers className="w-3.5 h-3.5" />,
 }
 
 // Full spec-aligned status list (Section 15)

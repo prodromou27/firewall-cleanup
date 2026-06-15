@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.config import settings
 from app.models.user import User
-from app.security.passwords import verify_password
+from app.security.passwords import verify_password, hash_password, validate_password_policy
 from app.security.identity import (
     create_session,
     revoke_session,
@@ -31,6 +31,11 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
 
 
 def _client_ip(request: Request) -> str:
@@ -112,6 +117,37 @@ def logout_all(request: Request, response: Response, user: User = Depends(get_cu
     response.delete_cookie(SESSION_COOKIE_NAME, path="/")
     audit_log("auth.logout_all", user_id=user.id, email=user.email, sessions_revoked=revoked)
     return {"message": "Signed out of all sessions.", "sessions_revoked": revoked}
+
+
+@router.post("/change-password")
+def change_password(
+    body: ChangePasswordRequest,
+    request: Request,
+    response: Response,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Self-service password change. Verifies the current password, enforces the
+    password policy, updates the hash, and revokes all OTHER sessions (the
+    caller's current session is kept alive).
+    """
+    if not verify_password(body.current_password, user.password_hash):
+        audit_log("auth.change_password_failed", user_id=user.id, email=user.email)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect.")
+    if body.new_password == body.current_password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New password must differ from the current password.")
+    try:
+        validate_password_policy(body.new_password)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    user.password_hash = hash_password(body.new_password)
+    db.commit()
+    # Revoke every other session so a stolen/old session can't survive a change.
+    current_token = request.cookies.get(SESSION_COOKIE_NAME)
+    revoked = revoke_all_sessions(db, user.id, except_token=current_token)
+    audit_log("auth.change_password", user_id=user.id, email=user.email, other_sessions_revoked=revoked)
+    return {"message": "Password changed.", "other_sessions_revoked": revoked}
 
 
 @router.get("/me")

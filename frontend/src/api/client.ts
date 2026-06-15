@@ -52,6 +52,12 @@ export const login = (email: string, password: string) =>
 export const logout = () =>
   api.post('/auth/logout').then(r => r.data)
 
+export const logoutAll = () =>
+  api.post('/auth/logout-all').then(r => r.data)
+
+export const changePassword = (current_password: string, new_password: string) =>
+  api.post('/auth/change-password', { current_password, new_password }).then(r => r.data)
+
 export const getMe = () =>
   api.get('/auth/me').then(r => r.data.user as CurrentUser)
 

@@ -21,7 +21,7 @@ from app.models.user import (
     ALL_ROLES, GLOBAL_ROLES, ROLE_SYSTEM_ADMIN,
 )
 from app.models.customer import Customer
-from app.security.passwords import hash_password
+from app.security.passwords import hash_password, validate_password_policy
 from app.security.identity import (
     get_current_user, require_capability, accessible_customer_ids,
 )
@@ -29,8 +29,6 @@ from app.security.rbac import CAP_MANAGE_USERS
 from app.security.audit import audit_log
 
 router = APIRouter(prefix="/api/users", tags=["users"])
-
-_MIN_PASSWORD_LEN = 12
 
 
 # ── Schemas ────────────────────────────────────────────────────────────────────
@@ -56,42 +54,11 @@ class PasswordReset(BaseModel):
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-# Weak base words: a password is rejected if it contains any of these (so
-# "Password123!", "welcome2024", etc. are all caught, not just exact matches).
-_WEAK_BASE_WORDS = (
-    "password", "passw0rd", "qwerty", "letmein", "welcome", "changeme",
-    "iloveyou", "monkey", "admin", "12345678",
-)
-
-
 def _validate_password(password: str) -> None:
-    pw = password or ""
-    if len(pw) < _MIN_PASSWORD_LEN:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Password must be at least {_MIN_PASSWORD_LEN} characters.",
-        )
-    # Require variety: at least 3 of the 4 character classes.
-    classes = sum([
-        any(c.islower() for c in pw),
-        any(c.isupper() for c in pw),
-        any(c.isdigit() for c in pw),
-        any(not c.isalnum() for c in pw),
-    ])
-    if classes < 3:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Password must include at least three of: lowercase, uppercase, "
-                "digit, and symbol."
-            ),
-        )
-    lowered = pw.lower()
-    if any(word in lowered for word in _WEAK_BASE_WORDS):
-        raise HTTPException(
-            status_code=400,
-            detail="Password contains a common, easily-guessed word; choose something less predictable.",
-        )
+    try:
+        validate_password_policy(password)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 def _validate_role(role: str) -> None:

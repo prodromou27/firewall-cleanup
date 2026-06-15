@@ -5,7 +5,7 @@ import {
   Lock, Download, Upload, Database, Key,
   AlertOctagon,
 } from 'lucide-react'
-import { getSettings, updateSettings } from '../api/client'
+import { getSettings, updateSettings, changePassword, logoutAll } from '../api/client'
 
 interface SettingsData {
   inactivity_threshold_low: number
@@ -36,6 +36,61 @@ function SectionTitle({ icon: Icon, title, subtitle }: { icon: React.ElementType
       <div>
         <h2 className="text-base font-bold text-gray-900">{title}</h2>
         {subtitle && <p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>}
+      </div>
+    </div>
+  )
+}
+
+function ChangePasswordCard() {
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+
+  const submit = async () => {
+    setError(''); setSuccess('')
+    if (next !== confirm) { setError('New password and confirmation do not match.'); return }
+    setSaving(true)
+    try {
+      const r = await changePassword(current, next)
+      const extra = r.other_sessions_revoked ? ` ${r.other_sessions_revoked} other session(s) signed out.` : ''
+      setSuccess('Password changed.' + extra)
+      setCurrent(''); setNext(''); setConfirm('')
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setError(detail || 'Could not change password.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="card">
+      <SectionTitle icon={Key} title="Change Password" subtitle="Update your own password. Requires at least 12 characters with mixed character types." />
+      <div className="space-y-3 max-w-md">
+        <input type="password" autoComplete="current-password" placeholder="Current password"
+          value={current} onChange={e => setCurrent(e.target.value)}
+          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 focus:bg-white" />
+        <input type="password" autoComplete="new-password" placeholder="New password"
+          value={next} onChange={e => setNext(e.target.value)}
+          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 focus:bg-white" />
+        <input type="password" autoComplete="new-password" placeholder="Confirm new password"
+          value={confirm} onChange={e => setConfirm(e.target.value)}
+          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 focus:bg-white" />
+        {error && <p className="text-sm text-red-600 flex items-center gap-1"><XCircle className="w-4 h-4" /> {error}</p>}
+        {success && <p className="text-sm text-green-600 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" /> {success}</p>}
+        <button onClick={submit} disabled={saving || !current || !next || !confirm}
+          className="btn-primary flex items-center gap-2 disabled:opacity-50">
+          {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Key className="w-4 h-4" />}
+          {saving ? 'Updating…' : 'Change Password'}
+        </button>
+        <p className="text-xs text-gray-400">
+          Changing your password signs you out of all other sessions.{' '}
+          <button onClick={() => logoutAll().then(() => { window.location.href = '/' })}
+            className="text-blue-600 hover:text-blue-800 underline">Sign out everywhere now</button>.
+        </p>
       </div>
     </div>
   )
@@ -509,6 +564,7 @@ export function Settings() {
         {/* ── Security ── */}
         {activeTab === 'security' && (
           <div className="space-y-5">
+            <ChangePasswordCard />
             {/* Live auth status from backend */}
             <div className="card">
               <SectionTitle icon={Lock} title="Authentication & Access Control" subtitle="Live status from backend configuration" />

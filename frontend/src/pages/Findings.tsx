@@ -50,6 +50,7 @@ const FINDING_TYPES: Record<string, string> = {
   ssh_exposed: 'SSH Exposed',
   database_exposed: 'Database Exposed',
   cleartext_service: 'Cleartext Protocol',
+  inbound_from_internet: 'Inbound From Internet',
   lateral_movement_risk: 'Lateral Movement Risk',
   // Policy structure
   mergeable_rules: 'Consolidation Candidate',
@@ -84,6 +85,7 @@ const FINDING_ICONS: Record<string, React.ReactNode> = {
   mergeable_rules: <Copy className="w-3.5 h-3.5" />,
   no_cleanup_rule: <Shield className="w-3.5 h-3.5" />,
   lateral_movement_risk: <AlertTriangle className="w-3.5 h-3.5" />,
+  inbound_from_internet: <Shield className="w-3.5 h-3.5" />,
   rule_order_optimization: <Activity className="w-3.5 h-3.5" />,
   large_rule_section: <Layers className="w-3.5 h-3.5" />,
 }

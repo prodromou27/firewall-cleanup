@@ -203,6 +203,7 @@ export function PolicyDetail() {
     ssh_exposed: 'SSH Exposed',
     database_exposed: 'Database Exposed',
     cleartext_service: 'Cleartext Protocol',
+    inbound_from_internet: 'Inbound From Internet',
     lateral_movement_risk: 'Lateral Movement Risk',
     mergeable_rules: 'Consolidation Candidate',
     no_cleanup_rule: 'Missing Cleanup Rule',

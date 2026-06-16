@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Eye, Lock, AlertCircle, Loader2 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
-import logoImg from '../assets/logo.png'
+import logoImg from '../assets/logo-onlight.png'
 
 export function Login() {
   const { login } = useAuth()

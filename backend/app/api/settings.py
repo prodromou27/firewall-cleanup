@@ -40,6 +40,8 @@ class SettingsUpdate(BaseModel):
     severity_high_threshold: Optional[int] = None
     severity_medium_threshold: Optional[int] = None
     severity_low_threshold: Optional[int] = None
+    # Allowed origin subnets (CIDRs) for CORS/CSRF — LAN access
+    allowed_origin_subnets: Optional[List[str]] = None
 
 
 _THRESHOLD_KEYS = [
@@ -77,6 +79,14 @@ def _set_db_setting(db: Session, key: str, value: str):
     else:
         db.add(AppSettings(key=key, value=value))
     db.commit()
+
+
+def _get_allowed_subnets(db: Session) -> List[str]:
+    """DB-stored origin subnets, falling back to the env/config default."""
+    raw = _get_db_setting(db, "allowed_origin_subnets")
+    if raw is None:
+        raw = app_settings.allowed_origin_subnets or ""
+    return [c.strip() for c in raw.split(",") if c.strip()]
 
 
 def _get_threshold(db: Session, key: str, default: int) -> int:
@@ -152,6 +162,8 @@ def get_settings(
             "auth_mode":      "session",
             "secret_key_set": secret_set,
         },
+        # Allowed origin subnets (CIDRs) — DB override, else env default.
+        "allowed_origin_subnets": _get_allowed_subnets(db),
         # App info
         "app_version": "2.1.0",
     }
@@ -177,6 +189,17 @@ def update_settings(
     if body.nvd_api_key is not None:
         _set_db_setting(db, "nvd_api_key", body.nvd_api_key.strip())
         updated.append("nvd_api_key")
+
+    if body.allowed_origin_subnets is not None:
+        from app.security import origin_policy
+        from fastapi import HTTPException
+        cidrs = [c.strip() for c in body.allowed_origin_subnets if c and c.strip()]
+        _, invalid = origin_policy.parse_cidrs(cidrs)
+        if invalid:
+            raise HTTPException(status_code=400, detail=f"Invalid CIDR(s): {', '.join(invalid)}")
+        _set_db_setting(db, "allowed_origin_subnets", ",".join(cidrs))
+        origin_policy.set_subnets(cidrs)   # apply at runtime (no restart)
+        updated.append("allowed_origin_subnets")
 
     # Threshold overrides stored in DB
     for key in _THRESHOLD_KEYS:

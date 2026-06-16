@@ -98,7 +98,6 @@ export function Upload() {
   const selectedCustomerId = watch('customer_id')
   const selectedVendor = watch('vendor')
   const selectedCustomer = customers.find(c => c.id === selectedCustomerId)
-  const isCheckPoint = selectedVendor === 'CheckPoint'
   const fileHint: Record<string, string> = {
     FortiGate:   '.conf or .json (FortiOS config export)',
     CheckPoint:  '.json (management API / policy package export)',

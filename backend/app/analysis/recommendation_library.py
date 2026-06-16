@@ -140,6 +140,16 @@ LIBRARY: dict[str, str] = {
         "into smaller, purpose-specific sections through the approved change management "
         "process."
     ),
+    "inbound_from_internet": (
+        "This rule permits inbound traffic from an untrusted source (the internet or a "
+        "public network) directly to an internal system. NIST SP 800-41 and PCI DSS require "
+        "every inbound allow rule to carry a documented business justification and to be as "
+        "specific as possible. Review the rule: confirm the business need, restrict the "
+        "source to the minimum required external addresses, limit the service to specific "
+        "ports, ensure logging is enabled, and where possible terminate the connection in a "
+        "DMZ rather than allowing direct access to the internal network. All changes require "
+        "engineer validation and approved change management."
+    ),
     "lateral_movement_risk": (
         "This rule permits traffic between two broad internal network segments, which "
         "enables lateral (east-west) movement across the environment if any host in the "

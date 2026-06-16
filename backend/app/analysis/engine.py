@@ -96,6 +96,9 @@ def run_analysis(policy_id: str, db: Session) -> str:
         # 4d. Lateral-movement risk (broad internal segment -> broad internal segment)
         findings.extend(_analyze_lateral_movement(rules, obj_map))
 
+        # 4e. Direct inbound exposure (untrusted source -> internal destination)
+        findings.extend(_analyze_inbound_exposure(rules, obj_map))
+
         # 5. Duplicate rules
         findings.extend(detect_duplicates(rules, obj_map))
 
@@ -998,6 +1001,76 @@ def _analyze_cleanup_rule(rules: List[dict], obj_map: dict) -> List[dict]:
         "evidence": {"enabled_rule_count": len(enabled), "explicit_cleanup_rule": False},
         "recommendation": _RL.get("no_cleanup_rule"),
     }]
+
+
+def _internal_dest_addrs(expanded: List[dict]) -> List[str]:
+    """Return concrete internal (private, non-'any') destination values."""
+    out = []
+    for a in expanded:
+        if a.get("type") in ("any", "unknown", "empty_group"):
+            continue
+        v = a.get("value", "")
+        if not v or is_public_network(v):
+            continue
+        out.append(v)
+    return out
+
+
+def _analyze_inbound_exposure(rules: List[dict], obj_map: dict) -> List[dict]:
+    """Detect allow rules permitting traffic from an untrusted source (internet /
+    public) directly to an internal destination — the core NIST SP 800-41 / PCI
+    DSS inbound-exposure concern. Distinct from exposed_services (specific
+    sensitive ports) and overly_permissive (any/any).
+    """
+    findings = []
+    for rule in rules:
+        action = (rule.get("action") or "").lower()
+        if action not in ("accept", "allow", "permit"):
+            continue
+        if not rule.get("enabled", True):
+            continue
+
+        exposure, public_srcs = _untrusted_source(rule, obj_map)
+        if exposure is None:
+            continue
+        internal_dsts = _internal_dest_addrs(expand_rule_destinations(rule, obj_map))
+        if not internal_dsts:
+            continue
+
+        any_svc = has_any_service(rule, obj_map)
+        severity = "Critical" if any_svc else "High"
+        rule_id = rule.get("rule_id") or rule.get("rule_number", "?")
+        rule_name = rule.get("rule_name") or f"Rule {rule_id}"
+        src_desc = (
+            "any source (the entire internet)" if exposure == "any"
+            else f"public source(s) {', '.join(public_srcs)}"
+        )
+        svc_note = (
+            " The rule permits any service, so every port on the internal target is "
+            "reachable from the internet." if any_svc else ""
+        )
+        findings.append({
+            "finding_type": "inbound_from_internet",
+            "severity": severity,
+            "confidence": "Medium",
+            "title": f"Rule {rule_id} allows direct inbound access from the internet to an internal host",
+            "description": (
+                f"{rule_name} permits inbound traffic from {src_desc} directly to internal "
+                f"destination(s) ({', '.join(internal_dsts)}). Direct internet-to-internal "
+                "access is a primary attack surface; standards require it to be justified, "
+                "minimal, and ideally terminated in a DMZ." + svc_note
+            ),
+            "affected_rules": [rule.get("id")],
+            "evidence": {
+                "rule_id": rule_id,
+                "exposure": exposure,
+                "public_sources": public_srcs,
+                "internal_destinations": internal_dsts,
+                "any_service": any_svc,
+            },
+            "recommendation": _RL.get("inbound_from_internet"),
+        })
+    return findings
 
 
 def _analyze_no_logging(rules: List[dict], obj_map: dict) -> List[dict]:

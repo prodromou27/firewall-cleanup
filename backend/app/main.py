@@ -193,6 +193,22 @@ async def lifespan(app: FastAPI):
     except Exception as _exc:
         logger.error("Startup recovery failed: %s", _exc)
 
+    # Load runtime origin-subnet allow-list from DB (overrides the env seed).
+    try:
+        from app.database import SessionLocal
+        from app.models.settings import AppSettings
+        _odb = SessionLocal()
+        try:
+            row = _odb.query(AppSettings).filter(AppSettings.key == "allowed_origin_subnets").first()
+            if row and row.value:
+                cidrs = [c.strip() for c in row.value.split(",") if c.strip()]
+                origin_policy.set_subnets(cidrs)
+                logger.info("Loaded allowed_origin_subnets from DB: %s", origin_policy.get_cidrs())
+        finally:
+            _odb.close()
+    except Exception as _osub_exc:
+        logger.error("Failed to load origin subnets from DB: %s", _osub_exc)
+
     task = asyncio.create_task(_auto_sync_loop())
 
     # Start syslog listener for real-time policy-change detection
@@ -302,15 +318,16 @@ if not _allowed_origins:
 import ipaddress as _ipaddress
 from urllib.parse import urlparse as _urlparse
 
-_allowed_networks = []
-for _c in (settings.allowed_origin_subnets or "").split(","):
-    _c = _c.strip()
-    if not _c:
-        continue
-    try:
-        _allowed_networks.append(_ipaddress.ip_network(_c, strict=False))
-    except ValueError:
-        logger.warning("Ignoring invalid ALLOWED_ORIGIN_SUBNETS entry: %r", _c)
+from app.security import origin_policy
+
+# Seed the runtime subnet allow-list from env (a DB override, if set, is loaded
+# during startup in lifespan). CSRF consults origin_policy live; CORS builds its
+# regex once below from this initial set.
+_env_cidrs = [c.strip() for c in (settings.allowed_origin_subnets or "").split(",") if c.strip()]
+_invalid = origin_policy.set_subnets(_env_cidrs)
+if _invalid:
+    logger.warning("Ignoring invalid ALLOWED_ORIGIN_SUBNETS entries: %s", _invalid)
+_allowed_networks = [_ipaddress.ip_network(c, strict=False) for c in origin_policy.get_cidrs()]
 
 
 def _cidr_to_host_regex(net) -> Optional[str]:
@@ -334,18 +351,7 @@ if _host_regexes:
     logger.info("CORS/CSRF subnet origin regex enabled: %s", _origin_regex)
 
 
-def _origin_in_allowed_subnet(origin: str) -> bool:
-    """True if the origin's host IP falls within an allowed subnet."""
-    if not _allowed_networks or not origin:
-        return False
-    try:
-        host = _urlparse(origin).hostname
-        if not host:
-            return False
-        ip = _ipaddress.ip_address(host)
-    except ValueError:
-        return False
-    return any(ip in net for net in _allowed_networks)
+_origin_in_allowed_subnet = origin_policy.origin_in_allowed_subnet
 
 
 app.add_middleware(

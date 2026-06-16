@@ -22,6 +22,7 @@ interface SettingsData {
   nvd_api_key_set?: boolean
   syslog_listener?: { active: boolean; port: number; cooldown_seconds?: number }
   security?: { auth_enabled: boolean; auth_mode: string; secret_key_set: boolean }
+  allowed_origin_subnets?: string[]
   app_version?: string
 }
 
@@ -153,6 +154,12 @@ export function Settings() {
   const [savingThresh, setSavingThresh] = useState(false)
   const [threshSaved,  setThreshSaved]  = useState(false)
 
+  // Allowed origin subnets (LAN access)
+  const [subnetText, setSubnetText]   = useState('')
+  const [savingSubnets, setSavingSubnets] = useState(false)
+  const [subnetError, setSubnetError] = useState('')
+  const [subnetSaved, setSubnetSaved] = useState(false)
+
   // Backup
   const [backupStatus, setBackupStatus] = useState<string | null>(null)
 
@@ -170,6 +177,7 @@ export function Settings() {
         setSevHigh(data.severity_thresholds.high)
         setSevMedium(data.severity_thresholds.medium)
         setSevLow(data.severity_thresholds.low)
+        setSubnetText((data.allowed_origin_subnets || []).join('\n'))
       })
       .finally(() => setLoading(false))
   }
@@ -228,6 +236,21 @@ export function Settings() {
       load()
     } catch (e) { console.error(e) }
     finally { setSavingThresh(false) }
+  }
+
+  const saveSubnets = async () => {
+    setSubnetError(''); setSubnetSaved(false)
+    const cidrs = subnetText.split(/[\n,]+/).map(s => s.trim()).filter(Boolean)
+    setSavingSubnets(true)
+    try {
+      await updateSettings({ allowed_origin_subnets: cidrs })
+      setSubnetSaved(true)
+      setTimeout(() => setSubnetSaved(false), 3000)
+      load()
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setSubnetError(detail || 'Could not save subnets.')
+    } finally { setSavingSubnets(false) }
   }
 
   const toggleEvent = (evt: string) =>
@@ -565,6 +588,35 @@ export function Settings() {
         {activeTab === 'security' && (
           <div className="space-y-5">
             <ChangePasswordCard />
+
+            {/* Allowed origin subnets — LAN access */}
+            <div className="card">
+              <SectionTitle icon={Network} title="Allowed Origin Subnets"
+                subtitle="IP ranges (CIDR) permitted to reach the app from a browser — for LAN access. One per line." />
+              <div className="space-y-3 max-w-md">
+                <textarea
+                  value={subnetText}
+                  onChange={e => setSubnetText(e.target.value)}
+                  rows={3}
+                  placeholder="192.168.201.0/24"
+                  spellCheck={false}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono bg-gray-50 focus:bg-white"
+                />
+                {subnetError && <p className="text-sm text-red-600 flex items-center gap-1"><XCircle className="w-4 h-4" /> {subnetError}</p>}
+                {subnetSaved && <p className="text-sm text-green-600 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" /> Saved — applies immediately, no restart.</p>}
+                <button onClick={saveSubnets} disabled={savingSubnets}
+                  className="btn-primary flex items-center gap-2">
+                  {savingSubnets ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                  {savingSubnets ? 'Saving…' : 'Save Subnets'}
+                </button>
+                <p className="text-xs text-gray-400">
+                  Leave empty to allow only <code className="bg-gray-100 px-1 rounded">localhost</code>. Each entry must be a valid
+                  CIDR (e.g. <code className="bg-gray-100 px-1 rounded">192.168.201.0/24</code>). Any host IP in these ranges may
+                  sign in on any port. Use HTTPS for real multi-machine deployments.
+                </p>
+              </div>
+            </div>
+
             {/* Live auth status from backend */}
             <div className="card">
               <SectionTitle icon={Lock} title="Authentication & Access Control" subtitle="Live status from backend configuration" />

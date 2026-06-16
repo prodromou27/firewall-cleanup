@@ -5,6 +5,7 @@ import logging.config
 import threading
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
+from typing import Optional
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -297,9 +298,60 @@ if not _allowed_origins:
         "will be rejected. Set ALLOWED_ORIGINS to your frontend URL(s)."
     )
 
+# Optional: allow whole IP subnets (CIDRs) as origins, for LAN access.
+import ipaddress as _ipaddress
+from urllib.parse import urlparse as _urlparse
+
+_allowed_networks = []
+for _c in (settings.allowed_origin_subnets or "").split(","):
+    _c = _c.strip()
+    if not _c:
+        continue
+    try:
+        _allowed_networks.append(_ipaddress.ip_network(_c, strict=False))
+    except ValueError:
+        logger.warning("Ignoring invalid ALLOWED_ORIGIN_SUBNETS entry: %r", _c)
+
+
+def _cidr_to_host_regex(net) -> Optional[str]:
+    """Build a host regex for an octet-aligned IPv4 CIDR (/8,/16,/24,/32)."""
+    if net.version != 4 or net.prefixlen % 8 != 0:
+        logger.warning(
+            "Subnet %s is not octet-aligned; CORS regex skipped (CSRF still "
+            "honors it via membership).", net,
+        )
+        return None
+    fixed = net.prefixlen // 8
+    octets = str(net.network_address).split(".")
+    parts = [octets[i] if i < fixed else r"\d{1,3}" for i in range(4)]
+    return r"\.".join(parts)
+
+
+_origin_regex = None
+_host_regexes = [r for net in _allowed_networks if (r := _cidr_to_host_regex(net))]
+if _host_regexes:
+    _origin_regex = r"^https?://(" + "|".join(_host_regexes) + r")(:\d+)?$"
+    logger.info("CORS/CSRF subnet origin regex enabled: %s", _origin_regex)
+
+
+def _origin_in_allowed_subnet(origin: str) -> bool:
+    """True if the origin's host IP falls within an allowed subnet."""
+    if not _allowed_networks or not origin:
+        return False
+    try:
+        host = _urlparse(origin).hostname
+        if not host:
+            return False
+        ip = _ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return any(ip in net for net in _allowed_networks)
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
+    allow_origin_regex=_origin_regex,   # whole-subnet origins, when configured
     allow_credentials=True,       # cookies ride along on cross-origin requests
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Accept", "Authorization"],
@@ -404,7 +456,9 @@ async def csrf_protect(request: Request, call_next):
         # (Absent Origin+Referer ⇒ not a browser CSRF vector — e.g. server-side
         # API client — so we let endpoint auth handle it.)
         if origin:
-            if origin not in _ALLOWED_ORIGIN_SET and origin != _request_self_origin(request):
+            if (origin not in _ALLOWED_ORIGIN_SET
+                    and origin != _request_self_origin(request)
+                    and not _origin_in_allowed_subnet(origin)):
                 return JSONResponse(
                     status_code=status.HTTP_403_FORBIDDEN,
                     content={"detail": "Cross-origin request rejected (CSRF protection)."},

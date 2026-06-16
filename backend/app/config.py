@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     # Default: localhost only. In production set to your actual frontend URL.
     allowed_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
+    # Additional allowed origins by IP subnet (comma-separated CIDRs), e.g.
+    # "192.168.201.0/24". Any http(s) origin whose host IP falls in one of these
+    # ranges is accepted by CORS and CSRF, on any port. Use for LAN access.
+    allowed_origin_subnets: str = ""
+
     # Deployment environment. When set to "production", interactive API docs
     # (/docs, /redoc, /openapi.json) are disabled unless enable_docs is True.
     environment: str = "development"

@@ -1,0 +1,53 @@
+# PolicyInsight — Linux/Docker stack with PostgreSQL.
+# Usage:
+#   cp .env.example .env   # then fill in SECRET_KEY, POSTGRES_PASSWORD, etc.
+#   docker compose up -d --build
+# App is served at http://localhost:${HTTP_PORT:-8080}
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-policyinsight}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-policyinsight}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-policyinsight} -d ${POSTGRES_DB:-policyinsight}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-policyinsight}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-policyinsight}
+      SECRET_KEY: ${SECRET_KEY}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080}
+      ALLOWED_ORIGIN_SUBNETS: ${ALLOWED_ORIGIN_SUBNETS:-}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    expose:
+      - "8000"
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+
+volumes:
+  pgdata:
+  uploads:

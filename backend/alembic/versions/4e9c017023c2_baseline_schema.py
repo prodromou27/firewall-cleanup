@@ -23,12 +23,12 @@ def upgrade() -> None:
     op.create_table('app_settings',
     sa.Column('key', sa.String(), nullable=False),
     sa.Column('value', sa.Text(), nullable=True),
-    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.PrimaryKeyConstraint('key')
     )
     op.create_table('audit_events',
     sa.Column('id', sa.String(), nullable=False),
-    sa.Column('ts', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('ts', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
     sa.Column('event', sa.String(), nullable=False),
     sa.Column('user_id', sa.String(), nullable=True),
     sa.Column('actor_email', sa.String(), nullable=True),
@@ -60,8 +60,8 @@ def upgrade() -> None:
     sa.Column('total_rules', sa.Integer(), nullable=True),
     sa.Column('total_findings', sa.Integer(), nullable=True),
     sa.Column('high_findings', sa.Integer(), nullable=True),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
-    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('name')
     )
@@ -72,8 +72,8 @@ def upgrade() -> None:
     sa.Column('password_hash', sa.String(), nullable=False),
     sa.Column('role', sa.String(), nullable=False),
     sa.Column('is_active', sa.Boolean(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
-    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.Column('last_login_at', sa.DateTime(), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
@@ -112,8 +112,8 @@ def upgrade() -> None:
     sa.Column('sync_status', sa.String(), nullable=True),
     sa.Column('last_error', sa.Text(), nullable=True),
     sa.Column('last_policy_id', sa.String(), nullable=True),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
-    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.ForeignKeyConstraint(['customer_id'], ['customers.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
@@ -121,7 +121,7 @@ def upgrade() -> None:
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('user_id', sa.String(), nullable=False),
     sa.Column('customer_id', sa.String(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.ForeignKeyConstraint(['customer_id'], ['customers.id'], ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
@@ -135,9 +135,9 @@ def upgrade() -> None:
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('user_id', sa.String(), nullable=False),
     sa.Column('token_hash', sa.String(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.Column('expires_at', sa.DateTime(), nullable=False),
-    sa.Column('last_seen_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
+    sa.Column('last_seen_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.Column('source_ip', sa.String(), nullable=True),
     sa.Column('user_agent', sa.String(), nullable=True),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
@@ -152,8 +152,8 @@ def upgrade() -> None:
     sa.Column('device_id', sa.String(), nullable=False),
     sa.Column('cpe_string', sa.String(), nullable=True),
     sa.Column('cve_data', sa.Text(), nullable=True),
-    sa.Column('last_checked', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
+    sa.Column('last_checked', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.ForeignKeyConstraint(['device_id'], ['firewall_devices.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('device_id')
@@ -166,7 +166,7 @@ def upgrade() -> None:
     sa.Column('vendor', sa.String(), nullable=False),
     sa.Column('policy_package', sa.String(), nullable=True),
     sa.Column('uploaded_by', sa.String(), nullable=True),
-    sa.Column('upload_date', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
+    sa.Column('upload_date', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.Column('original_filename', sa.String(), nullable=True),
     sa.Column('file_path', sa.String(), nullable=True),
     sa.Column('analysis_status', sa.String(), nullable=True),
@@ -181,8 +181,8 @@ def upgrade() -> None:
     sa.Column('cleanup_readiness_score', sa.Float(), nullable=True),
     sa.Column('health_score', sa.Float(), nullable=True),
     sa.Column('top_risk_drivers', sa.JSON(), nullable=True),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
-    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.ForeignKeyConstraint(['customer_id'], ['customers.id'], ),
     sa.ForeignKeyConstraint(['device_id'], ['firewall_devices.id'], ondelete='SET NULL'),
     sa.PrimaryKeyConstraint('id')
@@ -190,7 +190,7 @@ def upgrade() -> None:
     op.create_table('analysis_runs',
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('policy_id', sa.String(), nullable=False),
-    sa.Column('started_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
+    sa.Column('started_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.Column('completed_at', sa.DateTime(), nullable=True),
     sa.Column('status', sa.String(), nullable=True),
     sa.Column('findings_created', sa.Integer(), nullable=True),
@@ -224,8 +224,8 @@ def upgrade() -> None:
     sa.Column('risk_acceptance_expiry', sa.String(), nullable=True),
     sa.Column('risk_acceptance_ref', sa.String(), nullable=True),
     sa.Column('risk_accepted_by', sa.String(), nullable=True),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
-    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.ForeignKeyConstraint(['policy_id'], ['firewall_policies.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -244,7 +244,7 @@ def upgrade() -> None:
     sa.Column('used_by_rules', sa.JSON(), nullable=True),
     sa.Column('comment', sa.Text(), nullable=True),
     sa.Column('raw_data', sa.JSON(), nullable=True),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.ForeignKeyConstraint(['policy_id'], ['firewall_policies.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -280,7 +280,7 @@ def upgrade() -> None:
     sa.Column('risk_score', sa.Float(), nullable=True),
     sa.Column('risk_factors', sa.JSON(), nullable=True),
     sa.Column('raw_data', sa.JSON(), nullable=True),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.ForeignKeyConstraint(['policy_id'], ['firewall_policies.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -289,7 +289,7 @@ def upgrade() -> None:
     sa.Column('policy_id', sa.String(), nullable=False),
     sa.Column('device_id', sa.String(), nullable=True),
     sa.Column('revision_number', sa.Integer(), nullable=False),
-    sa.Column('synced_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
+    sa.Column('synced_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.Column('sync_source', sa.String(), nullable=True),
     sa.Column('rule_count', sa.Integer(), nullable=True),
     sa.Column('object_count', sa.Integer(), nullable=True),
@@ -312,7 +312,7 @@ def upgrade() -> None:
     sa.Column('comment', sa.Text(), nullable=False),
     sa.Column('old_status', sa.String(), nullable=True),
     sa.Column('new_status', sa.String(), nullable=True),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.ForeignKeyConstraint(['finding_id'], ['findings.id'], ),
     sa.PrimaryKeyConstraint('id')
     )

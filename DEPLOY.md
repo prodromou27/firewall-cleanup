@@ -12,7 +12,19 @@ Windows + SQLite developer setup lives on the `WindowServer` branch.
 ## Prerequisites
 - Docker Engine + Docker Compose v2
 
-## AlmaLinux 8/9 (step by step)
+## AlmaLinux — automated (recommended)
+One idempotent script does everything (install Docker, generate `.env` + secrets,
+open the firewall, build, launch, health-check). From the cloned repo on the host:
+```bash
+git clone https://github.com/prodromou27/firewall-cleanup.git
+cd firewall-cleanup && git checkout DEV
+sudo bash deploy/almalinux-deploy.sh          # or: HTTP_PORT=80 sudo bash deploy/almalinux-deploy.sh
+```
+On success it prints the URL and the generated admin password (saved in `.env`,
+mode 600). Re-running is safe — it preserves an existing `.env`. The manual
+steps below are the same thing broken out, for reference or troubleshooting.
+
+## AlmaLinux 8/9 (manual / step by step)
 ```bash
 # 1. Install Docker Engine + Compose plugin
 sudo dnf -y install dnf-plugins-core

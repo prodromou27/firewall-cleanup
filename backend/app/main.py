@@ -134,7 +134,12 @@ async def _auto_sync_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine)
+    # SQLite (dev) bootstraps the schema directly; PostgreSQL/other engines are
+    # managed by Alembic (`alembic upgrade head`, run before the app starts).
+    if engine.dialect.name == "sqlite":
+        Base.metadata.create_all(bind=engine)
+    else:
+        logger.info("Non-sqlite dialect '%s': schema managed by Alembic.", engine.dialect.name)
 
     # ── Schema migrations (additive-only, safe to re-run) ─────────────────────
     # These are SQLite-specific PRAGMA-based column adds for pre-existing dev

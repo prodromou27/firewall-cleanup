@@ -13,6 +13,7 @@ from app.config import settings as app_settings
 from app.models.user import User
 from app.security.identity import get_current_user, require_capability
 from app.security.rbac import CAP_MANAGE_SETTINGS, CAP_DOWNLOAD_BACKUP
+from app.security.audit import audit_log
 from pydantic import BaseModel
 from typing import Optional, List
 
@@ -211,6 +212,16 @@ def update_settings(
             _set_db_setting(db, key, str(val))
             updated.append(key)
 
+    if updated:
+        # Record the change in the audit trail (key names only — never secret
+        # values). The new subnet list is included since it governs access.
+        details = {"changed": updated}
+        if "allowed_origin_subnets" in updated:
+            details["allowed_origin_subnets"] = ",".join(
+                c.strip() for c in (body.allowed_origin_subnets or []) if c and c.strip()
+            )
+        audit_log("settings.update", user_id=user.id, email=user.email, **details)
+
     return {"updated": updated, "message": "Settings saved"}
 
 
@@ -299,9 +310,19 @@ def import_settings_json(
         raise HTTPException(status_code=400, detail="Invalid payload: 'settings' must be an object.")
 
     restored = 0
+    restored_keys = []
     for key, value in settings_data.items():
         if isinstance(value, str) and key:
             _set_db_setting(db, key, value)
             restored += 1
+            restored_keys.append(key)
 
+    # Re-apply runtime-effective settings that were restored.
+    if "allowed_origin_subnets" in restored_keys:
+        from app.security import origin_policy
+        raw = settings_data.get("allowed_origin_subnets") or ""
+        origin_policy.set_subnets([c.strip() for c in raw.split(",") if c.strip()])
+
+    audit_log("settings.restore", user_id=user.id, email=user.email,
+              restored=restored, keys=restored_keys)
     return {"restored": restored, "message": f"Restored {restored} settings entries."}

@@ -137,7 +137,14 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
 
     # ── Schema migrations (additive-only, safe to re-run) ─────────────────────
-    try:
+    # These are SQLite-specific PRAGMA-based column adds for pre-existing dev
+    # databases. On PostgreSQL (and other engines) create_all above already
+    # builds the full current schema, so they are skipped — proper schema
+    # evolution there is handled by Alembic.
+    if engine.dialect.name != "sqlite":
+        logger.info("Skipping SQLite PRAGMA migrations on '%s' dialect.", engine.dialect.name)
+    else:
+      try:
         with engine.connect() as _conn:
             from sqlalchemy import text as _text
             # Add device_id FK column to firewall_policies if not present
@@ -170,7 +177,7 @@ async def lifespan(app: FastAPI):
                 ))
                 _conn.commit()
                 logger.info("Schema migration: added severity_snapshot column to analysis_runs.")
-    except Exception as _mig_exc:
+      except Exception as _mig_exc:
         logger.error("Schema migration failed: %s", _mig_exc)
 
     # Recover any devices stuck in "running" state from a previous crashed process

@@ -12,6 +12,42 @@ Windows + SQLite developer setup lives on the `WindowServer` branch.
 ## Prerequisites
 - Docker Engine + Docker Compose v2
 
+## AlmaLinux 8/9 (step by step)
+```bash
+# 1. Install Docker Engine + Compose plugin
+sudo dnf -y install dnf-plugins-core
+sudo dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+sudo dnf -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo systemctl enable --now docker
+sudo usermod -aG docker "$USER"      # log out/in for group to take effect
+
+# 2. Get the code (Docker stack lives on the DEV branch)
+git clone https://github.com/prodromou27/firewall-cleanup.git
+cd firewall-cleanup && git checkout DEV
+
+# 3. Configure
+cp .env.example .env
+openssl rand -base64 32 | tr '+/' '-_'   # paste as SECRET_KEY in .env
+# also set POSTGRES_PASSWORD, BOOTSTRAP_ADMIN_PASSWORD, ALLOWED_ORIGINS=http://<server-ip>:8080
+
+# 4. Open the app port in firewalld
+sudo firewall-cmd --permanent --add-port=8080/tcp
+sudo firewall-cmd --reload
+
+# 5. Build & start
+docker compose up -d --build
+docker compose logs -f backend          # watch alembic upgrade + startup
+```
+App: `http://<server-ip>:8080`.
+
+**AlmaLinux notes**
+- SELinux (enforcing by default) is fine here — compose uses *named volumes*
+  (`pgdata`, `uploads`), which Docker labels automatically; no `:Z` needed
+  (only bind-mounts would require it).
+- DB persists in the `pgdata` volume across restarts. `docker compose down -v`
+  wipes it.
+- First boot runs `alembic upgrade head` then seeds the bootstrap admin.
+
 ## Quick start
 ```bash
 cp .env.example .env
@@ -21,9 +57,12 @@ docker compose up -d --build
 App: `http://localhost:8080` (or the `HTTP_PORT` you set).
 
 ### Generate a SECRET_KEY
+A Fernet key is 32 random bytes, url-safe base64 encoded. No Python needed:
 ```bash
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+openssl rand -base64 32 | tr '+/' '-_'
 ```
+(Or, where the cryptography package is installed:
+`python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.)
 
 ## Key environment variables
 See `.env.example` for the full list. Notable:

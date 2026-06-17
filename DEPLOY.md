@@ -35,11 +35,23 @@ See `.env.example` for the full list. Notable:
   runtime in Settings → Security).
 - `COOKIE_SECURE=true` only behind HTTPS.
 
-## Schema
-On first start the backend creates the full schema via SQLAlchemy
-`create_all`. The SQLite-only `PRAGMA` column migrations are skipped on
-PostgreSQL. Ongoing schema changes should be managed with **Alembic** (already
-a dependency) — initialize migrations before the first production release.
+## Schema & migrations (Alembic)
+Schema is managed by **Alembic** on PostgreSQL. The compose `backend` service
+runs `alembic upgrade head` before starting uvicorn, so a fresh database is
+provisioned automatically (the baseline revision creates all tables).
+
+- SQLite (dev on the `WindowServer` branch) bootstraps directly via
+  `create_all`; Alembic is skipped there but still available for authoring
+  migrations.
+- **Add a schema change:** edit the models, then
+  `cd backend && alembic revision --autogenerate -m "describe change"`, review
+  the generated file in `alembic/versions/`, and commit it. Compose applies it
+  on the next deploy.
+- **Adopt Alembic on an existing create_all database:** `alembic stamp head`
+  once (marks it at the baseline without re-creating tables), then use
+  `upgrade` for subsequent changes.
+- `alembic` reads `DATABASE_URL` from the environment (via `app.config`), so the
+  same commands work against SQLite and PostgreSQL.
 
 ## Notes / TODO before PROD
 - Put a TLS-terminating reverse proxy in front and set `COOKIE_SECURE=true`.

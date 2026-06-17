@@ -17,6 +17,7 @@ env/
 *.env
 backend/.env
 frontend/.env
+!.env.example
 .dev_key
 
 # Test/curl session artifacts

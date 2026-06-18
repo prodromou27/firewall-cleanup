@@ -44,6 +44,25 @@ APP_URL=https://fw.example.com COOKIE_SECURE=true sudo bash deploy/almalinux-dep
 `update.sh` rebuilds in place from the host's current branch, so DEV pulls DEV
 and PROD pulls PROD automatically. Schema changes ride along via Alembic.
 
+### Fully hands-off auto-deploy
+Two options to remove the manual `update.sh` step:
+
+**A) Pull-based self-update (recommended for private-LAN hosts).** Each host
+polls its branch and redeploys on change — no inbound access required:
+```bash
+sudo bash deploy/install-autoupdate.sh        # installs a systemd timer (~2 min poll)
+# logs:        journalctl -u policyinsight-update.service -f
+# uninstall:   sudo bash deploy/install-autoupdate.sh --uninstall
+```
+Now: push to `DEV` → DEV host self-updates; promote `DEV→PROD` → PROD host
+self-updates. PROD promotion stays gated behind the branch merge you approve.
+
+**B) Push-based via GitHub Actions** (`.github/workflows/deploy.yml`). On push
+to `DEV`/`PROD` it SSHes into the matching host and runs `update.sh`. Requires
+the host to be reachable from the runner (public IP or a self-hosted runner on
+the LAN) and these repo secrets: `DEV_HOST/DEV_USER/DEV_SSH_KEY` and the `PROD_*`
+equivalents. Adjust `REPO_PATH` in the workflow to the clone location.
+
 ## Prerequisites
 - Docker Engine + Docker Compose v2
 

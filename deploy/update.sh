@@ -24,19 +24,32 @@ docker info >/dev/null 2>&1 || DC="sudo docker compose"
 [ -f "$REPO_DIR/.env" ] || die "No .env — run deploy/almalinux-deploy.sh first."
 [ -f "$REPO_DIR/docker-compose.yml" ] || die "Not a PolicyInsight checkout."
 
+# --if-changed: exit without rebuilding when the branch has no new commits
+# (used by the unattended self-update timer so it's cheap to poll).
+IF_CHANGED=0
+[ "${1:-}" = "--if-changed" ] && IF_CHANGED=1
+
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 HTTP_PORT="$(grep -E '^HTTP_PORT=' .env | cut -d= -f2- | tr -d '[:space:]')"; HTTP_PORT="${HTTP_PORT:-8080}"
 
 BEFORE="$(git rev-parse --short HEAD)"
 log "Branch '${BRANCH}' at ${BEFORE} — fetching updates…"
 git fetch --quiet origin "$BRANCH"
+REMOTE="$(git rev-parse --short "origin/${BRANCH}")"
+
+if [ "$BEFORE" = "$REMOTE" ]; then
+  if [ "$IF_CHANGED" = "1" ]; then
+    log "No new commits on '${BRANCH}' (${BEFORE}); nothing to do."
+    exit 0
+  fi
+  log "Already up to date (${BEFORE}); rebuilding to pick up any local changes…"
+else
+  log "New commits on '${BRANCH}': ${BEFORE} -> ${REMOTE}"
+fi
+
 git pull --ff-only origin "$BRANCH"
 AFTER="$(git rev-parse --short HEAD)"
-
-if [ "$BEFORE" = "$AFTER" ]; then
-  log "Already up to date (${AFTER}). Rebuilding anyway to pick up any local image changes…"
-else
-  log "Updated ${BEFORE} -> ${AFTER}. Changes:"
+if [ "$BEFORE" != "$AFTER" ]; then
   git --no-pager log --oneline "${BEFORE}..${AFTER}" | sed 's/^/    /'
 fi
 

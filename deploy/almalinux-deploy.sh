@@ -42,10 +42,21 @@ gen_pass() { openssl rand -hex 24; }
 # Policy-compliant admin password: >=12 chars, upper+lower+digit+symbol, no weak words.
 gen_admin(){ printf 'Pi%s#7Az' "$(openssl rand -hex 6)"; }
 
+# Overridable per environment:
+#   APP_URL        — public URL users hit (e.g. https://fw.example.com). When set,
+#                    it drives ALLOWED_ORIGINS. Otherwise http://<server-ip>:<port>.
+#   COOKIE_SECURE  — set "true" when serving over HTTPS (recommended for PROD).
+COOKIE_SECURE="${COOKIE_SECURE:-false}"
+
 if [ ! -f "$ENV_FILE" ]; then
   log "Generating $ENV_FILE with fresh secrets…"
   SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"; SERVER_IP="${SERVER_IP:-localhost}"
   ADMIN_PW="$(gen_admin)"
+  if [ -n "${APP_URL:-}" ]; then
+    ORIGINS="${APP_URL}"
+  else
+    ORIGINS="http://${SERVER_IP}:${HTTP_PORT},http://localhost:${HTTP_PORT}"
+  fi
   umask 077
   cat > "$ENV_FILE" <<EOF
 POSTGRES_USER=policyinsight
@@ -54,9 +65,9 @@ POSTGRES_DB=policyinsight
 
 SECRET_KEY=$(gen_key)
 ENVIRONMENT=production
-ALLOWED_ORIGINS=http://${SERVER_IP}:${HTTP_PORT},http://localhost:${HTTP_PORT}
+ALLOWED_ORIGINS=${ORIGINS}
 ALLOWED_ORIGIN_SUBNETS=
-COOKIE_SECURE=false
+COOKIE_SECURE=${COOKIE_SECURE}
 
 BOOTSTRAP_ADMIN_EMAIL=admin@policyinsight.local
 BOOTSTRAP_ADMIN_PASSWORD=${ADMIN_PW}

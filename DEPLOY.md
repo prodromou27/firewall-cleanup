@@ -4,10 +4,45 @@ This is the containerized stack used on the `DEV` and `PROD` branches. The
 Windows + SQLite developer setup lives on the `WindowServer` branch.
 
 ## Stack
-- **db** — PostgreSQL 16
+- **db** — PostgreSQL 16 (the only supported database for this stack)
 - **backend** — FastAPI (uvicorn), Python 3.12
 - **frontend** — SPA built with Vite, served by nginx, which proxies `/api` to
   the backend (so the app is same-origin: session cookie + CSRF work cleanly)
+
+## Two environments (DEV + PROD, separate machines)
+Both run the identical PostgreSQL stack; they differ only in branch and `.env`.
+
+| | DEV host | PROD host |
+|---|---|---|
+| Git branch | `DEV` | `PROD` |
+| Purpose | testing / iteration | live |
+| TLS / `COOKIE_SECURE` | off (http) | on (behind TLS) |
+
+**First-time bring-up (run once per machine):**
+```bash
+git clone https://github.com/prodromou27/firewall-cleanup.git && cd firewall-cleanup
+
+# DEV host:
+git checkout DEV
+sudo bash deploy/almalinux-deploy.sh
+
+# PROD host (behind a TLS reverse proxy at APP_URL):
+git checkout PROD
+APP_URL=https://fw.example.com COOKIE_SECURE=true sudo bash deploy/almalinux-deploy.sh
+```
+
+**The promotion loop (DEV → PROD on every change):**
+1. Develop & test on the DEV host: push fixes to `origin/DEV`, then on the DEV
+   host run `sudo bash deploy/update.sh` (pulls `DEV`, rebuilds, migrates,
+   health-checks).
+2. When validated, promote: merge `DEV → PROD` and push (`git checkout PROD &&
+   git merge --no-ff DEV && git push`).
+3. On the PROD host run `sudo bash deploy/update.sh` (pulls `PROD`, rebuilds,
+   runs `alembic upgrade head`, health-checks). Roll back with the command the
+   script prints if health fails.
+
+`update.sh` rebuilds in place from the host's current branch, so DEV pulls DEV
+and PROD pulls PROD automatically. Schema changes ride along via Alembic.
 
 ## Prerequisites
 - Docker Engine + Docker Compose v2

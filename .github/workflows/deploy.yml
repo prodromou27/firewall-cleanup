@@ -1,0 +1,49 @@
+# Push-based deploy: on push to DEV/PROD, SSH into the matching host and run
+# the in-place updater. ALTERNATIVE to the pull-based self-update timer
+# (deploy/install-autoupdate.sh) — use this only when the host is reachable
+# from the runner (public IP, or a self-hosted runner on the same network).
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   DEV_HOST,  DEV_USER,  DEV_SSH_KEY,  DEV_SSH_PORT(optional)
+#   PROD_HOST, PROD_USER, PROD_SSH_KEY, PROD_SSH_PORT(optional)
+# The SSH user must be able to run `sudo bash deploy/update.sh` and the repo
+# must already be cloned at REPO_PATH on each host (first bring-up is manual).
+name: deploy
+
+on:
+  push:
+    branches: [DEV, PROD]
+
+env:
+  REPO_PATH: ~/firewall-cleanup   # adjust to where the repo is cloned on the hosts
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Select target host
+        id: target
+        run: |
+          if [ "${{ github.ref_name }}" = "PROD" ]; then
+            echo "host=${{ secrets.PROD_HOST }}"   >> "$GITHUB_OUTPUT"
+            echo "user=${{ secrets.PROD_USER }}"   >> "$GITHUB_OUTPUT"
+            echo "port=${{ secrets.PROD_SSH_PORT || '22' }}" >> "$GITHUB_OUTPUT"
+            echo "key_name=PROD_SSH_KEY"           >> "$GITHUB_OUTPUT"
+          else
+            echo "host=${{ secrets.DEV_HOST }}"    >> "$GITHUB_OUTPUT"
+            echo "user=${{ secrets.DEV_USER }}"    >> "$GITHUB_OUTPUT"
+            echo "port=${{ secrets.DEV_SSH_PORT || '22' }}"  >> "$GITHUB_OUTPUT"
+            echo "key_name=DEV_SSH_KEY"            >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy over SSH
+        env:
+          SSH_KEY: ${{ github.ref_name == 'PROD' && secrets.PROD_SSH_KEY || secrets.DEV_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -p "${{ steps.target.outputs.port }}" -H "${{ steps.target.outputs.host }}" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -i ~/.ssh/id_deploy -p "${{ steps.target.outputs.port }}" \
+            "${{ steps.target.outputs.user }}@${{ steps.target.outputs.host }}" \
+            "cd ${{ env.REPO_PATH }} && sudo bash deploy/update.sh"

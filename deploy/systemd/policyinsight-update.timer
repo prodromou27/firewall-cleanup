@@ -1,0 +1,11 @@
+[Unit]
+Description=PolicyInsight self-update timer (polls the branch and redeploys on change)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=30s
+Unit=policyinsight-update.service
+
+[Install]
+WantedBy=timers.target

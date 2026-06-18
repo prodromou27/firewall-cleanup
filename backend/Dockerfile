@@ -1,14 +1,18 @@
 # PolicyInsight backend — FastAPI on Python 3.12 (Linux).
 FROM python:3.12-slim
 
-# System libraries required at runtime by WeasyPrint (PDF reports) and the
-# psycopg2 PostgreSQL driver.
+# System libraries required at runtime by WeasyPrint (PDF reports).
+# Per the official WeasyPrint docs for Debian >= 11 (this base image is Debian
+# 12 "bookworm") using pre-built wheels, the required libraries are:
+#   libpango-1.0-0  libpangoft2-1.0-0  libharfbuzz-subset0
+# (WeasyPrint 60+ no longer depends on Cairo/GDK-Pixbuf.)
+# fonts-dejavu-core gives the renderer at least one usable font family;
+# shared-mime-info helps image type detection. The psycopg2-binary driver
+# ships as a self-contained wheel and needs no extra system libs.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libpango-1.0-0 \
-        libpangocairo-1.0-0 \
-        libcairo2 \
-        libgdk-pixbuf-2.0-0 \
-        libffi8 \
+        libpangoft2-1.0-0 \
+        libharfbuzz-subset0 \
         shared-mime-info \
         fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*

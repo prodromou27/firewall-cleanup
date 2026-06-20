@@ -8,7 +8,7 @@ import {
   Send, User, FileText,
 } from 'lucide-react'
 import {
-  getFindings, updateFinding, bulkUpdateFindings, getPolicies,
+  getFindings, updateFinding, bulkUpdateFindings, getPolicies, getRemediation, type Remediation,
   addFindingComment, getFindingComments, getFindingsExportUrl,
 } from '../api/client'
 import { SeverityBadge, StatusBadge } from '../components/ui/SeverityBadge'
@@ -546,6 +546,31 @@ function evidenceQuality(finding: Finding): { label: string; cls: string; tip: s
     tip: 'Moderate evidence; some data gaps may reduce accuracy.' }
 }
 
+/** Lazy-loaded per-vendor remediation guidance (mounts only when a row is expanded). */
+function VendorRemediation({ finding }: { finding: Finding }) {
+  const [rem, setRem] = useState<Remediation | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    getRemediation(finding.finding_type, finding.vendor || undefined)
+      .then(r => { if (!cancelled) setRem(r) })
+      .catch(() => { if (!cancelled) setRem(null) })
+    return () => { cancelled = true }
+  }, [finding.finding_type, finding.vendor])
+  if (!rem) return null
+  return (
+    <div className="border-t border-gray-100 pt-4">
+      <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+        Vendor remediation — {rem.vendor}{!rem.vendor_specific && ' (generic)'}
+      </h4>
+      <div className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+        <p className="text-[11px] font-semibold text-slate-500 mb-1">{rem.category_label}</p>
+        <p className="text-sm text-slate-700 leading-relaxed">{rem.guidance}</p>
+        <p className="text-[11px] text-slate-400 mt-2">{rem.read_only_note}</p>
+      </div>
+    </div>
+  )
+}
+
 function EvidenceBadge({ finding }: { finding: Finding }) {
   const q = evidenceQuality(finding)
   return (
@@ -698,6 +723,9 @@ function FindingRow({ finding, onUpdate, selected, onSelect }: {
                   </div>
                 </div>
               )}
+
+              {/* Per-vendor remediation guidance (review-only) */}
+              <VendorRemediation finding={finding} />
 
               {/* Evidence toggle */}
               <div className="border-t border-gray-100 pt-3">

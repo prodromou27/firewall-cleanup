@@ -190,6 +190,19 @@ export const getFindings = (params?: Record<string, string | number>) =>
 export const getFinding = (id: string) =>
   api.get(`/findings/${id}`).then(r => r.data)
 
+export interface Remediation {
+  vendor: string
+  finding_type: string
+  category: string | null
+  category_label: string
+  guidance: string
+  vendor_specific: boolean
+  read_only_note: string
+}
+export const getRemediation = (findingType: string, vendor?: string) =>
+  api.get('/remediation', { params: { finding_type: findingType, ...(vendor ? { vendor } : {}) } })
+    .then(r => r.data as Remediation)
+
 export const updateFinding = (id: string, data: Record<string, string | undefined>) =>
   api.patch(`/findings/${id}`, data).then(r => r.data)
 

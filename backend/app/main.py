@@ -602,3 +602,10 @@ def get_recommendation(finding_type: str):
     """Return the standard recommendation for a specific finding type."""
     from app.analysis.recommendation_library import get as _get
     return {"finding_type": finding_type, "recommendation": _get(finding_type)}
+
+
+@app.get("/api/remediation")
+def get_remediation(finding_type: str, vendor: str = None):
+    """Per-vendor review/remediation guidance for a finding type (read-only)."""
+    from app.analysis.remediation_templates import get as _get_rem
+    return _get_rem(vendor, finding_type)

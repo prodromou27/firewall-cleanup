@@ -137,6 +137,25 @@ export interface CleanupPlan {
   unscheduled_count: number
   generated_for: string
 }
+export interface PolicyChange {
+  policy_id: string
+  firewall_name: string
+  vendor: string | null
+  last_synced: string | null
+  revision_number: number | null
+  rules_added: number
+  rules_removed: number
+  rules_modified: number
+  rule_changes_total: number
+  change_summary: string | null
+  severity_delta: Record<string, number>
+  new_high_risk: boolean
+  sample_changes: Array<Record<string, unknown>>
+}
+export const getChanges = (customerId?: string) =>
+  api.get('/changes', { params: customerId ? { customer_id: customerId } : undefined })
+    .then(r => r.data as { customer_id: string | null; policies: PolicyChange[] })
+
 export const getCleanupPlan = (customerId?: string) =>
   api.get('/cleanup-plan', { params: customerId ? { customer_id: customerId } : undefined })
     .then(r => r.data as CleanupPlan)

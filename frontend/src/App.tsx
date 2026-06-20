@@ -24,6 +24,7 @@ import { PolicyComparison } from './pages/PolicyComparison'
 import { Compliance } from './pages/Compliance'
 import { AuditLog } from './pages/AuditLog'
 import { CleanupPlan } from './pages/CleanupPlan'
+import { ChangeWatch } from './pages/ChangeWatch'
 
 function AuthenticatedApp() {
   return (
@@ -50,6 +51,7 @@ function AuthenticatedApp() {
             <Route path="/health" element={<HealthAssessment />} />
             <Route path="/audit" element={<AuditLog />} />
             <Route path="/cleanup-plan" element={<CleanupPlan />} />
+            <Route path="/changes" element={<ChangeWatch />} />
 
             {/* Customer management */}
             <Route path="/customers" element={<Customers />} />

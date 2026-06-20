@@ -71,6 +71,12 @@
     @apply px-2.5 py-1.5 text-xs;
   }
 
+  /* ── Form inputs ───────────────────────────────────────────── */
+  .inp {
+    @apply block w-full mt-1 border border-ink-200 rounded-lg px-3 py-2 text-sm
+      bg-ink-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500;
+  }
+
   /* ── Cards ─────────────────────────────────────────────────── */
   .card {
     @apply bg-white rounded-xl border border-ink-200/70 shadow-card p-5;

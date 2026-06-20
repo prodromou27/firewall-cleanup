@@ -346,3 +346,58 @@ export const getRecommendations = () =>
 
 export const getRecommendation = (findingType: string) =>
   api.get(`/recommendations/${findingType}`).then(r => r.data as { finding_type: string; recommendation: string })
+
+// ── Reporting ────────────────────────────────────────────────────────────────
+export interface ReportSectionDef { key: string; name: string; type: string; group: string; default: boolean }
+export interface TemplateSection {
+  id?: string; section_key: string; section_name?: string; section_type?: string
+  enabled: boolean; display_order: number; custom_text?: string | null; config?: Record<string, unknown>
+}
+export interface ReportTemplate {
+  id: string; name: string; description?: string | null; template_type: string; audience: string
+  is_customer_facing: boolean; default_export_format: string; default_detail_level: string
+  branding_config: Record<string, unknown>; cover_page_config: Record<string, unknown>
+  introduction_text?: string | null; methodology_text?: string | null; disclaimer_text?: string | null
+  footer_text?: string | null; default_finding_categories: string[]; customer_id?: string | null
+  is_default: boolean; sections: TemplateSection[]
+}
+export interface GeneratedReportRow {
+  id: string; report_type: string; export_format: string; customer_id: string | null
+  firewall_name: string | null; file_name: string; generated_by: string | null; generated_at: string | null
+  selected_sections: string[]; template_id: string | null; policy_id: string | null
+}
+
+export const getReportSections = () =>
+  api.get('/report-sections/catalog').then(r => r.data as { sections: ReportSectionDef[]; default_sections: string[] })
+export const getReportPlaceholders = () =>
+  api.get('/report-placeholders').then(r => r.data as { placeholders: string[] })
+export const getReportFindingCategories = () =>
+  api.get('/report-finding-categories').then(r => r.data as { categories: Array<{ key: string; label: string }> })
+
+export const listReportTemplates = () =>
+  api.get('/report-templates').then(r => r.data as { templates: ReportTemplate[] })
+export const getReportTemplate = (id: string) =>
+  api.get(`/report-templates/${id}`).then(r => r.data as ReportTemplate)
+export const createReportTemplate = (body: Partial<ReportTemplate> & { sections?: TemplateSection[] }) =>
+  api.post('/report-templates', body).then(r => r.data as ReportTemplate)
+export const updateReportTemplate = (id: string, body: Partial<ReportTemplate> & { sections?: TemplateSection[] }) =>
+  api.put(`/report-templates/${id}`, body).then(r => r.data as ReportTemplate)
+export const deleteReportTemplate = (id: string) =>
+  api.delete(`/report-templates/${id}`).then(r => r.data)
+export const cloneReportTemplate = (id: string) =>
+  api.post(`/report-templates/${id}/clone`).then(r => r.data as ReportTemplate)
+export const setDefaultReportTemplate = (id: string) =>
+  api.post(`/report-templates/${id}/default`).then(r => r.data)
+
+export interface GenerateBody {
+  policy_id: string; template_id?: string; export_format: string; report_type?: string
+  sections?: string[]; finding_categories?: string[]; filters?: Record<string, unknown>
+  branding?: Record<string, unknown>; texts?: Record<string, string>; custom_sections?: Record<string, string>
+}
+export const generateReport = (body: GenerateBody) =>
+  api.post('/reports/generate', body).then(r => r.data as { id: string; file_name: string; export_format: string; download_url: string })
+export const previewReportUrl = '/api/reports/preview'   // POST → HTML (use fetch for srcdoc)
+export const listGeneratedReports = (customerId?: string) =>
+  api.get('/reports', { params: customerId ? { customer_id: customerId } : undefined })
+    .then(r => r.data as { reports: GeneratedReportRow[] })
+export const reportDownloadUrl = (id: string) => `/api/reports/${id}/download`

@@ -11,6 +11,10 @@ import { Findings } from './pages/Findings'
 import { Rulebase } from './pages/Rulebase'
 import { Objects } from './pages/Objects'
 import { Reports } from './pages/Reports'
+import { ReportsDashboard } from './pages/reporting/ReportsDashboard'
+import { ReportBuilder } from './pages/reporting/ReportBuilder'
+import { TemplateManager } from './pages/reporting/TemplateManager'
+import { TemplateEditor } from './pages/reporting/TemplateEditor'
 import { Scorecard } from './pages/Scorecard'
 import { HealthAssessment } from './pages/HealthAssessment'
 import { Posture } from './pages/Posture'
@@ -44,7 +48,11 @@ function AuthenticatedApp() {
             <Route path="/policies/:policyId/compare" element={<PolicyComparison />} />
             <Route path="/findings" element={<Findings />} />
             <Route path="/objects" element={<Objects />} />
-            <Route path="/reports" element={<Reports />} />
+            <Route path="/reports" element={<ReportsDashboard />} />
+            <Route path="/reports/new" element={<ReportBuilder />} />
+            <Route path="/reports/templates" element={<TemplateManager />} />
+            <Route path="/reports/templates/:id" element={<TemplateEditor />} />
+            <Route path="/reports/legacy" element={<Reports />} />
             <Route path="/posture" element={<Posture />} />
             <Route path="/compliance" element={<Compliance />} />
             <Route path="/scorecard" element={<Scorecard />} />

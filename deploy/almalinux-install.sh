@@ -55,21 +55,31 @@ if [ -f "$HBA" ]; then
 fi
 systemctl enable --now postgresql
 
-PG_PASS_FILE="$REPO_DIR/backend/.pgpass_value"
+# Reuse the existing password from backend/.env when present (parsed robustly,
+# URL-decoded); otherwise generate a fresh one. Never rotate an existing one.
 if [ -f "$ENV_FILE" ]; then
-  PG_PASS="$(grep -E '^DATABASE_URL=' "$ENV_FILE" | sed -E 's@.*://[^:]+:([^@]+)@.*@\1@')"
+  PG_PASS="$("$PY" - "$ENV_FILE" <<'PY'
+import re, sys
+from urllib.parse import urlsplit, unquote
+txt = open(sys.argv[1], encoding="utf-8").read()
+m = re.search(r'^DATABASE_URL=(.+)$', txt, re.M)
+print(unquote(urlsplit(m.group(1).strip()).password or "") if m else "")
+PY
+)"
 fi
 PG_PASS="${PG_PASS:-$(openssl rand -hex 24)}"
+
+# Escape for a PostgreSQL string literal (standard_conforming_strings=on, the
+# default): double any single quotes. Avoids breakage/injection from custom
+# passwords containing quotes.
+ESC_PASS="${PG_PASS//\'/\'\'}"
+
 log "Ensuring PostgreSQL role + database…"
-sudo -u postgres psql -v ON_ERROR_STOP=1 <<SQL
-DO \$\$ BEGIN
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='${PG_USER}') THEN
-    CREATE ROLE ${PG_USER} LOGIN PASSWORD '${PG_PASS}';
-  ELSE
-    ALTER ROLE ${PG_USER} PASSWORD '${PG_PASS}';
-  END IF;
-END \$\$;
-SQL
+if sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${PG_USER}'" | grep -q 1; then
+  sudo -u postgres psql -v ON_ERROR_STOP=1 -q -c "ALTER ROLE ${PG_USER} LOGIN PASSWORD '${ESC_PASS}'"
+else
+  sudo -u postgres psql -v ON_ERROR_STOP=1 -q -c "CREATE ROLE ${PG_USER} LOGIN PASSWORD '${ESC_PASS}'"
+fi
 # Create the database if it doesn't exist (owned by the app role).
 sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='${PG_DB}'" | grep -q 1 \
   || sudo -u postgres createdb -O "${PG_USER}" "${PG_DB}"

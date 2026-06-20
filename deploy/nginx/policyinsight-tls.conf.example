@@ -1,0 +1,44 @@
+# PolicyInsight — PRODUCTION nginx site with TLS.
+# Use this instead of policyinsight.conf when serving over HTTPS (required for
+# COOKIE_SECURE=true). Replace fw.example.com and the cert paths, then:
+#   cp deploy/nginx/policyinsight-tls.conf.example /etc/nginx/conf.d/policyinsight.conf
+#   nginx -t && systemctl reload nginx
+# Obtain certs e.g. with: certbot --nginx -d fw.example.com   (dnf install certbot python3-certbot-nginx)
+#
+# Also set in backend/.env:  COOKIE_SECURE=true  and  ALLOWED_ORIGINS=https://fw.example.com
+
+# Redirect all HTTP to HTTPS.
+server {
+    listen 80 default_server;
+    server_name fw.example.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name fw.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/fw.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/fw.example.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+
+    root /var/www/policyinsight;
+    index index.html;
+    client_max_body_size 100m;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;   # "https" — backend sets Secure cookies
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_read_timeout 120s;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

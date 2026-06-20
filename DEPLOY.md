@@ -78,7 +78,13 @@ schema changes apply on update.
 - Restart backend: `systemctl restart policyinsight-backend.service`
 - DB backups: use `pg_dump` (the in-app backup endpoint is SQLite-only and
   returns 400 on PostgreSQL).
-- For PROD, terminate TLS in front (nginx/Caddy) and set `COOKIE_SECURE=true`.
+- For PROD over HTTPS, use the TLS site template instead of the default HTTP
+  one, then set `COOKIE_SECURE=true` and `ALLOWED_ORIGINS=https://<domain>`:
+  ```bash
+  cp deploy/nginx/policyinsight-tls.conf.example /etc/nginx/conf.d/policyinsight.conf
+  # edit the domain + cert paths (certbot --nginx works), then:
+  nginx -t && systemctl reload nginx
+  ```
 - The in-process rate limiter / login throttle are per-process; for multiple
   backend workers, back them with Redis.
 

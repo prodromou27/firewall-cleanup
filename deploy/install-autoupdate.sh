@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Install the PolicyInsight unattended self-update timer on this host.
-# After this, pushing to the host's branch (DEV on the DEV box, PROD on the
+# After this, pushing to the host's branch (dev_red on the DEV box, PROD on the
 # PROD box) auto-deploys within the poll interval — no inbound access needed,
 # so it works on private LANs where GitHub runners can't reach the host.
 #

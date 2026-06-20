@@ -1,13 +1,12 @@
 [Unit]
 Description=PolicyInsight self-update (pull this host's branch and redeploy if changed)
-After=docker.service network-online.target
+After=network-online.target postgresql.service policyinsight-backend.service
 Wants=network-online.target
-Requires=docker.service
 
 [Service]
 Type=oneshot
 WorkingDirectory=__REPO_DIR__
 ExecStart=/bin/bash __REPO_DIR__/deploy/update.sh --if-changed
-# Run as root so docker + git operate without sudo (installer marks the repo
-# as a safe.directory for root). Output goes to the journal.
+# Runs as root so git/pip/systemctl/nginx operate without sudo (the installer
+# marks the repo as a safe.directory for root). Output goes to the journal.
 User=root

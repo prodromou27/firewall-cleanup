@@ -231,32 +231,60 @@ def update_settings(
 def download_database_backup(
     user: User = Depends(require_capability(CAP_DOWNLOAD_BACKUP)),
 ):
-    """
-    Stream a copy of the SQLite database for backup purposes.
-    The file is copied to a temp path first so there's no read contention.
+    """Stream a database backup. SQLite → a file copy; PostgreSQL → a pg_dump
+    custom-format archive (restorable with pg_restore).
     """
     db_url = app_settings.database_url
-    if not db_url.startswith("sqlite:///"):
-        return JSONResponse(status_code=400, content={"detail": "Backup only supported for SQLite databases."})
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    db_path = db_url.replace("sqlite:///", "")
-    if not os.path.exists(db_path):
-        return JSONResponse(status_code=404, content={"detail": "Database file not found."})
+    # ── SQLite: copy the file ────────────────────────────────────────────────
+    if db_url.startswith("sqlite:///"):
+        db_path = db_url.replace("sqlite:///", "")
+        if not os.path.exists(db_path):
+            return JSONResponse(status_code=404, content={"detail": "Database file not found."})
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp.close()
+        try:
+            shutil.copy2(db_path, tmp.name)
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"detail": f"Backup failed: {e}"})
+        audit_log("settings.db_backup", user_id=user.id, email=user.email, engine="sqlite")
+        return FileResponse(
+            tmp.name, media_type="application/octet-stream",
+            filename=f"policyinsight_backup_{ts}.db",
+            headers={"Content-Disposition": f'attachment; filename="policyinsight_backup_{ts}.db"'},
+        )
 
-    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-    tmp.close()
-    try:
-        shutil.copy2(db_path, tmp.name)
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"detail": f"Backup failed: {e}"})
+    # ── PostgreSQL: pg_dump custom-format archive ────────────────────────────
+    if db_url.startswith("postgresql"):
+        import subprocess
+        from urllib.parse import urlsplit, unquote
+        if not shutil.which("pg_dump"):
+            return JSONResponse(status_code=500, content={"detail": "pg_dump not available in the backend image."})
+        u = urlsplit(db_url)
+        dbname = (u.path or "").lstrip("/")
+        tmp = tempfile.NamedTemporaryFile(suffix=".dump", delete=False)
+        tmp.close()
+        env = {**os.environ, "PGPASSWORD": unquote(u.password or "")}
+        cmd = [
+            "pg_dump", "-Fc", "--no-owner", "--no-acl",
+            "-h", u.hostname or "127.0.0.1", "-p", str(u.port or 5432),
+            "-U", unquote(u.username or ""), "-d", dbname, "-f", tmp.name,
+        ]
+        try:
+            subprocess.run(cmd, env=env, check=True, capture_output=True, timeout=900)
+        except subprocess.CalledProcessError as e:
+            return JSONResponse(status_code=500, content={"detail": f"pg_dump failed: {e.stderr.decode(errors='replace')[:300]}"})
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"detail": f"Backup failed: {e}"})
+        audit_log("settings.db_backup", user_id=user.id, email=user.email, engine="postgresql")
+        return FileResponse(
+            tmp.name, media_type="application/octet-stream",
+            filename=f"policyinsight_backup_{ts}.dump",
+            headers={"Content-Disposition": f'attachment; filename="policyinsight_backup_{ts}.dump"'},
+        )
 
-    filename = f"policyinsight_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
-    return FileResponse(
-        tmp.name,
-        media_type="application/octet-stream",
-        filename=filename,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    return JSONResponse(status_code=400, content={"detail": "Unsupported database engine for backup."})
 
 
 @router.get("/backup/settings")

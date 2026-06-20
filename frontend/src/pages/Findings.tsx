@@ -524,6 +524,37 @@ function PriorityBadge({ priority }: { priority: string }) {
   )
 }
 
+/** Derive a human evidence-quality label from a finding's confidence + evidence. */
+function evidenceQuality(finding: Finding): { label: string; cls: string; tip: string } {
+  const ev = (finding.evidence || {}) as Record<string, unknown>
+  if (ev.expansion_complete === false) {
+    return {
+      label: 'Expansion incomplete',
+      cls: 'bg-orange-100 text-orange-700',
+      tip: 'Some referenced objects could not be fully expanded — validate against the effective object definitions before acting.',
+    }
+  }
+  if (finding.confidence === 'High') {
+    return { label: 'High confidence', cls: 'bg-emerald-100 text-emerald-700',
+      tip: 'Strong evidence (e.g. complete object expansion and/or hit-count data) — minimal ambiguity.' }
+  }
+  if (finding.confidence === 'Low') {
+    return { label: 'Low confidence', cls: 'bg-gray-100 text-gray-600',
+      tip: 'Limited evidence — often missing hit-count / usage data. Treat as indicative and confirm.' }
+  }
+  return { label: 'Reduced confidence', cls: 'bg-amber-100 text-amber-700',
+    tip: 'Moderate evidence; some data gaps may reduce accuracy.' }
+}
+
+function EvidenceBadge({ finding }: { finding: Finding }) {
+  const q = evidenceQuality(finding)
+  return (
+    <span title={q.tip} className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold cursor-help ${q.cls}`}>
+      {q.label}
+    </span>
+  )
+}
+
 function FindingRow({ finding, onUpdate, selected, onSelect }: {
   finding: Finding; onUpdate: () => void
   selected: boolean; onSelect: (id: string, checked: boolean) => void
@@ -592,8 +623,8 @@ function FindingRow({ finding, onUpdate, selected, onSelect }: {
         </td>
         <td className="px-4 py-3"><SeverityBadge severity={finding.severity} size="sm" /></td>
         <td className="px-4 py-3 text-xs text-gray-500">
-          <div className="flex flex-col gap-0.5">
-            <span>{finding.confidence}</span>
+          <div className="flex flex-col gap-1 items-start">
+            <EvidenceBadge finding={finding} />
             <PriorityBadge priority={finding.priority || 'Standard'} />
           </div>
         </td>

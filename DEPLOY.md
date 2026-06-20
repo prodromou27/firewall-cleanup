@@ -210,7 +210,15 @@ provisioned automatically (the baseline revision creates all tables).
 - Put a TLS-terminating reverse proxy in front and set `COOKIE_SECURE=true`.
 - Initialize Alembic (`alembic init`) and wire an autogenerate baseline against
   the current models, replacing reliance on `create_all`.
-- Database backups: the in-app SQLite backup endpoint does not apply to
-  PostgreSQL — use `pg_dump` / managed snapshots.
+- Database backups: **Settings → Backup → Download database** produces a
+  `pg_dump` custom-format archive (`.dump`) on PostgreSQL (or a `.db` copy on
+  SQLite). Restore a PostgreSQL archive with:
+  ```bash
+  # copy the .dump onto the host, then:
+  docker compose exec -T db pg_restore --clean --if-exists --no-owner \
+    -U policyinsight -d policyinsight < policyinsight_backup_YYYYMMDD_HHMMSS.dump
+  ```
+  Restore is intentionally a deliberate CLI step (it overwrites data), not an
+  API action. Managed-Postgres snapshots also work.
 - The in-process rate limiter and login throttle are per-container; for
   multi-replica backends, back them with Redis.

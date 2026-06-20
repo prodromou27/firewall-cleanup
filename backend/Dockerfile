@@ -9,12 +9,14 @@ FROM python:3.12-slim
 # fonts-dejavu-core gives the renderer at least one usable font family;
 # shared-mime-info helps image type detection. The psycopg2-binary driver
 # ships as a self-contained wheel and needs no extra system libs.
+# postgresql-client provides pg_dump/pg_restore for the DB backup endpoint.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libpango-1.0-0 \
         libpangoft2-1.0-0 \
         libharfbuzz-subset0 \
         shared-mime-info \
         fonts-dejavu-core \
+        postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

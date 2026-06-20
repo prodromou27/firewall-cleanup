@@ -1,0 +1,30 @@
+# TLS overlay — adds a Caddy reverse proxy that terminates HTTPS on 443 with
+# automatic Let's Encrypt certificates, and fronts the app. Use WITH the base:
+#   docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build
+# Requires APP_DOMAIN (public DNS → this host) and inbound 80+443.
+# (The installer wires this in automatically when APP_DOMAIN is set.)
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  frontend:
+    # In TLS mode the SPA is reached only through Caddy, so don't publish its
+    # plain-HTTP port on the host. (!reset needs Docker Compose v2.24+.)
+    ports: !reset []
+
+volumes:
+  caddy_data:
+  caddy_config:

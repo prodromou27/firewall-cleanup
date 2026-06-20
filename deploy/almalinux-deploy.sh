@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 #
-# PolicyInsight — one-shot AlmaLinux 8/9 deployment.
-# Idempotent: safe to re-run. Installs Docker, generates secrets/.env (only if
-# missing), opens the firewall, builds, launches, and health-checks the stack.
+# PolicyInsight — one-shot AlmaLinux 8/9 Docker deployment.
+# Idempotent: installs Docker, generates secrets/.env (only if missing), opens
+# the firewall, builds, launches, and health-checks the stack.
 #
-# Usage (from the repo root, on the AlmaLinux host):
+# Plain HTTP:
 #   sudo bash deploy/almalinux-deploy.sh
-#   HTTP_PORT=80 sudo bash deploy/almalinux-deploy.sh     # override the port
+#   HTTP_PORT=80 sudo bash deploy/almalinux-deploy.sh
+#
+# HTTPS with automatic Let's Encrypt certs (Caddy) — needs a public domain that
+# resolves to this host and inbound 80+443:
+#   APP_DOMAIN=fw.example.com ACME_EMAIL=you@example.com sudo bash deploy/almalinux-deploy.sh
 #
 set -euo pipefail
 
-# ── Resolve repo root (this script lives in <repo>/deploy) ────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$REPO_DIR"
@@ -21,8 +24,20 @@ ENV_FILE="$REPO_DIR/.env"
 log()  { printf '\033[1;32m[deploy]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[warn]\033[0m %s\n'  "$*"; }
 die()  { printf '\033[1;31m[error]\033[0m %s\n' "$*" >&2; exit 1; }
+[ -f "$REPO_DIR/docker-compose.yml" ] || die "Run from the cloned repo (docker-compose.yml missing)."
 
-[ -f "$REPO_DIR/docker-compose.yml" ] || die "docker-compose.yml not found — run this from the cloned repo (deploy/ subdir)."
+# ── TLS mode is enabled when APP_DOMAIN is set (env var or existing .env) ──────
+if [ -f "$ENV_FILE" ]; then
+  EXIST_DOMAIN="$(grep -E '^APP_DOMAIN=' "$ENV_FILE" | cut -d= -f2- | tr -d '[:space:]' || true)"
+  APP_DOMAIN="${APP_DOMAIN:-$EXIST_DOMAIN}"
+fi
+APP_DOMAIN="${APP_DOMAIN:-}"
+ACME_EMAIL="${ACME_EMAIL:-}"
+TLS=0; [ -n "$APP_DOMAIN" ] && TLS=1
+if [ "$TLS" = "1" ]; then COOKIE_SECURE="${COOKIE_SECURE:-true}"; else COOKIE_SECURE="${COOKIE_SECURE:-false}"; fi
+
+COMPOSE=(-f docker-compose.yml)
+[ "$TLS" = "1" ] && COMPOSE+=(-f docker-compose.tls.yml)
 
 # ── 1. Docker Engine + Compose plugin ─────────────────────────────────────────
 if ! command -v docker >/dev/null 2>&1; then
@@ -37,26 +52,16 @@ systemctl enable --now docker
 docker compose version >/dev/null 2>&1 || die "Docker Compose v2 plugin not available after install."
 
 # ── 2. Generate .env (only if absent — never clobber existing secrets) ────────
-gen_key()  { openssl rand -base64 32 | tr '+/' '-_' | tr -d '\n'; }     # Fernet-compatible
+gen_key()  { openssl rand -base64 32 | tr '+/' '-_' | tr -d '\n'; }   # Fernet-compatible
 gen_pass() { openssl rand -hex 24; }
-# Policy-compliant admin password: >=12 chars, upper+lower+digit+symbol, no weak words.
 gen_admin(){ printf 'Pi%s#7Az' "$(openssl rand -hex 6)"; }
-
-# Overridable per environment:
-#   APP_URL        — public URL users hit (e.g. https://fw.example.com). When set,
-#                    it drives ALLOWED_ORIGINS. Otherwise http://<server-ip>:<port>.
-#   COOKIE_SECURE  — set "true" when serving over HTTPS (recommended for PROD).
-COOKIE_SECURE="${COOKIE_SECURE:-false}"
 
 if [ ! -f "$ENV_FILE" ]; then
   log "Generating $ENV_FILE with fresh secrets…"
   SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"; SERVER_IP="${SERVER_IP:-localhost}"
   ADMIN_PW="$(gen_admin)"
-  if [ -n "${APP_URL:-}" ]; then
-    ORIGINS="${APP_URL}"
-  else
-    ORIGINS="http://${SERVER_IP}:${HTTP_PORT},http://localhost:${HTTP_PORT}"
-  fi
+  if [ "$TLS" = "1" ]; then ORIGINS="https://${APP_DOMAIN}"
+  else ORIGINS="http://${SERVER_IP}:${HTTP_PORT},http://localhost:${HTTP_PORT}"; fi
   umask 077
   cat > "$ENV_FILE" <<EOF
 POSTGRES_USER=policyinsight
@@ -73,6 +78,9 @@ BOOTSTRAP_ADMIN_EMAIL=admin@policyinsight.local
 BOOTSTRAP_ADMIN_PASSWORD=${ADMIN_PW}
 
 HTTP_PORT=${HTTP_PORT}
+# TLS (Caddy auto-HTTPS) — set APP_DOMAIN to enable; leave blank for plain HTTP.
+APP_DOMAIN=${APP_DOMAIN}
+ACME_EMAIL=${ACME_EMAIL}
 EOF
   chmod 600 "$ENV_FILE"
   log "Generated .env (mode 600). Initial admin password: ${ADMIN_PW}"
@@ -83,42 +91,57 @@ else
   NEW_ENV=0
 fi
 
-# ── 3. Open the app port in firewalld (if running) ────────────────────────────
+# ── 3. firewalld ──────────────────────────────────────────────────────────────
 if systemctl is-active --quiet firewalld; then
-  log "Opening ${HTTP_PORT}/tcp in firewalld…"
-  firewall-cmd --permanent --add-port="${HTTP_PORT}/tcp" >/dev/null
+  if [ "$TLS" = "1" ]; then
+    log "Opening 80/tcp + 443/tcp in firewalld (TLS)…"
+    firewall-cmd --permanent --add-service=http  >/dev/null
+    firewall-cmd --permanent --add-service=https >/dev/null
+  else
+    log "Opening ${HTTP_PORT}/tcp in firewalld…"
+    firewall-cmd --permanent --add-port="${HTTP_PORT}/tcp" >/dev/null
+  fi
   firewall-cmd --reload >/dev/null
 else
-  warn "firewalld not active — skipping firewall rule (ensure ${HTTP_PORT}/tcp is reachable)."
+  warn "firewalld not active — ensure the needed ports are reachable."
 fi
 
 # ── 4. Build & launch ─────────────────────────────────────────────────────────
-log "Building and starting the stack (this can take a few minutes on first run)…"
-docker compose up -d --build
+[ "$TLS" = "1" ] && log "TLS mode: serving https://${APP_DOMAIN} via Caddy (auto Let's Encrypt)."
+log "Building and starting the stack (first run can take a few minutes)…"
+docker compose "${COMPOSE[@]}" up -d --build
 
 # ── 5. Health check ───────────────────────────────────────────────────────────
 log "Waiting for the app to become healthy…"
 ok=0
-for i in $(seq 1 60); do
-  if curl -fsS "http://localhost:${HTTP_PORT}/api/health" >/dev/null 2>&1; then ok=1; break; fi
-  sleep 3
-done
+if [ "$TLS" = "1" ]; then
+  for _ in $(seq 1 60); do
+    if curl -fsS -k --max-time 5 --resolve "${APP_DOMAIN}:443:127.0.0.1" \
+         "https://${APP_DOMAIN}/api/health" >/dev/null 2>&1; then ok=1; break; fi
+    sleep 3
+  done
+else
+  for _ in $(seq 1 60); do
+    if curl -fsS "http://localhost:${HTTP_PORT}/api/health" >/dev/null 2>&1; then ok=1; break; fi
+    sleep 3
+  done
+fi
 
 echo
+SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"; SERVER_IP="${SERVER_IP:-localhost}"
 if [ "$ok" = "1" ]; then
-  SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"; SERVER_IP="${SERVER_IP:-localhost}"
-  log "✅ PolicyInsight is up at: http://${SERVER_IP}:${HTTP_PORT}"
+  if [ "$TLS" = "1" ]; then log "✅ PolicyInsight is up at: https://${APP_DOMAIN}"
+  else log "✅ PolicyInsight is up at: http://${SERVER_IP}:${HTTP_PORT}"; fi
   log "   Login: admin@policyinsight.local"
-  if [ "$NEW_ENV" = "1" ]; then
-    log "   Password: $(grep '^BOOTSTRAP_ADMIN_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)"
-  else
-    log "   Password: (from your existing .env / unchanged)"
-  fi
-  warn "For production, terminate TLS in front and set COOKIE_SECURE=true in .env, then 'docker compose up -d'."
+  [ "$NEW_ENV" = "1" ] && log "   Password: $(grep '^BOOTSTRAP_ADMIN_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)"
 else
-  warn "Health check did not pass in time. Inspect logs:"
-  echo "    docker compose ps"
-  echo "    docker compose logs --tail=80 backend"
-  echo "    docker compose logs --tail=40 db frontend"
+  if [ "$TLS" = "1" ]; then
+    warn "App not reachable over HTTPS yet. Certificate issuance needs public DNS"
+    warn "for ${APP_DOMAIN} → this host and inbound 80/443. Check Caddy:"
+    echo "    docker compose ${COMPOSE[*]} logs --tail=60 caddy"
+  fi
+  warn "Inspect:"
+  echo "    docker compose ${COMPOSE[*]} ps"
+  echo "    docker compose ${COMPOSE[*]} logs --tail=80 backend"
   exit 1
 fi

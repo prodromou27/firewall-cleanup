@@ -78,6 +78,54 @@ On success it prints the URL and the generated admin password (saved in `.env`,
 mode 600). Re-running is safe — it preserves an existing `.env`. The manual
 steps below are the same thing broken out, for reference or troubleshooting.
 
+## HTTPS / TLS on port 443 (certificates)
+The stack can serve HTTPS via a built-in **Caddy** reverse proxy
+(`docker-compose.tls.yml` + `deploy/caddy/Caddyfile`). Three certificate paths:
+
+### A) Automatic Let's Encrypt (recommended — zero manual cert handling)
+Caddy obtains and **auto-renews** a free certificate. Requirements: a public
+domain whose DNS A/AAAA record points at the server, and inbound **TCP 80 + 443**
+open from the internet (used for the ACME challenge).
+```bash
+APP_DOMAIN=fw.example.com ACME_EMAIL=you@example.com sudo bash deploy/almalinux-deploy.sh
+```
+The installer sets `COOKIE_SECURE=true`, `ALLOWED_ORIGINS=https://fw.example.com`,
+opens 80/443, and brings up the Caddy overlay. Nothing else to install — the
+cert is fetched on first start and renewed automatically. App: `https://fw.example.com`.
+
+### B) Bring your own certificate (corporate/internal CA, or purchased)
+Put your `fullchain.pem` + `privkey.pem` on the host, mount them into Caddy, and
+point the Caddyfile at them. In `docker-compose.tls.yml` add to the `caddy`
+service:
+```yaml
+    volumes:
+      - /etc/ssl/policyinsight/fullchain.pem:/certs/fullchain.pem:ro
+      - /etc/ssl/policyinsight/privkey.pem:/certs/privkey.pem:ro
+```
+and replace the site block in `deploy/caddy/Caddyfile` with:
+```
+{$APP_DOMAIN} {
+    tls /certs/fullchain.pem /certs/privkey.pem
+    reverse_proxy frontend:80
+}
+```
+Then `APP_DOMAIN=fw.example.com sudo bash deploy/almalinux-deploy.sh`. (No
+ACME, no public ports needed — good for internal-only servers.)
+
+### C) Internal / no public domain (self-signed)
+For a quick internal cert with no CA, use Caddy's local CA — in the Caddyfile:
+```
+{$APP_DOMAIN} { tls internal
+    reverse_proxy frontend:80 }
+```
+Browsers will warn unless you distribute Caddy's root to clients. Alternatively
+generate a self-signed pair with `openssl req -x509 -newkey rsa:2048 ...` and use
+path B.
+
+> Whichever path: when serving HTTPS, keep `COOKIE_SECURE=true` and
+> `ALLOWED_ORIGINS=https://<domain>` in `.env` (the installer does this for you
+> when `APP_DOMAIN` is set).
+
 ## AlmaLinux 8/9 (manual / step by step)
 ```bash
 # 1. Install Docker Engine + Compose plugin

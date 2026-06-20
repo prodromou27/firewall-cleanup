@@ -1,0 +1,25 @@
+# Caddy reverse proxy — automatic HTTPS for PolicyInsight.
+#
+# Caddy obtains and auto-renews a free Let's Encrypt certificate for APP_DOMAIN
+# and redirects HTTP→HTTPS. Requirements:
+#   - APP_DOMAIN resolves (public DNS A/AAAA) to this server
+#   - inbound TCP 80 and 443 reachable from the internet (ACME challenge)
+#
+# Bring-your-own certificate (corporate/internal CA, or no public domain):
+#   mount your cert+key into the caddy service and replace the site block with:
+#     {$APP_DOMAIN} {
+#         tls /certs/fullchain.pem /certs/privkey.pem
+#         reverse_proxy frontend:80
+#     }
+#   For a quick internal/test cert with no CA, use Caddy's local CA:
+#     {$APP_DOMAIN} { tls internal
+#         reverse_proxy frontend:80 }
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$APP_DOMAIN} {
+	encode gzip
+	reverse_proxy frontend:80
+}

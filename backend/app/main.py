@@ -17,6 +17,7 @@ from app.api import customers, devices, revisions, compliance, auth as auth_api,
 from app.api import audit as audit_api
 from app.api import cleanup as cleanup_api
 from app.api import changes as changes_api
+from app.api import reporting_v2
 import app.models  # ensure models are registered
 
 # ── Logging configuration ─────────────────────────────────────────────────────
@@ -212,6 +213,20 @@ async def lifespan(app: FastAPI):
             _db.close()
     except Exception as _exc:
         logger.error("Startup recovery failed: %s", _exc)
+
+    # Seed default report templates (customer-facing + internal) on a fresh DB.
+    try:
+        from app.database import SessionLocal
+        from app.reporting.defaults import ensure_default_templates
+        _rdb = SessionLocal()
+        try:
+            _n = ensure_default_templates(_rdb)
+            if _n:
+                logger.info("Seeded %d default report template(s).", _n)
+        finally:
+            _rdb.close()
+    except Exception as _rt_exc:
+        logger.error("Report template seeding failed: %s", _rt_exc)
 
     # Load runtime origin-subnet allow-list from DB (overrides the env seed).
     try:
@@ -587,6 +602,9 @@ app.include_router(compliance.router)
 app.include_router(audit_api.router)
 app.include_router(cleanup_api.router)
 app.include_router(changes_api.router)
+app.include_router(reporting_v2.templates_router)
+app.include_router(reporting_v2.reports_router)
+app.include_router(reporting_v2.meta_router)
 
 
 @app.get("/api/health")

@@ -340,7 +340,7 @@ def generate_customer_summary_report(
         fq = _apply_finding_filters(fq, severities, finding_types, statuses, None)
         findings = fq.all()
 
-        sev_counts = {"High": 0, "Medium": 0, "Low": 0, "Informational": 0}
+        sev_counts = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0, "Informational": 0}
         for f in findings:
             if f.severity in sev_counts:
                 sev_counts[f.severity] += 1
@@ -372,6 +372,7 @@ def generate_customer_summary_report(
 
     # Aggregate totals
     total_findings   = sum(s["total_findings"]           for s in policy_summaries)
+    total_critical   = sum(s["severity_counts"]["Critical"] for s in policy_summaries)
     total_high       = sum(s["severity_counts"]["High"]  for s in policy_summaries)
     total_medium     = sum(s["severity_counts"]["Medium"] for s in policy_summaries)
     total_low        = sum(s["severity_counts"]["Low"]   for s in policy_summaries)
@@ -401,6 +402,7 @@ def generate_customer_summary_report(
         "summary": {
             "total_policies":    len(policies),
             "total_findings":    total_findings,
+            "critical":          total_critical,
             "high":              total_high,
             "medium":            total_medium,
             "low":               total_low,
@@ -436,17 +438,17 @@ def generate_customer_summary_report(
     ws.append([f"Customer: {customer.name}"])
     ws.append([f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"])
     ws.append([])
-    ws.append(["Total Policies", "Total Findings", "High", "Medium", "Low", "Informational"])
+    ws.append(["Total Policies", "Total Findings", "Critical", "High", "Medium", "Low", "Informational"])
     for cell in ws[5]:
         cell.fill = hdr_fill
         cell.font = hdr_font
-    ws.append([len(policies), total_findings, total_high, total_medium, total_low, total_info])
+    ws.append([len(policies), total_findings, total_critical, total_high, total_medium, total_low, total_info])
     ws.append([])
 
     # Policies sheet
     wp = wb.create_sheet("Policies")
     pol_headers = ["Firewall Name", "Vendor", "Package", "Rules", "Objects",
-                   "Analysis", "Total Findings", "High", "Medium", "Low", "Upload Date"]
+                   "Analysis", "Total Findings", "Critical", "High", "Medium", "Low", "Upload Date"]
     wp.append(pol_headers)
     for cell in wp[1]:
         cell.fill = hdr_fill
@@ -455,7 +457,7 @@ def generate_customer_summary_report(
         wp.append([
             s["firewall_name"], s["vendor"], s["policy_package"] or "", s["rule_count"], s["object_count"],
             s["analysis_status"], s["total_findings"],
-            s["severity_counts"]["High"], s["severity_counts"]["Medium"], s["severity_counts"]["Low"],
+            s["severity_counts"]["Critical"], s["severity_counts"]["High"], s["severity_counts"]["Medium"], s["severity_counts"]["Low"],
             s["upload_date"] or "",
         ])
 
@@ -890,7 +892,7 @@ class ReportBuildConfig(_BaseModel):
     detail_level: str = "standard"          # summary | standard | detailed
     sections: List[str] = []               # exec_summary, scope, findings_summary, findings_detail, posture
     finding_categories: List[str] = []     # which finding_type values to include
-    severities: List[str] = ["High", "Medium", "Low", "Informational"]
+    severities: List[str] = ["Critical", "High", "Medium", "Low", "Informational"]
     statuses: Optional[List[str]] = None
     finding_ids: Optional[List[str]] = None
     include_rules: bool = True
@@ -998,7 +1000,7 @@ def build_report_v2(
         "summary": {
             "total_findings": len(findings),
             "by_severity": {sev: sum(1 for f in findings if f.severity == sev)
-                            for sev in ["High", "Medium", "Low", "Informational"]},
+                            for sev in ["Critical", "High", "Medium", "Low", "Informational"]},
             "by_category": {ftype: sum(1 for f in findings if f.finding_type == ftype)
                             for ftype in set(f.finding_type for f in findings)},
         },
@@ -1050,12 +1052,12 @@ def _build_html_full(policy, rules, findings, config: ReportBuildConfig, custome
         by_type.setdefault(f.finding_type, []).append(f)
 
     sev_counts = {s: sum(1 for f in findings if f.severity == s)
-                  for s in ("High", "Medium", "Low", "Informational")}
+                  for s in ("Critical", "High", "Medium", "Low", "Informational")}
     total = len(findings)
 
     # Helpers
-    def _sev_color(sev): return {"High":"#dc2626","Medium":"#d97706","Low":"#3b82f6","Informational":"#6b7280"}.get(sev,"#6b7280")
-    def _sev_bg(sev):    return {"High":"#fee2e2","Medium":"#fef3c7","Low":"#dbeafe","Informational":"#f3f4f6"}.get(sev,"#f9fafb")
+    def _sev_color(sev): return {"Critical":"#991b1b","High":"#dc2626","Medium":"#d97706","Low":"#3b82f6","Informational":"#6b7280"}.get(sev,"#6b7280")
+    def _sev_bg(sev):    return {"Critical":"#fecaca","High":"#fee2e2","Medium":"#fef3c7","Low":"#dbeafe","Informational":"#f3f4f6"}.get(sev,"#f9fafb")
 
     def score_ring(score: int, color: str, label: str) -> str:
         r, cx, cy = 38, 48, 48
@@ -1075,13 +1077,13 @@ def _build_html_full(policy, rules, findings, config: ReportBuildConfig, custome
         if not tot:
             return '<div class="sev-bar-empty">No findings</div>'
         segs = ""
-        for sev, clr in (("High","#dc2626"),("Medium","#d97706"),("Low","#3b82f6"),("Informational","#9ca3af")):
+        for sev, clr in (("Critical","#991b1b"),("High","#dc2626"),("Medium","#d97706"),("Low","#3b82f6"),("Informational","#9ca3af")):
             n = counts.get(sev, 0)
             if n:
                 segs += f'<span style="flex:{n};background:{clr};border-radius:2px" title="{sev}: {n}"></span>'
         legend = " &nbsp; ".join(
             f'<span><b style="color:{c}">{counts.get(s,0)}</b> {s}</span>'
-            for s, c in (("High","#dc2626"),("Medium","#d97706"),("Low","#3b82f6"),("Informational","#9ca3af"))
+            for s, c in (("Critical","#991b1b"),("High","#dc2626"),("Medium","#d97706"),("Low","#3b82f6"),("Informational","#9ca3af"))
         )
         return f'<div class="sev-bar">{segs}</div><div class="sev-legend">{legend}</div>'
 
@@ -1093,6 +1095,8 @@ def _build_html_full(policy, rules, findings, config: ReportBuildConfig, custome
         c_clr = "#ef4444" if complexity >= 70 else "#f59e0b" if complexity >= 40 else "#10b981"
 
         obs = []
+        if sev_counts["Critical"] > 0:
+            obs.append(f'<li><span style="color:#991b1b;font-weight:700">{sev_counts["Critical"]} critical finding{"s" if sev_counts["Critical"]!=1 else ""}</span> require immediate review.</li>')
         if sev_counts["High"] > 0:
             obs.append(f'<li><span style="color:#dc2626;font-weight:600">⚠ {sev_counts["High"]} high-severity finding{"s" if sev_counts["High"]!=1 else ""}</span> require prompt review.</li>')
         if sev_counts["Medium"] > 0:
@@ -1114,6 +1118,7 @@ def _build_html_full(policy, rules, findings, config: ReportBuildConfig, custome
               <div class="exec-right">
                 <div class="stat-grid">
                   <div class="stat-card"><div class="stat-n">{total}</div><div class="stat-l">Total</div></div>
+                  <div class="stat-card critical"><div class="stat-n">{sev_counts["Critical"]}</div><div class="stat-l">Critical</div></div>
                   <div class="stat-card high"><div class="stat-n">{sev_counts["High"]}</div><div class="stat-l">High</div></div>
                   <div class="stat-card med"><div class="stat-n">{sev_counts["Medium"]}</div><div class="stat-l">Medium</div></div>
                   <div class="stat-card low"><div class="stat-n">{sev_counts["Low"]}</div><div class="stat-l">Low</div></div>
@@ -1134,6 +1139,7 @@ def _build_html_full(policy, rules, findings, config: ReportBuildConfig, custome
             return ''
         rows = "".join(
             f'<tr><td>{CATEGORY_META.get(ft,ft.replace("_"," ").title())}</td>'
+            f'<td class="tc critical-clr">{sum(1 for f in fl if f.severity=="Critical") or ""}</td>'
             f'<td class="tc high-clr">{sum(1 for f in fl if f.severity=="High") or ""}</td>'
             f'<td class="tc med-clr">{sum(1 for f in fl if f.severity=="Medium") or ""}</td>'
             f'<td class="tc low-clr">{sum(1 for f in fl if f.severity=="Low") or ""}</td>'
@@ -1146,6 +1152,7 @@ def _build_html_full(policy, rules, findings, config: ReportBuildConfig, custome
           <div class="section-header"><h2>Findings Summary</h2><span class="badge">{total} total</span></div>
           <table><thead><tr>
             <th>Category</th>
+            <th class="tc" style="width:55px">Crit</th>
             <th class="tc" style="width:55px">High</th>
             <th class="tc" style="width:55px">Med</th>
             <th class="tc" style="width:55px">Low</th>
@@ -1222,6 +1229,7 @@ def _build_html_full(policy, rules, findings, config: ReportBuildConfig, custome
             f'<tr><td>Total Rules</td><td>{policy.rule_count}</td></tr>'
             f'<tr><td>Total Objects</td><td>{policy.object_count or 0}</td></tr>'
             f'<tr><td>Total Findings</td><td>{total}</td></tr>'
+            f'<tr><td>Critical Findings</td><td style="color:#991b1b;font-weight:700">{sev_counts["Critical"]}</td></tr>'
             f'<tr><td>High Findings</td><td style="color:#dc2626;font-weight:700">{sev_counts["High"]}</td></tr>'
         )
         return f'''
@@ -1324,11 +1332,11 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-
 .ring-wrap{{text-align:center;flex-shrink:0}}
 .ring-label{{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.7px;color:#9ca3af;margin-top:2px}}
 .exec-right{{flex:1}}
-.stat-grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}}
+.stat-grid{{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:10px}}
 .stat-card{{text-align:center;border:1px solid #e5e7eb;border-radius:8px;padding:10px 6px;background:#f9fafb}}
-.stat-card.high{{background:#fee2e2;border-color:#fca5a5}}.stat-card.med{{background:#fef3c7;border-color:#fcd34d}}.stat-card.low{{background:#dbeafe;border-color:#93c5fd}}
+.stat-card.critical{{background:#fecaca;border-color:#f87171}}.stat-card.high{{background:#fee2e2;border-color:#fca5a5}}.stat-card.med{{background:#fef3c7;border-color:#fcd34d}}.stat-card.low{{background:#dbeafe;border-color:#93c5fd}}
 .stat-n{{font-size:22px;font-weight:800;color:#111827}}.stat-l{{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:#9ca3af}}
-.stat-card.high .stat-n{{color:#dc2626}}.stat-card.med .stat-n{{color:#d97706}}.stat-card.low .stat-n{{color:#2563eb}}
+.stat-card.critical .stat-n{{color:#991b1b}}.stat-card.high .stat-n{{color:#dc2626}}.stat-card.med .stat-n{{color:#d97706}}.stat-card.low .stat-n{{color:#2563eb}}
 .sev-bar{{display:flex;height:7px;border-radius:4px;overflow:hidden;gap:2px;margin-bottom:4px}}
 .sev-bar-empty{{font-size:12px;color:#9ca3af}}
 .sev-legend{{font-size:11px;color:#6b7280;display:flex;gap:12px}}
@@ -1343,7 +1351,7 @@ thead th{{background:#f9fafb;padding:9px 12px;text-align:left;font-size:11px;fon
 tbody td{{padding:9px 12px;border-bottom:1px solid #f3f4f6;vertical-align:top}}
 tbody tr:last-child td{{border-bottom:none}}
 .tc{{text-align:center}}.bold{{font-weight:700}}.mono{{font-family:monospace;font-size:10px}}
-.high-clr{{color:#dc2626;font-weight:700}}.med-clr{{color:#d97706;font-weight:700}}.low-clr{{color:#2563eb;font-weight:700}}.info-clr{{color:#9ca3af}}
+.critical-clr{{color:#991b1b;font-weight:700}}.high-clr{{color:#dc2626;font-weight:700}}.med-clr{{color:#d97706;font-weight:700}}.low-clr{{color:#2563eb;font-weight:700}}.info-clr{{color:#9ca3af}}
 /* Finding rows */
 .sev-col{{width:75px;vertical-align:top}}.stat-col{{width:110px;vertical-align:top;font-size:11px;color:#6b7280}}
 .sev-badge{{display:inline-block;color:white;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700}}
@@ -1383,7 +1391,7 @@ tbody tr:last-child td{{border-bottom:none}}
       <div class="cm"><div class="lbl">Policy Package</div><div class="val">{policy.policy_package or "Default"}</div></div>
       <div class="cm"><div class="lbl">Rules Analysed</div><div class="val">{policy.rule_count}</div></div>
       <div class="cm"><div class="lbl">Assessment Date</div><div class="val">{date_str}</div></div>
-      <div class="cm"><div class="lbl">Total Findings</div><div class="val" style="color:{"#dc2626" if sev_counts["High"] else "#111827"}">{total}</div></div>
+      <div class="cm"><div class="lbl">Total Findings</div><div class="val" style="color:{"#991b1b" if sev_counts["Critical"] else "#dc2626" if sev_counts["High"] else "#111827"}">{total}</div></div>
     </div>
     <div class="cover-ft">
       <div>
@@ -1458,11 +1466,12 @@ def _build_excel_full(policy, rules, findings, config: ReportBuildConfig, custom
 
     DARK  = PatternFill(fill_type="solid", fgColor="111827")
     ACCF  = PatternFill(fill_type="solid", fgColor="1e3a5f")
+    H_CRIT = PatternFill(fill_type="solid", fgColor="fecaca")
     H_RED = PatternFill(fill_type="solid", fgColor="fee2e2")
     H_AMB = PatternFill(fill_type="solid", fgColor="fef3c7")
     H_BLU = PatternFill(fill_type="solid", fgColor="dbeafe")
     H_GRY = PatternFill(fill_type="solid", fgColor="f3f4f6")
-    SEV_FILL = {"High": H_RED, "Medium": H_AMB, "Low": H_BLU, "Informational": H_GRY}
+    SEV_FILL = {"Critical": H_CRIT, "High": H_RED, "Medium": H_AMB, "Low": H_BLU, "Informational": H_GRY}
     H_FONT = Font(bold=True, color="FFFFFF")
 
     def hdr(ws, cols):
@@ -1499,7 +1508,7 @@ def _build_excel_full(policy, rules, findings, config: ReportBuildConfig, custom
     ws.append(["FINDINGS SUMMARY"])
     ws[f"A{ws.max_row}"].font = Font(bold=True)
     ws.append(["Total Findings", len(findings)])
-    for sev in ("High", "Medium", "Low", "Informational"):
+    for sev in ("Critical", "High", "Medium", "Low", "Informational"):
         n = sum(1 for f in findings if f.severity == sev)
         ws.append([sev, n])
     ws.append([])

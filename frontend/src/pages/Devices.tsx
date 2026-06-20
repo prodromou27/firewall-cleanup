@@ -35,6 +35,21 @@ function SyncStatusChip({ status }: { status: string }) {
 }
 
 // ── Device form modal ─────────────────────────────────────────────────────
+function deviceConnectionInfo(device: FirewallDeviceT) {
+  const effectivePort = device.port || (device.vendor === 'HuaweiUSG' ? 22 : 443)
+  const isHuaweiSsh = device.vendor === 'HuaweiUSG' && effectivePort === 22
+  const protocol = isHuaweiSsh ? 'SSH' : device.use_ssl ? 'HTTPS' : 'HTTP'
+  const transport = isHuaweiSsh ? 'SSH CLI' : device.vendor === 'HuaweiUSG' ? `${protocol} REST API` : `${protocol} API`
+
+  return {
+    effectivePort,
+    protocol,
+    transport,
+    endpoint: `${device.host}:${effectivePort}`,
+    isSsh: isHuaweiSsh,
+  }
+}
+
 interface FormValues {
   name: string; vendor: string; host: string; port: string
   api_token: string; username: string; password: string
@@ -609,6 +624,7 @@ function DeviceDetailDrawer({ device, onClose, onEdit }: {
   }
 
   const vc = VENDOR_COLOR_MAP[device.vendor] ?? { bar: 'bg-slate-500', accent: 'from-slate-500 to-slate-700', chip: 'bg-gray-100 text-gray-700 border-gray-200' }
+  const connection = deviceConnectionInfo(device)
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
@@ -629,7 +645,7 @@ function DeviceDetailDrawer({ device, onClose, onEdit }: {
               </div>
               <div>
                 <h2 className="text-lg font-bold leading-tight">{device.name}</h2>
-                <p className="text-white/70 text-sm font-mono">{device.host}{device.port ? `:${device.port}` : ''}</p>
+                <p className="text-white/70 text-sm font-mono">{connection.endpoint}</p>
               </div>
             </div>
             <button onClick={onClose} className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors">
@@ -716,9 +732,9 @@ function DeviceDetailDrawer({ device, onClose, onEdit }: {
             </h3>
             <div className="space-y-2">
               {[
-                { label: 'Host / IP', value: `${device.host}${device.port ? ':' + device.port : ''}` },
-                { label: 'Protocol', value: device.use_ssl ? 'HTTPS' : 'HTTP' },
-                { label: 'SSL Verify', value: device.verify_ssl ? 'Enabled' : 'Disabled (self-signed)' },
+                { label: 'Host / IP', value: connection.endpoint },
+                { label: 'Protocol', value: connection.transport },
+                !connection.isSsh ? { label: 'SSL Verify', value: device.verify_ssl ? 'Enabled' : 'Disabled (self-signed)' } : null,
                 { label: 'Auth Method', value: device.has_token ? 'API Token' : device.has_credentials ? 'Username / Password' : 'None' },
                 { label: 'Username', value: device.username_hint || undefined },
                 device.vendor === 'FortiGate' ? { label: 'VDOM', value: device.vdom || 'root' } : null,
@@ -894,6 +910,7 @@ function DeviceCard({
   syncing: boolean
 }) {
   const vc = VENDOR_COLOR_MAP[device.vendor] ?? { chip: 'bg-gray-100 text-gray-700 border-gray-200', accent: 'from-slate-500 to-slate-700', bar: 'bg-slate-500' }
+  const connection = deviceConnectionInfo(device)
 
   const cardOsVersion: string | null = (() => {
     const ov = device.os_version || null
@@ -918,7 +935,7 @@ function DeviceCard({
             </div>
             <div className="min-w-0">
               <h3 className="font-bold text-gray-900 truncate">{device.name}</h3>
-              <p className="text-xs text-gray-400 font-mono">{device.host}{device.port ? `:${device.port}` : ''}</p>
+              <p className="text-xs text-gray-400 font-mono">{connection.endpoint}</p>
             </div>
           </div>
           <div className="flex flex-col items-end gap-1 flex-shrink-0 ml-2">
@@ -1024,7 +1041,16 @@ function DeviceCard({
           {device.has_credentials && !device.has_token && (
             <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full text-[10px] font-semibold">Credentials</span>
           )}
-          {device.use_ssl && <span className="text-[10px] text-green-600 font-semibold bg-green-50 px-2 py-0.5 rounded-full border border-green-100">HTTPS</span>}
+          <span className={clsx(
+            'text-[10px] font-semibold px-2 py-0.5 rounded-full border',
+            connection.isSsh
+              ? 'text-sky-600 bg-sky-50 border-sky-100'
+              : device.use_ssl
+                ? 'text-green-600 bg-green-50 border-green-100'
+                : 'text-amber-600 bg-amber-50 border-amber-100'
+          )}>
+            {connection.transport}
+          </span>
         </div>
 
         {/* Actions */}

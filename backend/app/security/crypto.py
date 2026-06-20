@@ -45,6 +45,8 @@ def _get_fernet() -> Fernet:
         digest = hashlib.sha256(raw_key.encode()).digest()
         key = base64.urlsafe_b64encode(digest)
     else:
+        if settings.is_production:
+            raise RuntimeError("SECRET_KEY must be set in production to encrypt/decrypt device credentials.")
         # Dev fallback: derive from a stable machine secret stored on disk
         key_file = os.path.join(os.path.dirname(settings.database_url.replace("sqlite:///", "")), ".dev_key")
         if not os.path.isabs(key_file):

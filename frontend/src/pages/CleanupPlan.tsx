@@ -85,6 +85,9 @@ export function CleanupPlan() {
                       <div>
                         <h2 className="text-base font-bold text-gray-900">Wave {w.id} · {w.name}</h2>
                         <p className="text-xs text-gray-500 mt-0.5 max-w-2xl">{w.description}</p>
+                        <p className="text-[11px] text-gray-400 mt-1 max-w-2xl">
+                          Rollback: {w.rollback}
+                        </p>
                       </div>
                     </div>
                     <button onClick={() => downloadCsv(getCleanupTicketsUrl(customerId || undefined, w.id), `cleanup_tickets_wave${w.id}.csv`)}

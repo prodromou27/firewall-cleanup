@@ -114,7 +114,7 @@ export interface FirewallObject {
   is_large_group?: boolean
 }
 
-export type FindingSeverity = 'High' | 'Medium' | 'Low' | 'Informational'
+export type FindingSeverity = 'Critical' | 'High' | 'Medium' | 'Low' | 'Informational'
 export type FindingConfidence = 'High' | 'Medium' | 'Low'
 export type FindingStatus =
   | 'New'

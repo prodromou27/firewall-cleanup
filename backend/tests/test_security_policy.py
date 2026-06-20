@@ -1,9 +1,14 @@
 """Unit tests for the password policy, rate limiter, and public-network helper."""
 import pytest
+from pydantic import ValidationError
 
 from app.security.passwords import validate_password_policy, hash_password, verify_password
 from app.security.ratelimit import _RateLimiter
 from app.analysis.ip_utils import is_public_network
+from app.config import Settings
+from app.api.devices import DeviceCreate
+from app.models.user import ROLE_SYSTEM_ADMIN, ROLE_TENANT_ADMIN
+from app.security.rbac import CAP_MANAGE_SETTINGS, has_capability
 
 
 # ── Password policy ──────────────────────────────────────────────────────────
@@ -82,3 +87,56 @@ def test_unparseable_source_is_not_public():
     # Named objects we cannot resolve must not be treated as public exposure.
     assert not is_public_network("Branch-Office-Group")
     assert not is_public_network("")
+
+
+def test_production_requires_secret_secure_cookie_and_real_origin():
+    s = Settings(
+        environment="production",
+        secret_key="",
+        cookie_secure=False,
+        allowed_origins="http://localhost:3000",
+    )
+    with pytest.raises(RuntimeError) as exc:
+        s.validate_security_posture()
+    msg = str(exc.value)
+    assert "SECRET_KEY" in msg
+    assert "COOKIE_SECURE" in msg
+    assert "localhost" in msg
+
+
+def test_secure_production_settings_pass_validation():
+    s = Settings(
+        environment="production",
+        secret_key="test-secret",
+        cookie_secure=True,
+        allowed_origins="https://policyinsight.example.com",
+    )
+    s.validate_security_posture()
+
+
+def test_device_host_blocks_local_and_metadata_targets():
+    base = {
+        "customer_id": "c1",
+        "name": "FW",
+        "vendor": "FortiGate",
+        "api_token": "token",
+    }
+    for host in ("127.0.0.1", "localhost", "169.254.169.254", "0.0.0.0"):
+        with pytest.raises(ValidationError):
+            DeviceCreate(host=host, **base)
+
+
+def test_device_host_allows_normal_internal_firewall_ip():
+    d = DeviceCreate(
+        customer_id="c1",
+        name="FW",
+        vendor="FortiGate",
+        host="10.10.10.1",
+        api_token="token",
+    )
+    assert d.host == "10.10.10.1"
+
+
+def test_global_settings_are_system_admin_only():
+    assert has_capability(ROLE_SYSTEM_ADMIN, CAP_MANAGE_SETTINGS)
+    assert not has_capability(ROLE_TENANT_ADMIN, CAP_MANAGE_SETTINGS)

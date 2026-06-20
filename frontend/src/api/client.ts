@@ -122,6 +122,7 @@ export interface CleanupWave {
   id: number
   name: string
   description: string
+  rollback: string
   finding_count: number
   candidate_rule_count: number
   candidate_object_count: number

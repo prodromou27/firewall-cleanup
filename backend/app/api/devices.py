@@ -19,6 +19,7 @@ Security:
   - All state-changing operations are written to the audit log.
 """
 import logging
+import ipaddress
 import re
 from typing import Optional
 
@@ -33,6 +34,7 @@ from app.models.policy import FirewallPolicy
 from app.models.revision import PolicyRevision
 from app.security.crypto import encrypt_credential, decrypt_credential
 from app.security.audit import audit_log
+from app.config import settings
 from app.models.user import User
 from app.security.identity import (
     get_current_user, require_capability, require_customer_access, accessible_customer_ids,
@@ -68,6 +70,36 @@ _HOST_RE = re.compile(
     r"|(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*)"  # FQDN
     r")$"
 )
+
+_BLOCKED_DEVICE_IPS = {
+    ipaddress.ip_address("169.254.169.254"),  # cloud instance metadata
+}
+
+
+def _is_unsafe_device_host(host: str) -> bool:
+    h = (host or "").strip().lower().rstrip(".")
+    if h in {"localhost", "ip6-localhost"}:
+        return True
+    try:
+        ip = ipaddress.ip_address(h.strip("[]"))
+    except ValueError:
+        return False
+    return (
+        ip in _BLOCKED_DEVICE_IPS
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
+def _validate_safe_device_host(v: str) -> str:
+    v = v.strip()
+    if not v or not _HOST_RE.match(v):
+        raise ValueError("host must be a valid IP address or hostname")
+    if _is_unsafe_device_host(v) and not settings.allow_unsafe_device_hosts:
+        raise ValueError("host targets a local/link-local/metadata address and is blocked")
+    return v
 
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
@@ -107,10 +139,7 @@ class DeviceCreate(BaseModel):
     @field_validator("host")
     @classmethod
     def validate_host(cls, v: str) -> str:
-        v = v.strip()
-        if not v or not _HOST_RE.match(v):
-            raise ValueError("host must be a valid IP address or hostname")
-        return v
+        return _validate_safe_device_host(v)
 
     @field_validator("port")
     @classmethod
@@ -169,9 +198,7 @@ class DeviceUpdate(BaseModel):
     @classmethod
     def validate_host(cls, v: Optional[str]) -> Optional[str]:
         if v is not None:
-            v = v.strip()
-            if not v or not _HOST_RE.match(v):
-                raise ValueError("host must be a valid IP address or hostname")
+            v = _validate_safe_device_host(v)
         return v
 
     @field_validator("port")

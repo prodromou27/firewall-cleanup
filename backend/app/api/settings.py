@@ -6,6 +6,7 @@ import tempfile
 from datetime import datetime
 from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.background import BackgroundTask
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.settings import AppSettings
@@ -25,6 +26,16 @@ _WEBHOOK_EVENTS_ALL = ["sync_completed", "sync_error", "high_finding"]
 # They are still restorable: the import endpoint accepts them, this export just
 # omits their values so backups can't leak credentials.
 _SECRET_SETTING_KEYS = {"nvd_api_key"}
+
+
+def _safe_unlink(path: str) -> None:
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        # Backup download cleanup is best effort; do not break the response.
+        pass
 
 
 class SettingsUpdate(BaseModel):
@@ -253,6 +264,7 @@ def download_database_backup(
             tmp.name, media_type="application/octet-stream",
             filename=f"policyinsight_backup_{ts}.db",
             headers={"Content-Disposition": f'attachment; filename="policyinsight_backup_{ts}.db"'},
+            background=BackgroundTask(_safe_unlink, tmp.name),
         )
 
     # ── PostgreSQL: pg_dump custom-format archive ────────────────────────────
@@ -282,6 +294,7 @@ def download_database_backup(
             tmp.name, media_type="application/octet-stream",
             filename=f"policyinsight_backup_{ts}.dump",
             headers={"Content-Disposition": f'attachment; filename="policyinsight_backup_{ts}.dump"'},
+            background=BackgroundTask(_safe_unlink, tmp.name),
         )
 
     return JSONResponse(status_code=400, content={"detail": "Unsupported database engine for backup."})

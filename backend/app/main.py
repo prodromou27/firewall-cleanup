@@ -65,6 +65,8 @@ logging.config.dictConfig(LOGGING_CONFIG)
 logger = logging.getLogger("app")
 auto_sync_logger = logging.getLogger("auto_sync")
 
+settings.validate_security_posture()
+
 
 # ── Auto-sync background scheduler ───────────────────────────────────────────
 
@@ -412,11 +414,10 @@ _CSP_DOCS = (
     "worker-src 'self' blob:; "
     "frame-ancestors 'none'"
 )
-# App CSP. 'unsafe-inline'/'unsafe-eval' are required by the Vite dev server
-# (HMR injects inline scripts and uses eval) and inline styles; connect-src
-# allows the HMR websocket. Tighten script-src for a production build behind a
-# real bundler if desired.
-_CSP_APP = (
+# App CSP. Development allows Vite HMR/eval. Production removes unsafe-eval and
+# websocket origins; inline styles are still allowed because the app uses React
+# style attributes for measured bars and charts.
+_CSP_APP_DEV = (
     "default-src 'self'; "
     "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
@@ -427,6 +428,18 @@ _CSP_APP = (
     "base-uri 'self'; "
     "form-action 'self'"
 )
+_CSP_APP_PROD = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+    "font-src 'self' data: https://fonts.gstatic.com; "
+    "img-src 'self' data:; "
+    "connect-src 'self'; "
+    "frame-ancestors 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'"
+)
+_CSP_APP = _CSP_APP_PROD if settings.is_production else _CSP_APP_DEV
 
 
 @app.middleware("http")

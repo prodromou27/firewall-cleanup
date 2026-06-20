@@ -50,9 +50,39 @@ class Settings(BaseSettings):
     def docs_enabled(self) -> bool:
         """Docs are on in non-production environments, or when explicitly enabled."""
         return self.enable_docs or self.environment.strip().lower() != "production"
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment.strip().lower() == "production"
+
+    def validate_security_posture(self) -> None:
+        """Fail closed for production deployments with unsafe security settings."""
+        if not self.is_production:
+            return
+
+        errors = []
+        if not self.secret_key.strip():
+            errors.append("SECRET_KEY must be set in production to encrypt stored firewall credentials.")
+        if not self.cookie_secure:
+            errors.append("COOKIE_SECURE must be true in production so session cookies are HTTPS-only.")
+
+        origins = [o.strip().lower() for o in self.allowed_origins.split(",") if o.strip()]
+        if not origins:
+            errors.append("ALLOWED_ORIGINS must include the production HTTPS origin.")
+        if any(o == "*" for o in origins):
+            errors.append("ALLOWED_ORIGINS must not contain '*'.")
+        if any("://localhost" in o or "://127." in o for o in origins):
+            errors.append("ALLOWED_ORIGINS must not use localhost/127.0.0.1 in production.")
+
+        if errors:
+            raise RuntimeError("Insecure production configuration: " + " ".join(errors))
+
     # Set cookies with the Secure flag (HTTPS only). Leave False for local dev
     # over http://localhost; set True in production behind TLS.
     cookie_secure: bool = False
+    # Lab/dev escape hatch. Production blocks device targets that resolve to
+    # local machine/link-local/metadata style addresses unless this is true.
+    allow_unsafe_device_hosts: bool = False
     # Bootstrap admin — if no users exist at startup and both are set, a
     # system_admin is created. Change the password immediately after first login.
     bootstrap_admin_email: str = ""

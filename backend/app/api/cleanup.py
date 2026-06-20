@@ -65,6 +65,102 @@ WAVES = [
 
 _TYPE_TO_WAVE = {t: w["id"] for w in WAVES for t in w["types"]}
 
+_TYPE_ACTION: dict[str, tuple[str, str, str]] = {
+    "disabled_rule": (
+        "Confirm the rule is intentionally disabled and no pending change requires it.",
+        "Remove or archive the disabled rule after approval.",
+        "Restore the rule from the captured policy baseline if it is needed.",
+    ),
+    "zero_hit_rule": (
+        "Validate the observation window and confirm with the service owner that no traffic is expected.",
+        "Disable first where operationally required, monitor, then remove in a later change.",
+        "Re-enable or recreate the rule from the baseline if legitimate traffic is reported.",
+    ),
+    "low_usage_rule": (
+        "Confirm low usage is expected and identify the exact sources, destinations, and services still required.",
+        "Tighten the rule to the observed business requirement or keep with documented justification.",
+        "Restore the previous broader scope from the baseline if approved traffic is blocked.",
+    ),
+    "duplicate_rule": (
+        "Confirm the reported duplicate covers the same source, destination, service, action, and zone context.",
+        "Keep the canonical rule and remove the redundant duplicate after approval.",
+        "Recreate the removed duplicate from the baseline if the canonical rule does not preserve intent.",
+    ),
+    "shadowed_rule": (
+        "Validate rule order and confirm the shadowed rule cannot be reached because of an earlier match.",
+        "Remove or reorder the shadowed rule only after the intended policy behavior is confirmed.",
+        "Restore original order and rule content from the baseline if behavior changes unexpectedly.",
+    ),
+    "unused_object": (
+        "Confirm the object is not referenced by active rules, NAT, VPN, groups, or pending changes.",
+        "Remove the unused object or archive it according to customer standards.",
+        "Recreate the object from the baseline if a hidden dependency is discovered.",
+    ),
+    "duplicate_object": (
+        "Confirm duplicate values, object type, and usage before consolidation.",
+        "Replace references with the approved canonical object, then remove redundant objects.",
+        "Restore the original object references from the baseline if dependency issues appear.",
+    ),
+    "empty_group": (
+        "Confirm the group is not intentionally reserved for a pending project or automation workflow.",
+        "Remove the empty group or populate it with approved members if it is still required.",
+        "Recreate the group from the baseline if an approved dependency is discovered.",
+    ),
+    "overly_permissive": (
+        "Identify the real business sources, destinations, services, users, and application context required.",
+        "Replace Any or broad values with the minimum approved access scope.",
+        "Restore the previous broader rule temporarily if validated business traffic is blocked.",
+    ),
+    "risky_service": (
+        "Confirm the service is required, exposed only to approved sources, and protected by compensating controls.",
+        "Restrict the service scope or replace it with a safer alternative where possible.",
+        "Restore the prior service scope from the baseline if approved operations are impacted.",
+    ),
+    "rdp_exposed": (
+        "Confirm whether RDP exposure is business-approved and protected by VPN, MFA, and source restrictions.",
+        "Restrict RDP to approved management sources or remove direct exposure.",
+        "Restore the prior rule temporarily if approved emergency access is impacted.",
+    ),
+    "ssh_exposed": (
+        "Confirm whether SSH exposure is business-approved and limited to trusted administration sources.",
+        "Restrict SSH to approved management sources or remove direct exposure.",
+        "Restore the prior rule temporarily if approved administration access is impacted.",
+    ),
+    "database_exposed": (
+        "Confirm the database listener should be reachable from the reported source networks.",
+        "Restrict database access to approved application tiers and administrative sources.",
+        "Restore the prior rule temporarily if an approved application flow is impacted.",
+    ),
+    "cleartext_service": (
+        "Confirm whether cleartext protocol use is still required and whether sensitive data may traverse it.",
+        "Replace with encrypted alternatives or restrict to approved isolated networks.",
+        "Restore the prior scope temporarily if approved legacy service traffic is impacted.",
+    ),
+}
+
+
+def _default_action(finding_type: str, wave: dict) -> tuple[str, str, str]:
+    """Return customer-facing cleanup guidance for a finding type."""
+    if finding_type in _TYPE_ACTION:
+        return _TYPE_ACTION[finding_type]
+    if wave["id"] == 1:
+        return (
+            "Confirm the item is unused or redundant in the current production policy.",
+            "Remove or consolidate the item after approval.",
+            "Restore the item from the captured baseline if a dependency is discovered.",
+        )
+    if wave["id"] == 2:
+        return (
+            "Confirm the optimization does not alter required traffic flows.",
+            "Apply the hygiene change through the approved change process.",
+            "Revert the hygiene change if unexpected operational impact appears.",
+        )
+    return (
+        "Confirm the business owner, required traffic scope, and compensating controls.",
+        "Tighten the rule to least privilege after approval.",
+        "Restore the previous rule scope from the captured baseline if approved traffic is blocked.",
+    )
+
 
 def _scoped_findings(db: Session, user: User, customer_id: Optional[str]):
     """Tenant-isolated, actionable findings + a policy_id->name map."""
@@ -120,6 +216,7 @@ def get_cleanup_plan(
             "id": w["id"],
             "name": w["name"],
             "description": w["description"],
+            "rollback": w["rollback"],
             "finding_count": len(wf),
             "candidate_rule_count": len(rule_ids),
             "candidate_object_count": len(obj_ids),
@@ -156,19 +253,24 @@ def export_cleanup_tickets(
     writer = csv.writer(output)
     writer.writerow([
         "Wave", "Wave Name", "Finding ID", "Severity", "Confidence", "Finding Type",
-        "Policy", "Title", "Recommendation", "Rollback Note", "Status",
-        "Affected Rules", "Affected Objects",
+        "Policy", "Title", "Status", "Customer Validation Required",
+        "Recommended Change Objective", "Implementation Note", "Rollback Note",
+        "Recommendation", "Affected Rules", "Affected Objects", "Evidence Summary",
     ])
     for f in findings:
         wid = _TYPE_TO_WAVE.get(f.finding_type)
         if wid is None or (wave is not None and wid != wave):
             continue
         w = wave_meta[wid]
+        validation, objective, rollback = _default_action(f.finding_type, w)
+        evidence = f.evidence if isinstance(f.evidence, dict) else {}
+        evidence_summary = "; ".join(f"{k}={v}" for k, v in list(evidence.items())[:6])
         writer.writerow([
             wid, w["name"], f.id, f.severity, f.confidence, f.finding_type,
-            policy_map.get(f.policy_id, ""), f.title, f.recommendation or "",
-            w["rollback"], f.status,
-            len(f.affected_rules or []), len(f.affected_objects or []),
+            policy_map.get(f.policy_id, ""), f.title, f.status,
+            validation, objective, "Implement outside PolicyInsight using the customer's approved firewall change process.",
+            rollback or w["rollback"], f.recommendation or "",
+            len(f.affected_rules or []), len(f.affected_objects or []), evidence_summary,
         ])
 
     output.seek(0)

@@ -25,18 +25,27 @@ jobs:
         id: target
         run: |
           if [ "${{ github.ref_name }}" = "PROD" ]; then
-            echo "host=${{ secrets.PROD_HOST }}"   >> "$GITHUB_OUTPUT"
-            echo "user=${{ secrets.PROD_USER }}"   >> "$GITHUB_OUTPUT"
+            host="${{ secrets.PROD_HOST }}"
+            echo "host=$host"                       >> "$GITHUB_OUTPUT"
+            echo "user=${{ secrets.PROD_USER }}"    >> "$GITHUB_OUTPUT"
             echo "port=${{ secrets.PROD_SSH_PORT || '22' }}" >> "$GITHUB_OUTPUT"
-            echo "key_name=PROD_SSH_KEY"           >> "$GITHUB_OUTPUT"
           else
-            echo "host=${{ secrets.DEV_HOST }}"    >> "$GITHUB_OUTPUT"
-            echo "user=${{ secrets.DEV_USER }}"    >> "$GITHUB_OUTPUT"
+            host="${{ secrets.DEV_HOST }}"
+            echo "host=$host"                       >> "$GITHUB_OUTPUT"
+            echo "user=${{ secrets.DEV_USER }}"     >> "$GITHUB_OUTPUT"
             echo "port=${{ secrets.DEV_SSH_PORT || '22' }}"  >> "$GITHUB_OUTPUT"
-            echo "key_name=DEV_SSH_KEY"            >> "$GITHUB_OUTPUT"
+          fi
+          # Skip (succeed) when no deploy secrets are configured for this branch —
+          # the pull-based self-update timer is the default deploy path.
+          if [ -z "$host" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No SSH deploy secrets set for '${{ github.ref_name }}' — skipping push-based deploy (the host self-updates via deploy/install-autoupdate.sh)."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Deploy over SSH
+        if: steps.target.outputs.configured == 'true'
         env:
           SSH_KEY: ${{ github.ref_name == 'PROD' && secrets.PROD_SSH_KEY || secrets.DEV_SSH_KEY }}
         run: |

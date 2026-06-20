@@ -118,6 +118,37 @@ export const getFindingsTrend = (customerId?: string, days = 90) =>
     params: { days, ...(customerId ? { customer_id: customerId } : {}) },
   }).then(r => r.data as { days: number; points: Array<{ date: string; total: number; runs: number; Critical: number; High: number; Medium: number; Low: number; Informational: number }> })
 
+export interface CleanupWave {
+  id: number
+  name: string
+  description: string
+  finding_count: number
+  candidate_rule_count: number
+  candidate_object_count: number
+  risk_weight: number
+  risk_reduction_pct: number
+  severity_breakdown: Record<string, number>
+}
+export interface CleanupPlan {
+  customer_id: string | null
+  total_findings: number
+  total_risk_weight: number
+  waves: CleanupWave[]
+  unscheduled_count: number
+  generated_for: string
+}
+export const getCleanupPlan = (customerId?: string) =>
+  api.get('/cleanup-plan', { params: customerId ? { customer_id: customerId } : undefined })
+    .then(r => r.data as CleanupPlan)
+
+export const getCleanupTicketsUrl = (customerId?: string, wave?: number) => {
+  const p = new URLSearchParams()
+  if (customerId) p.set('customer_id', customerId)
+  if (wave) p.set('wave', String(wave))
+  const q = p.toString()
+  return `/api/cleanup-plan/tickets.csv${q ? `?${q}` : ''}`
+}
+
 export const getDashboardStats = (customerId?: string) =>
   api.get('/policies/stats', { params: customerId ? { customer_id: customerId } : undefined }).then(r => r.data)
 

@@ -23,6 +23,7 @@ import { DeviceHistory } from './pages/DeviceHistory'
 import { PolicyComparison } from './pages/PolicyComparison'
 import { Compliance } from './pages/Compliance'
 import { AuditLog } from './pages/AuditLog'
+import { CleanupPlan } from './pages/CleanupPlan'
 
 function AuthenticatedApp() {
   return (
@@ -48,6 +49,7 @@ function AuthenticatedApp() {
             <Route path="/scorecard" element={<Scorecard />} />
             <Route path="/health" element={<HealthAssessment />} />
             <Route path="/audit" element={<AuditLog />} />
+            <Route path="/cleanup-plan" element={<CleanupPlan />} />
 
             {/* Customer management */}
             <Route path="/customers" element={<Customers />} />

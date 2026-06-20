@@ -4,7 +4,7 @@ import { clsx } from 'clsx'
 import {
   LayoutDashboard, Users, Upload, List, AlertTriangle,
   Package, FileText, Settings, Server,
-  TrendingUp, Eye, ShieldAlert, Building2, ChevronDown, X, LogOut, ScrollText,
+  TrendingUp, Eye, ShieldAlert, Building2, ChevronDown, X, LogOut, ScrollText, ListChecks,
 } from 'lucide-react'
 import { getCustomers } from '../api/client'
 import { useCustomer } from '../contexts/CustomerContext'
@@ -18,6 +18,7 @@ const globalNav = [
   { to: '/',                label: 'Dashboard',       icon: LayoutDashboard, exact: true },
   { to: '/customers',       label: 'Customers',       icon: Users },
   { to: '/findings',        label: 'Findings',        icon: AlertTriangle },
+  { to: '/cleanup-plan',    label: 'Cleanup Plan',    icon: ListChecks },
   { to: '/policies',        label: 'Policies',        icon: List },
   { to: '/posture',         label: 'Posture',         icon: TrendingUp },
   { to: '/devices',         label: 'Devices',         icon: Server },

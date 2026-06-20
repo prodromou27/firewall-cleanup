@@ -98,14 +98,14 @@ export function CleanupPlan() {
                     <div><p className="text-xl font-bold text-gray-900">{w.candidate_rule_count}</p><p className="text-[11px] text-gray-500">Candidate rules</p></div>
                     <div><p className="text-xl font-bold text-gray-900">{w.candidate_object_count}</p><p className="text-[11px] text-gray-500">Candidate objects</p></div>
                     <div>
-                      <p className="text-xl font-bold text-emerald-600 flex items-center gap-1"><TrendingDown className="w-4 h-4" />{w.risk_reduction_pct}%</p>
-                      <p className="text-[11px] text-gray-500">Est. risk reduction</p>
+                      <p className="text-xl font-bold text-emerald-600 flex items-center gap-1"><TrendingDown className="w-4 h-4" />{(w.risk_weight_pct ?? w.risk_reduction_pct)}%</p>
+                      <p className="text-[11px] text-gray-500">Risk weight share</p>
                     </div>
                   </div>
 
                   {/* Risk reduction bar */}
                   <div className="mt-3 h-2 bg-gray-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${Math.min(100, w.risk_reduction_pct)}%` }} />
+                    <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${Math.min(100, w.risk_weight_pct ?? w.risk_reduction_pct)}%` }} />
                   </div>
 
                   {/* Severity chips */}

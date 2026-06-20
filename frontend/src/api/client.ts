@@ -78,7 +78,7 @@ export const getAuditEvents = (params?: Record<string, string | number>) =>
   api.get('/audit', { params: params as Record<string, string> })
     .then(r => r.data as { total: number; page: number; page_size: number; events: AuditEvent[] })
 
-// â”€â”€ Customers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Customers
 export const getCustomers = (params?: Record<string, string>) =>
   api.get('/customers', { params }).then(r => r.data)
 
@@ -97,7 +97,7 @@ export const updateCustomer = (id: string, data: Record<string, string>) =>
 export const deleteCustomer = (id: string) =>
   api.delete(`/customers/${id}`).then(r => r.data)
 
-// â”€â”€ Policies â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Policies
 export const getPolicies = (params?: Record<string, string>) =>
   api.get('/policies', { params }).then(r =>
     // API returns paginated wrapper; unwrap for backwards compat with list consumers
@@ -126,6 +126,7 @@ export interface CleanupWave {
   candidate_rule_count: number
   candidate_object_count: number
   risk_weight: number
+  risk_weight_pct: number
   risk_reduction_pct: number
   severity_breakdown: Record<string, number>
 }
@@ -133,6 +134,7 @@ export interface CleanupPlan {
   customer_id: string | null
   total_findings: number
   total_risk_weight: number
+  risk_metric_label: string
   waves: CleanupWave[]
   unscheduled_count: number
   generated_for: string
@@ -149,6 +151,8 @@ export interface PolicyChange {
   rule_changes_total: number
   change_summary: string | null
   severity_delta: Record<string, number>
+  finding_type_delta: Record<string, number>
+  finding_type_labels: Record<string, string>
   new_high_risk: boolean
   sample_changes: Array<Record<string, unknown>>
 }
@@ -183,7 +187,7 @@ export const getRules = (policyId: string, params?: Record<string, string | numb
 export const getRule = (policyId: string, ruleId: string) =>
   api.get(`/policies/${policyId}/rules/${ruleId}`).then(r => r.data)
 
-// â”€â”€ Findings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Findings
 export const getFindings = (params?: Record<string, string | number>) =>
   api.get('/findings', { params: params as Record<string, string> }).then(r => r.data)
 
@@ -215,15 +219,15 @@ export const bulkUpdateFindings = (
   return api.post(`/findings/bulk-update?${params.toString()}`, data).then(r => r.data)
 }
 
-// â”€â”€ Objects â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Objects
 export const getObjects = (params?: Record<string, string | number>) =>
   api.get('/objects', { params: params as Record<string, string> }).then(r => r.data)
 
-// â”€â”€ Upload â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Upload
 export const uploadPolicy = (formData: FormData) =>
   api.post('/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data)
 
-// â”€â”€ Reports â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Reports
 export const getReportUrl = (
   policyId: string,
   format: 'html' | 'excel' | 'csv' | 'json',
@@ -245,11 +249,11 @@ export const getReportUrl = (
   return `/api/reports/${policyId}/${format}${qs ? '?' + qs : ''}`
 }
 
-// â”€â”€ Settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Settings
 export const getSettings = () =>
   api.get('/settings').then(r => r.data)
 
-// â”€â”€ Devices â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Devices
 export const getDevices = (customerId?: string) =>
   api.get('/devices', { params: customerId ? { customer_id: customerId } : undefined }).then(r => r.data)
 
@@ -294,20 +298,20 @@ export const resetDeviceSync = (id: string) =>
 export const getDeviceTrends = (id: string) =>
   api.get(`/devices/${id}/trends`).then(r => r.data)
 
-// â”€â”€ Policies: get by customer scoped â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Policies: get by customer scoped
 export const getPoliciesForCustomer = (customerId: string) =>
   api.get('/policies', { params: { customer_id: customerId } }).then(r =>
     Array.isArray(r.data) ? r.data : (r.data.policies ?? [])
   )
 
-// â”€â”€ Revisions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Revisions
 export const getRevisions = (params?: { policy_id?: string; device_id?: string; limit?: number }) =>
   api.get('/revisions', { params: params as Record<string, string> }).then(r => r.data)
 
 export const getRevision = (id: string) =>
   api.get(`/revisions/${id}`).then(r => r.data)
 
-// â”€â”€ Policy advanced â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Policy advanced
 export const getPolicyRiskScore = (policyId: string) =>
   api.get(`/policies/${policyId}/risk-score`).then(r => r.data)
 
@@ -324,7 +328,7 @@ export const getRulesExportUrl = (
   return `/api/policies/${policyId}/rules?${qs}`
 }
 
-// â”€â”€ Findings advanced â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Findings advanced
 export const getFindingsExportUrl = (params: Record<string, string> = {}) => {
   const qs = new URLSearchParams({ ...params, export: 'true' }).toString()
   return `/api/findings?${qs}`

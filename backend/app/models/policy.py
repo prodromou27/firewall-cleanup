@@ -132,6 +132,8 @@ class AnalysisRun(Base):
     findings_created = Column(Integer, default=0)
     # JSON-encoded {severity: count} snapshot at completion time, for trend charts.
     severity_snapshot = Column(Text, nullable=True)
+    # JSON-encoded {finding_type: count} snapshot at completion time, for change watch.
+    finding_type_snapshot = Column(Text, nullable=True)
     error = Column(Text, nullable=True)
     run_by = Column(String, default="engineer")
 

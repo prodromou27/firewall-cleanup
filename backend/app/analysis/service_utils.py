@@ -1,10 +1,17 @@
 """Service/port utility functions for firewall rule comparison."""
-from typing import Dict, Optional
+from typing import Optional
 
 
 def normalize_service(svc: dict) -> dict:
     """Normalize a service dict to {protocol, port_start, port_end}."""
-    # Use `or` to coerce None to the safe default (None is falsy)
+    if svc.get("opaque"):
+        return {
+            "protocol": (svc.get("protocol") or "opaque").lower(),
+            "port_start": None,
+            "port_end": None,
+            "name": svc.get("name", ""),
+            "opaque": True,
+        }
     return {
         "protocol": (svc.get("protocol") or "any").lower(),
         "port_start": int(svc.get("port_start") if svc.get("port_start") is not None else 0),
@@ -13,8 +20,8 @@ def normalize_service(svc: dict) -> dict:
 
 
 def service_is_any(svc: dict) -> bool:
-    # Short-circuit for unknown/unresolvable service objects — they are never "any"
-    if svc.get("unknown"):
+    # Unknown/opaque services are never treated as any.
+    if svc.get("unknown") or svc.get("opaque"):
         return False
     proto = (svc.get("protocol") or "").lower()
     ps = int(svc.get("port_start") if svc.get("port_start") is not None else 0)
@@ -24,6 +31,9 @@ def service_is_any(svc: dict) -> bool:
 
 def service_contains(outer: dict, inner: dict) -> bool:
     """True if outer service range contains inner service range."""
+    if outer.get("opaque") or inner.get("opaque"):
+        return services_equal(outer, inner)
+
     outer = normalize_service(outer)
     inner = normalize_service(inner)
 
@@ -43,6 +53,9 @@ def service_contains(outer: dict, inner: dict) -> bool:
 
 def services_overlap(a: dict, b: dict) -> bool:
     """True if two service ranges overlap."""
+    if a.get("opaque") or b.get("opaque"):
+        return services_equal(a, b)
+
     a = normalize_service(a)
     b = normalize_service(b)
 
@@ -61,6 +74,11 @@ def services_overlap(a: dict, b: dict) -> bool:
 
 
 def services_equal(a: dict, b: dict) -> bool:
+    if a.get("opaque") or b.get("opaque"):
+        return (
+            bool(a.get("opaque")) == bool(b.get("opaque"))
+            and (a.get("name") or "").lower() == (b.get("name") or "").lower()
+        )
     a = normalize_service(a)
     b = normalize_service(b)
     return (
@@ -72,6 +90,8 @@ def services_equal(a: dict, b: dict) -> bool:
 
 def is_wide_port_range(svc: dict, threshold: int = 1024) -> bool:
     """True if service covers a wide port range."""
+    if svc.get("opaque"):
+        return False
     svc = normalize_service(svc)
     return (svc["port_end"] - svc["port_start"]) >= threshold
 
@@ -101,6 +121,8 @@ RISKY_UDP_PORT_MAP = {
 
 def identify_risky_service(svc: dict) -> Optional[str]:
     """Return a risky service label if the service is considered risky."""
+    if svc.get("opaque"):
+        return None
     svc = normalize_service(svc)
     if service_is_any(svc):
         return "Any"

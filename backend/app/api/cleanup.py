@@ -115,6 +115,7 @@ def get_cleanup_plan(
                 rule_ids.add(rid)
             for oid in (f.affected_objects or []):
                 obj_ids.add(oid)
+        risk_weight_pct = round(100 * weight / total_weight, 1)
         waves_out.append({
             "id": w["id"],
             "name": w["name"],
@@ -123,7 +124,8 @@ def get_cleanup_plan(
             "candidate_rule_count": len(rule_ids),
             "candidate_object_count": len(obj_ids),
             "risk_weight": weight,
-            "risk_reduction_pct": round(100 * weight / total_weight, 1),
+            "risk_weight_pct": risk_weight_pct,
+            "risk_reduction_pct": risk_weight_pct,
             "severity_breakdown": sev_counts,
         })
 
@@ -132,6 +134,7 @@ def get_cleanup_plan(
         "customer_id": customer_id,
         "total_findings": len(findings),
         "total_risk_weight": total_weight,
+        "risk_metric_label": "Share of actionable risk weight",
         "waves": waves_out,
         "unscheduled_count": len(unscheduled),
         "generated_for": user.email,

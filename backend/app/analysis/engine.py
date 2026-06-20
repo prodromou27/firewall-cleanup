@@ -286,6 +286,8 @@ def run_analysis(policy_id: str, db: Session) -> str:
         # Severity snapshot for trend charting (counts at this run's completion).
         _sev_snapshot = Counter(f.get("severity", "Informational") for f in findings)
         run.severity_snapshot = json.dumps(dict(_sev_snapshot))
+        _type_snapshot = Counter(f.get("finding_type", "unknown") for f in findings)
+        run.finding_type_snapshot = json.dumps(dict(_type_snapshot))
 
         db.commit()
         logger.info(f"Analysis complete for policy {policy_id}: {finding_count} findings")
@@ -1810,6 +1812,7 @@ def _analyze_import_quality(
         notes.append(
             "No NAT data was detected. NAT-specific findings are not generated for this policy."
         )
+    vendor_hints = _vendor_collection_hints(policy.vendor or "")
 
     description = (
         f"Parsed {total_rules} rule(s), {total_objects} object(s) "
@@ -1843,7 +1846,42 @@ def _analyze_import_quality(
             "rules_with_hit_count": rules_with_hits,
             "last_hit_available": last_hit_available,
             "rules_with_last_hit": rules_with_last_hit,
-            "confidence_impact": confidence_impact or ["None — full data available."],
+            "recommended_collection": vendor_hints,
+            "confidence_impact": confidence_impact or ["None - full data available."],
         },
         "recommendation": _RL.get("import_quality"),
     }]
+
+
+def _vendor_collection_hints(vendor: str) -> List[str]:
+    """Return vendor-specific data that improves analysis completeness."""
+    v = (vendor or "").lower()
+    if "huawei" in v:
+        return [
+            "Include display security-policy all or current-configuration security-policy output.",
+            "Include display security-policy statistics output so hit_count, first_hit, and last_hit can be populated.",
+            "Include display ip address-set, display service-set, display zone, and display nat-policy output when using file import.",
+        ]
+    if "fortigate" in v:
+        return [
+            "Prefer API/JSON export or backup output that includes hitc, first-used, and last-used fields.",
+            "Include config firewall address, addrgrp, service custom, service group, policy, and NAT/VIP sections.",
+        ]
+    if "palo" in v:
+        return [
+            "Use XML configuration exports that include address, address-group, service, service-group, application, and security rulebase nodes.",
+            "When available, enrich imports with rule hit-count and last-hit data from operational rule usage APIs or reports.",
+        ]
+    if "cisco" in v or "asa" in v:
+        return [
+            "Include show running-config and show access-list output so ACE hitcnt values can be parsed.",
+            "Include object, object-group network, object-group service, access-group, and NAT sections.",
+        ]
+    if "checkpoint" in v or "check point" in v:
+        return [
+            "Include exported access rulebase, network objects, service objects, service groups, and install-on/package details.",
+            "When available, enrich imports with rule hit-count and last-hit data from management API usage/statistics views.",
+        ]
+    return [
+        "Include rule hit counts, last-hit timestamps, address/service objects, groups, NAT, logging, and zone/interface metadata when available.",
+    ]

@@ -17,25 +17,50 @@ from app.security.identity import get_current_user, accessible_customer_ids, req
 router = APIRouter(prefix="/api/changes", tags=["changes"])
 
 _SEVS = ["Critical", "High", "Medium", "Low", "Informational"]
+_WATCH_TYPES = {
+    "rdp_exposed": "RDP exposed",
+    "ssh_exposed": "SSH exposed",
+    "database_exposed": "Database exposed",
+    "inbound_from_internet": "Inbound from internet",
+    "cleartext_service": "Cleartext service",
+    "overly_permissive": "Overly permissive",
+}
+
+
+def _count_delta(curr: dict, prev: dict, keys: list[str] | None = None) -> dict:
+    """Count change (curr - prev); only non-zero entries are returned."""
+    out = {}
+    for key in keys or sorted(set(curr) | set(prev)):
+        d = int(curr.get(key, 0) or 0) - int(prev.get(key, 0) or 0)
+        if d != 0:
+            out[key] = d
+    return out
 
 
 def _severity_delta(curr: dict, prev: dict) -> dict:
     """Per-severity change (curr - prev); only non-zero entries are returned."""
-    out = {}
-    for s in _SEVS:
-        d = int(curr.get(s, 0) or 0) - int(prev.get(s, 0) or 0)
-        if d != 0:
-            out[s] = d
-    return out
+    return _count_delta(curr, prev, _SEVS)
+
+
+def _snapshot_value(raw: Optional[str]) -> dict:
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        return {}
 
 
 def _snapshot(run: Optional[AnalysisRun]) -> dict:
-    if not run or not run.severity_snapshot:
-        return {}
-    try:
-        return json.loads(run.severity_snapshot)
-    except (ValueError, TypeError):
-        return {}
+    return _snapshot_value(run.severity_snapshot if run else None)
+
+
+def _finding_type_snapshot(run: Optional[AnalysisRun]) -> dict:
+    return _snapshot_value(getattr(run, "finding_type_snapshot", None) if run else None)
+
+
+def _finding_type_delta(curr: dict, prev: dict) -> dict:
+    return _count_delta(curr, prev, list(_WATCH_TYPES.keys()))
 
 
 @router.get("")
@@ -76,6 +101,10 @@ def get_changes(
         curr_snap = _snapshot(runs[0]) if runs else {}
         prev_snap = _snapshot(runs[1]) if len(runs) > 1 else {}
         sev_delta = _severity_delta(curr_snap, prev_snap)
+        type_delta = _finding_type_delta(
+            _finding_type_snapshot(runs[0]) if runs else {},
+            _finding_type_snapshot(runs[1]) if len(runs) > 1 else {},
+        )
 
         rule_changes = 0
         change_detail = []
@@ -99,8 +128,14 @@ def get_changes(
             "rule_changes_total": rule_changes,
             "change_summary": latest_rev.change_summary if latest_rev else None,
             "severity_delta": sev_delta,
+            "finding_type_delta": type_delta,
+            "finding_type_labels": _WATCH_TYPES,
             # Alert when new Critical/High findings appeared since the prior run.
-            "new_high_risk": sev_delta.get("Critical", 0) > 0 or sev_delta.get("High", 0) > 0,
+            "new_high_risk": (
+                sev_delta.get("Critical", 0) > 0
+                or sev_delta.get("High", 0) > 0
+                or any(v > 0 for v in type_delta.values())
+            ),
             "sample_changes": change_detail,
         })
 

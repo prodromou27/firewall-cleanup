@@ -97,6 +97,19 @@ export function ChangeWatch() {
                   </div>
                 )}
                 {r.change_summary && <p className="text-xs text-gray-500 mt-2">{r.change_summary}</p>}
+
+                {Object.keys(r.finding_type_delta || {}).length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-3 text-xs">
+                    {Object.entries(r.finding_type_delta).map(([type, delta]) => (
+                      <span
+                        key={type}
+                        className={`px-2 py-0.5 rounded font-semibold ${delta > 0 ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}
+                      >
+                        {delta > 0 ? '+' : ''}{delta} {r.finding_type_labels?.[type] || type.split('_').join(' ')}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>

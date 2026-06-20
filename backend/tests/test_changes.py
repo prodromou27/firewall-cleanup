@@ -1,10 +1,11 @@
 """Unit tests for the change-feed severity-delta logic."""
-from app.api.changes import _severity_delta, _snapshot
+from app.api.changes import _finding_type_delta, _finding_type_snapshot, _severity_delta, _snapshot
 
 
 class _Run:
-    def __init__(self, snap):
+    def __init__(self, snap, type_snap=None):
         self.severity_snapshot = snap
+        self.finding_type_snapshot = type_snap
 
 
 def test_delta_new_high_risk():
@@ -31,3 +32,18 @@ def test_snapshot_handles_missing_and_garbage():
     assert _snapshot(_Run(None)) == {}
     assert _snapshot(_Run("not json")) == {}
     assert _snapshot(None) == {}
+
+
+def test_finding_type_delta_tracks_security_exposure_categories():
+    curr = {"rdp_exposed": 2, "database_exposed": 1, "unused_object": 99}
+    prev = {"rdp_exposed": 1, "cleartext_service": 1}
+    assert _finding_type_delta(curr, prev) == {
+        "rdp_exposed": 1,
+        "database_exposed": 1,
+        "cleartext_service": -1,
+    }
+
+
+def test_finding_type_snapshot_handles_older_runs():
+    assert _finding_type_snapshot(_Run("{}", '{"rdp_exposed": 1}')) == {"rdp_exposed": 1}
+    assert _finding_type_snapshot(_Run("{}")) == {}

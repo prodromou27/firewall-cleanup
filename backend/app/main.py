@@ -184,6 +184,12 @@ async def lifespan(app: FastAPI):
                 ))
                 _conn.commit()
                 logger.info("Schema migration: added severity_snapshot column to analysis_runs.")
+            if "finding_type_snapshot" not in _rcols:
+                _conn.execute(_text(
+                    "ALTER TABLE analysis_runs ADD COLUMN finding_type_snapshot TEXT"
+                ))
+                _conn.commit()
+                logger.info("Schema migration: added finding_type_snapshot column to analysis_runs.")
       except Exception as _mig_exc:
         logger.error("Schema migration failed: %s", _mig_exc)
 

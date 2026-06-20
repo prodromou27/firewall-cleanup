@@ -35,6 +35,16 @@ def score_rule(rule: dict, obj_map: Dict[str, dict]) -> Tuple[int, Dict[str, int
     if has_any_service(rule, obj_map):
         add("any_service", settings.risk_any_service, "Rule allows any service/port")
 
+    # Compound exposure. The additive weights alone can understate any-to-any
+    # policy behavior, so align the numeric score with explicit Critical findings.
+    any_src = "any_source" in factors
+    any_dst = "any_destination" in factors
+    any_svc = "any_service" in factors
+    if any_src and any_dst:
+        add("any_to_any", 50, "Rule allows traffic from any source to any destination")
+    elif (any_src or any_dst) and any_svc:
+        add("broad_any_service", 15, "Rule combines broad scope with any service")
+
     # Risky services
     services = expand_rule_services(rule, obj_map)
     risky_found = set()

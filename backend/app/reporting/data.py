@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.models.policy import FirewallPolicy, FirewallRule, FirewallObject, AnalysisRun
 from app.models.finding import Finding
 from app.reporting import placeholders, sections as S
+from app.reporting.export_safety import css_hex_color
 
 _SEVS = ["Critical", "High", "Medium", "Low", "Informational"]
 _FINDING_LABEL = dict(S.FINDING_CATEGORIES)
@@ -57,7 +58,6 @@ def _finding_dict(f: Finding, firewall_name: str) -> Dict[str, Any]:
         "affected_object_count": len(f.affected_objects or []),
         "evidence_summary": _evidence_summary(f.evidence),
         "firewall_name": firewall_name,
-        "status": f.status,
     }
 
 
@@ -95,6 +95,7 @@ def build_report_data(
     *,
     section_keys: List[str],
     finding_categories: Optional[List[str]] = None,
+    analysis_run_id: Optional[str] = None,
     filters: Optional[Dict[str, Any]] = None,
     branding: Optional[Dict[str, Any]] = None,
     texts: Optional[Dict[str, str]] = None,
@@ -123,6 +124,8 @@ def build_report_data(
 
     # ── Findings (apply finding-level filters) ────────────────────────────────
     fq = db.query(Finding).filter(Finding.policy_id == policy.id)
+    if analysis_run_id:
+        fq = fq.filter(Finding.analysis_run_id == analysis_run_id)
     sev_filter = filters.get("severities")
     if sev_filter:
         fq = fq.filter(Finding.severity.in_(sev_filter))
@@ -167,8 +170,8 @@ def build_report_data(
     # ── Branding defaults ─────────────────────────────────────────────────────
     branding.setdefault("company_name", "")
     branding.setdefault("customer_name", customer_name)
-    branding.setdefault("accent_color", "#1e3a5f")
-    branding.setdefault("secondary_color", "#2e7d62")
+    branding["accent_color"] = css_hex_color(branding.get("accent_color"), "#1e3a5f")
+    branding["secondary_color"] = css_hex_color(branding.get("secondary_color"), "#2e7d62")
     branding.setdefault("confidentiality", "Confidential")
     branding.setdefault("report_title", f"Firewall Policy Review — {firewall_name}")
     branding.setdefault("footer_text", texts.get("footer_text", ""))

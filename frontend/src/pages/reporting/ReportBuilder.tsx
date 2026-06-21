@@ -1,11 +1,13 @@
 import { useEffect, useState, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ChevronLeft, ChevronRight, ArrowUp, ArrowDown, FileText, Eye, Download, Check, Loader2,
 } from 'lucide-react'
 import {
   getPolicies, listReportTemplates, getReportSections, getReportFindingCategories,
+  listReportAnalysisRuns,
   generateReport, reportDownloadUrl, type ReportTemplate, type ReportSectionDef,
+  type ReportAnalysisRun,
 } from '../../api/client'
 import type { Policy } from '../../types'
 
@@ -22,14 +24,17 @@ const STEPS = ['Source', 'Template', 'Sections', 'Categories', 'Filters', 'Previ
 
 export function ReportBuilder() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [step, setStep] = useState(0)
   const [policies, setPolicies] = useState<Policy[]>([])
   const [templates, setTemplates] = useState<ReportTemplate[]>([])
   const [catalog, setCatalog] = useState<ReportSectionDef[]>([])
   const [categories, setCategories] = useState<Array<{ key: string; label: string }>>([])
+  const [analysisRuns, setAnalysisRuns] = useState<ReportAnalysisRun[]>([])
 
-  const [policyId, setPolicyId] = useState('')
-  const [templateId, setTemplateId] = useState('')
+  const [policyId, setPolicyId] = useState(searchParams.get('policy') || '')
+  const [templateId, setTemplateId] = useState(searchParams.get('template') || '')
+  const [analysisRunId, setAnalysisRunId] = useState(searchParams.get('analysis_run') || '')
   const [sections, setSections] = useState<string[]>([])
   const [selCats, setSelCats] = useState<string[]>([])
   const [severities, setSeverities] = useState<string[]>([])
@@ -43,6 +48,20 @@ export function ReportBuilder() {
     getReportSections().then(d => setCatalog(d.sections)).catch(() => {})
     getReportFindingCategories().then(d => setCategories(d.categories)).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    if (!policyId) {
+      setAnalysisRuns([])
+      setAnalysisRunId('')
+      return
+    }
+    listReportAnalysisRuns(policyId)
+      .then(d => {
+        setAnalysisRuns(d.analysis_runs)
+        if (analysisRunId && !d.analysis_runs.some(r => r.id === analysisRunId)) setAnalysisRunId('')
+      })
+      .catch(() => setAnalysisRuns([]))
+  }, [policyId])
 
   // Apply template defaults when a template is chosen.
   useEffect(() => {
@@ -71,6 +90,7 @@ export function ReportBuilder() {
   const body = () => ({
     policy_id: policyId,
     template_id: templateId || undefined,
+    analysis_run_id: analysisRunId || undefined,
     sections,
     finding_categories: selCats.length ? selCats : undefined,
     filters: severities.length ? { severities } : {},
@@ -131,7 +151,7 @@ export function ReportBuilder() {
 
         {/* Step 0: Source */}
         {step === 0 && (
-          <div className="card max-w-xl">
+          <div className="card max-w-xl space-y-3">
             <h3 className="font-semibold mb-3">Select firewall / policy</h3>
             <select value={policyId} onChange={e => setPolicyId(e.target.value)}
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 focus:bg-white">
@@ -140,6 +160,27 @@ export function ReportBuilder() {
                 <option key={p.id} value={p.id}>{p.firewall_name} · {p.vendor}{p.customer_name ? ` · ${p.customer_name}` : ''}</option>
               ))}
             </select>
+            {policyId && (
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  Analysis run
+                </label>
+                <select value={analysisRunId} onChange={e => setAnalysisRunId(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 focus:bg-white mt-1">
+                  <option value="">Latest stored findings</option>
+                  {analysisRuns.map(r => (
+                    <option key={r.id} value={r.id}>
+                      {(r.completed_at || r.started_at || r.id).replace('T', ' ').slice(0, 19)}
+                      {r.status ? ` - ${r.status}` : ''}
+                      {r.findings_created != null ? ` - ${r.findings_created} findings` : ''}
+                    </option>
+                  ))}
+                </select>
+                {analysisRuns.length === 0 && (
+                  <p className="text-xs text-gray-400 mt-1">No historical analysis runs found; the latest stored findings will be used.</p>
+                )}
+              </div>
+            )}
           </div>
         )}
 

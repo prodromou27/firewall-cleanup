@@ -365,7 +365,15 @@ export interface ReportTemplate {
 export interface GeneratedReportRow {
   id: string; report_type: string; export_format: string; customer_id: string | null
   firewall_name: string | null; file_name: string; generated_by: string | null; generated_at: string | null
-  selected_sections: string[]; template_id: string | null; policy_id: string | null
+  selected_sections: string[]; template_id: string | null; policy_id: string | null; analysis_run_id: string | null
+}
+export interface ReportAnalysisRun {
+  id: string
+  status: string
+  started_at: string | null
+  completed_at: string | null
+  findings_created: number
+  run_by: string | null
 }
 
 export const getReportSections = () =>
@@ -389,6 +397,9 @@ export const cloneReportTemplate = (id: string) =>
   api.post(`/report-templates/${id}/clone`).then(r => r.data as ReportTemplate)
 export const setDefaultReportTemplate = (id: string) =>
   api.post(`/report-templates/${id}/default`).then(r => r.data)
+export const listReportAnalysisRuns = (policyId: string) =>
+  api.get(`/reports/policies/${policyId}/analysis-runs`)
+    .then(r => r.data as { analysis_runs: ReportAnalysisRun[] })
 
 export const uploadReportLogo = (file: File) => {
   const fd = new FormData(); fd.append('file', file)
@@ -397,6 +408,7 @@ export const uploadReportLogo = (file: File) => {
 
 export interface GenerateBody {
   policy_id: string; template_id?: string; export_format: string; report_type?: string
+  analysis_run_id?: string
   sections?: string[]; finding_categories?: string[]; filters?: Record<string, unknown>
   branding?: Record<string, unknown>; texts?: Record<string, string>; custom_sections?: Record<string, string>
 }

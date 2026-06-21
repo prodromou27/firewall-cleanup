@@ -23,6 +23,15 @@ async function download(id: string, name: string) {
   URL.revokeObjectURL(a.href)
 }
 
+function regenerateUrl(r: GeneratedReportRow) {
+  const p = new URLSearchParams()
+  if (r.policy_id) p.set('policy', r.policy_id)
+  if (r.template_id) p.set('template', r.template_id)
+  if (r.analysis_run_id) p.set('analysis_run', r.analysis_run_id)
+  const qs = p.toString()
+  return `/reports/new${qs ? `?${qs}` : ''}`
+}
+
 export function ReportsDashboard() {
   const navigate = useNavigate()
   const [reports, setReports] = useState<GeneratedReportRow[]>([])
@@ -103,7 +112,7 @@ export function ReportsDashboard() {
                       <td className="px-4 py-2.5 text-gray-500">{r.generated_by || '—'}</td>
                       <td className="px-4 py-2.5 text-right whitespace-nowrap">
                         <button onClick={() => download(r.id, r.file_name)} className="text-blue-600 hover:text-blue-800 inline-flex items-center gap-1 text-xs"><Download className="w-3.5 h-3.5" /> Download</button>
-                        <button onClick={() => navigate(`/reports/new?policy=${r.policy_id || ''}&template=${r.template_id || ''}`)} className="ml-3 text-gray-500 hover:text-gray-700 text-xs">Regenerate</button>
+                        <button onClick={() => navigate(regenerateUrl(r))} className="ml-3 text-gray-500 hover:text-gray-700 text-xs">Regenerate</button>
                       </td>
                     </tr>
                   ))}

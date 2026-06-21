@@ -8,10 +8,14 @@ SCHEMA_VERSION = "1.0"
 
 def render(data: ReportData) -> str:
     meta = {k: v for k, v in data.meta.items() if k != "placeholders"}
+    branding = {
+        k: v for k, v in data.branding.items()
+        if not k.endswith("_path")
+    }
     payload = {
         "schema_version": SCHEMA_VERSION,
         "meta": meta,
-        "branding": data.branding,
+        "branding": branding,
         "texts": data.texts,
         "sections": [
             {"key": s["key"], "name": s["name"], "type": s["type"],

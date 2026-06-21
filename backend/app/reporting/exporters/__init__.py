@@ -13,6 +13,7 @@ _MEDIA = {
     "csv": ("text/csv", "csv"),
     "json": ("application/json", "json"),
 }
+_ALIASES = {"word": "docx", "excel": "xlsx"}
 
 SUPPORTED_FORMATS = list(_MEDIA.keys())
 
@@ -23,9 +24,10 @@ def _slug(s: str) -> str:
 
 
 def filename_for(data: ReportData, fmt: str, report_type: str = "Report") -> str:
+    fmt = normalize_format(fmt)
     ext = _MEDIA[fmt][1]
     parts = [
-        "PolicyInsight",
+        "Firewall-Report",
         _slug(data.meta.get("customer_name") or "Customer"),
         _slug(data.meta.get("firewall_name") or "Firewall"),
         _slug(report_type),
@@ -34,8 +36,14 @@ def filename_for(data: ReportData, fmt: str, report_type: str = "Report") -> str
     return "_".join(parts) + f".{ext}"
 
 
+def normalize_format(fmt: str) -> str:
+    fmt = (fmt or "").strip().lower()
+    return _ALIASES.get(fmt, fmt)
+
+
 def export(data: ReportData, fmt: str) -> Tuple[bytes, str, str]:
     """Render the report. Returns (bytes, media_type, file_extension)."""
+    fmt = normalize_format(fmt)
     if fmt not in _MEDIA:
         raise ValueError(f"Unsupported export format: {fmt}")
     media, ext = _MEDIA[fmt]

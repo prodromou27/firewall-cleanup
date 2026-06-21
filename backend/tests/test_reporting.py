@@ -40,7 +40,7 @@ def _sample() -> ReportData:
         "finding_type_label": "Overly Permissive Rules", "title": "Rule 1 is overly permissive",
         "description": "any/any", "recommendation": "Restrict scope.", "risk_score": 80,
         "affected_rule_count": 1, "affected_object_count": 0, "evidence_summary": "any_source: True",
-        "firewall_name": "FW1", "status": "Review Required",
+        "firewall_name": "FW1",
     }]
     return ReportData(
         meta={"customer_name": "ACME", "firewall_name": "FW1", "vendor": "FortiGate",
@@ -48,7 +48,7 @@ def _sample() -> ReportData:
               "total_rules": 10, "total_objects": 5, "total_findings": 1,
               "critical_findings": 0, "high_findings": 1, "medium_findings": 0,
               "low_findings": 0, "info_findings": 0, "policy_score": 72},
-        branding={"company_name": "PolicyInsight", "accent_color": "#1e3a5f",
+        branding={"company_name": "", "accent_color": "#1e3a5f",
                   "confidentiality": "Confidential", "report_title": "Review — FW1"},
         texts={"introduction_text": "Intro", "disclaimer_text": S.READ_ONLY_DISCLAIMER},
         sections=[
@@ -96,7 +96,32 @@ def test_html_includes_disclaimer():
 
 def test_filename_format():
     fn = filename_for(_sample(), "docx", "Technical-Findings")
-    assert fn.startswith("PolicyInsight_ACME_FW1_Technical-Findings_") and fn.endswith(".docx")
+    assert fn.startswith("Firewall-Report_ACME_FW1_Technical-Findings_") and fn.endswith(".docx")
+    assert "PolicyInsight" not in fn
+
+
+def test_format_aliases_are_supported():
+    content, media, ext = export(_sample(), "word")
+    assert content[:2] == b"PK"
+    assert ext == "docx"
+    assert "wordprocessingml.document" in media
+    assert filename_for(_sample(), "excel").endswith(".xlsx")
+
+
+def test_csv_export_guards_against_formula_injection():
+    data = _sample()
+    data.findings[0]["title"] = '=HYPERLINK("https://evil.example")'
+    content, _, _ = export(data, "csv")
+    assert "'=HYPERLINK" in content.decode()
+
+
+def test_json_export_does_not_include_local_logo_paths_or_workflow_status():
+    data = _sample()
+    data.branding["company_logo_path"] = "C:/secret/internal/path/logo.png"
+    content, _, _ = export(data, "json")
+    payload = json.loads(content)
+    assert "company_logo_path" not in payload["branding"]
+    assert "status" not in payload["findings"][0]
 
 
 def test_pdf_when_available():

@@ -8,12 +8,12 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.config import settings
-from app.models.policy import FirewallPolicy
+from app.models.policy import FirewallPolicy, AnalysisRun
 from app.models.report import ReportTemplate, ReportTemplateSection, GeneratedReport
 from app.models.user import User
 from app.security.identity import (
@@ -23,7 +23,7 @@ from app.security.rbac import CAP_VIEW, CAP_GENERATE_REPORT, CAP_DOWNLOAD_REPORT
 from app.security.audit import audit_log
 from app.reporting import sections as S
 from app.reporting.data import build_report_data
-from app.reporting.exporters import export, filename_for, SUPPORTED_FORMATS
+from app.reporting.exporters import export, filename_for, SUPPORTED_FORMATS, normalize_format
 
 templates_router = APIRouter(prefix="/api/report-templates", tags=["reporting"])
 reports_router = APIRouter(prefix="/api/reports", tags=["reporting"])
@@ -40,7 +40,7 @@ class SectionIn(BaseModel):
     enabled: bool = True
     display_order: int = 0
     custom_text: Optional[str] = None
-    config: Dict[str, Any] = {}
+    config: Dict[str, Any] = Field(default_factory=dict)
 
 
 class TemplateIn(BaseModel):
@@ -51,15 +51,23 @@ class TemplateIn(BaseModel):
     is_customer_facing: bool = False
     default_export_format: str = "pdf"
     default_detail_level: str = "standard"
-    branding_config: Dict[str, Any] = {}
-    cover_page_config: Dict[str, Any] = {}
+    branding_config: Dict[str, Any] = Field(default_factory=dict)
+    cover_page_config: Dict[str, Any] = Field(default_factory=dict)
     introduction_text: Optional[str] = None
     methodology_text: Optional[str] = None
     disclaimer_text: Optional[str] = None
     footer_text: Optional[str] = None
-    default_finding_categories: List[str] = []
+    default_finding_categories: List[str] = Field(default_factory=list)
     customer_id: Optional[str] = None
-    sections: List[SectionIn] = []
+    sections: List[SectionIn] = Field(default_factory=list)
+
+    @field_validator("default_export_format")
+    @classmethod
+    def validate_export_format(cls, v: str) -> str:
+        fmt = normalize_format(v)
+        if fmt not in SUPPORTED_FORMATS:
+            raise ValueError(f"default_export_format must be one of: {', '.join(SUPPORTED_FORMATS)}")
+        return fmt
 
 
 class GenerateIn(BaseModel):
@@ -70,10 +78,18 @@ class GenerateIn(BaseModel):
     analysis_run_id: Optional[str] = None
     sections: Optional[List[str]] = None
     finding_categories: Optional[List[str]] = None
-    filters: Dict[str, Any] = {}
-    branding: Dict[str, Any] = {}
-    texts: Dict[str, str] = {}
-    custom_sections: Dict[str, str] = {}
+    filters: Dict[str, Any] = Field(default_factory=dict)
+    branding: Dict[str, Any] = Field(default_factory=dict)
+    texts: Dict[str, str] = Field(default_factory=dict)
+    custom_sections: Dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("export_format")
+    @classmethod
+    def validate_export_format(cls, v: str) -> str:
+        fmt = normalize_format(v)
+        if fmt not in SUPPORTED_FORMATS:
+            raise ValueError(f"export_format must be one of: {', '.join(SUPPORTED_FORMATS)}")
+        return fmt
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -123,6 +139,12 @@ def _authz_policy(db: Session, user: User, policy_id: str) -> FirewallPolicy:
         raise HTTPException(status_code=404, detail="Policy not found")
     require_customer_access(db, user, p.customer_id)
     return p
+
+
+def _safe_report_path(path: str) -> bool:
+    base = os.path.abspath(_REPORTS_DIR)
+    p = os.path.abspath(path or "")
+    return p.startswith(base + os.sep)
 
 
 def _set_sections(db: Session, template: ReportTemplate, sections: List[SectionIn]):
@@ -258,6 +280,14 @@ def set_default(tid: str, db: Session = Depends(get_db),
 def _resolve_and_build(db: Session, user: User, body: GenerateIn):
     policy = _authz_policy(db, user, body.policy_id)
     template = _authz_template(db, user, body.template_id) if body.template_id else None
+    if body.analysis_run_id:
+        run = (
+            db.query(AnalysisRun)
+            .filter(AnalysisRun.id == body.analysis_run_id, AnalysisRun.policy_id == policy.id)
+            .first()
+        )
+        if not run:
+            raise HTTPException(status_code=404, detail="Analysis run not found for this policy")
 
     # Sections (ordered)
     if body.sections:
@@ -281,6 +311,7 @@ def _resolve_and_build(db: Session, user: User, body: GenerateIn):
 
     # Texts (template defaults < request)
     texts = {}
+    template_custom_sections: Dict[str, str] = {}
     if template:
         texts.update({
             "introduction_text": template.introduction_text or "",
@@ -292,13 +323,16 @@ def _resolve_and_build(db: Session, user: User, body: GenerateIn):
         # custom_text from template sections
         for s in template.sections:
             if s.custom_text:
-                texts[f"section_{s.section_key}"] = s.custom_text
+                template_custom_sections[s.section_key] = s.custom_text
+                if s.section_name:
+                    template_custom_sections[f"{s.section_key}_name"] = s.section_name
     texts.update(body.texts or {})
+    template_custom_sections.update(body.custom_sections or {})
 
     data = build_report_data(
         db, policy, section_keys=section_keys, finding_categories=finding_categories,
-        filters=body.filters, branding=branding, texts=texts,
-        custom_sections=body.custom_sections, generated_by=user.email,
+        analysis_run_id=body.analysis_run_id, filters=body.filters, branding=branding, texts=texts,
+        custom_sections=template_custom_sections, generated_by=user.email,
     )
     return policy, template, data, section_keys, finding_categories
 
@@ -314,7 +348,7 @@ def preview_report(body: GenerateIn, db: Session = Depends(get_db),
 @reports_router.post("/generate")
 def generate_report(body: GenerateIn, db: Session = Depends(get_db),
                     user: User = Depends(require_capability(CAP_GENERATE_REPORT))):
-    fmt = body.export_format
+    fmt = normalize_format(body.export_format)
     if fmt not in SUPPORTED_FORMATS:
         raise HTTPException(status_code=400, detail=f"Unsupported format. Use one of: {', '.join(SUPPORTED_FORMATS)}")
     policy, template, data, section_keys, finding_categories = _resolve_and_build(db, user, body)
@@ -347,6 +381,31 @@ def generate_report(body: GenerateIn, db: Session = Depends(get_db),
             "download_url": f"/api/reports/{rec.id}/download"}
 
 
+@reports_router.get("/policies/{policy_id}/analysis-runs")
+def list_policy_analysis_runs(
+    policy_id: str,
+    limit: int = Query(25, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_VIEW)),
+):
+    policy = _authz_policy(db, user, policy_id)
+    rows = (
+        db.query(AnalysisRun)
+        .filter(AnalysisRun.policy_id == policy.id)
+        .order_by(AnalysisRun.completed_at.desc(), AnalysisRun.started_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return {"analysis_runs": [{
+        "id": r.id,
+        "status": r.status,
+        "started_at": r.started_at.isoformat() if r.started_at else None,
+        "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+        "findings_created": r.findings_created,
+        "run_by": r.run_by,
+    } for r in rows]}
+
+
 @reports_router.get("")
 def list_reports(customer_id: Optional[str] = None, limit: int = Query(100, ge=1, le=500),
                  db: Session = Depends(get_db), user: User = Depends(require_capability(CAP_VIEW))):
@@ -366,7 +425,7 @@ def list_reports(customer_id: Optional[str] = None, limit: int = Query(100, ge=1
         "generated_by": r.generated_by,
         "generated_at": r.generated_at.isoformat() if r.generated_at else None,
         "selected_sections": r.selected_sections or [], "template_id": r.template_id,
-        "policy_id": r.policy_id,
+        "policy_id": r.policy_id, "analysis_run_id": r.analysis_run_id,
     } for r in rows]}
 
 
@@ -378,7 +437,7 @@ def download_report(report_id: str, db: Session = Depends(get_db),
         raise HTTPException(status_code=404, detail="Report not found")
     if r.customer_id:
         require_customer_access(db, user, r.customer_id)
-    if not r.file_path or not os.path.exists(r.file_path):
+    if not r.file_path or not _safe_report_path(r.file_path) or not os.path.exists(r.file_path):
         raise HTTPException(status_code=410, detail="Report file no longer available; regenerate it.")
     from app.reporting.exporters import _MEDIA
     media = _MEDIA.get(r.export_format, ("application/octet-stream", ""))[0]
@@ -399,4 +458,5 @@ def get_report(report_id: str, db: Session = Depends(get_db),
             "generated_at": r.generated_at.isoformat() if r.generated_at else None,
             "selected_sections": r.selected_sections or [],
             "selected_finding_categories": r.selected_finding_categories or [],
-            "filters": r.filters or {}, "template_id": r.template_id, "policy_id": r.policy_id}
+            "filters": r.filters or {}, "template_id": r.template_id,
+            "policy_id": r.policy_id, "analysis_run_id": r.analysis_run_id}

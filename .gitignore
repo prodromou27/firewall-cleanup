@@ -42,6 +42,7 @@ audit.log
 node_modules/
 frontend/dist/
 frontend/build/
+.tools/
 
 # IDE
 .idea/

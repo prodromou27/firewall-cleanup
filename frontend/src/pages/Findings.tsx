@@ -12,6 +12,7 @@ import {
   addFindingComment, getFindingComments, getFindingsExportUrl,
 } from '../api/client'
 import { SeverityBadge, StatusBadge } from '../components/ui/SeverityBadge'
+import { EmptyState, LoadingState } from '../components/ui/page-state'
 import { useAuth } from '../contexts/AuthContext'
 import type { Finding, Policy, AffectedRuleData, FindingComment } from '../types'
 
@@ -1079,7 +1080,7 @@ export function Findings() {
       </div>
 
       {/* Detailed filters */}
-      <div className="flex flex-wrap gap-2 mb-5 p-3 bg-white rounded-xl border border-gray-200 shadow-sm">
+      <div className="filter-bar mb-5">
         <Filter className="w-4 h-4 text-gray-400 mt-2 flex-shrink-0" />
 
         <select
@@ -1146,15 +1147,18 @@ export function Findings() {
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-16">
-          <div className="animate-spin w-8 h-8 border-b-2 border-blue-600 rounded-full" />
-        </div>
+        <LoadingState label="Loading findings..." />
       ) : findings.length === 0 ? (
-        <div className="bg-white rounded-xl border border-gray-200 text-center py-16 text-gray-400">
-          No findings match the selected filters.
-        </div>
+        <EmptyState
+          icon={<AlertTriangle className="w-6 h-6" />}
+          title="No findings match the selected filters"
+          description="Adjust the filters or clear them to review the full findings list."
+          action={hasFilters ? (
+            <button onClick={clearFilters} className="btn-secondary">Clear filters</button>
+          ) : null}
+        />
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="table-shell">
           {/* Bulk action bar */}
           {selected.size > 0 && (
             <div className="flex items-center gap-3 px-4 py-2.5 bg-blue-50 border-b border-blue-200">

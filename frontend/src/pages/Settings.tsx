@@ -6,6 +6,7 @@ import {
   AlertOctagon,
 } from 'lucide-react'
 import { getSettings, updateSettings, changePassword, logoutAll } from '../api/client'
+import { ErrorState, LoadingState } from '../components/ui/page-state'
 
 interface SettingsData {
   inactivity_threshold_low: number
@@ -290,14 +291,16 @@ export function Settings() {
   ]
 
   if (loading) {
+    return <LoadingState label="Loading settings..." className="m-7" />
+  }
+
+  if (!settings) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin w-8 h-8 border-b-2 border-blue-600 rounded-full" />
+      <div className="p-7">
+        <ErrorState title="Failed to load settings" message="Refresh the page or check backend connectivity." />
       </div>
     )
   }
-
-  if (!settings) return <div className="p-8 text-red-600">Failed to load settings.</div>
 
   const maxRiskWeight = Math.max(...Object.values(settings.risk_weights))
   const sec = settings.security

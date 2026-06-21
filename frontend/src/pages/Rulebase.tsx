@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { getRules, getPolicy, getRulesExportUrl } from '../api/client'
 import { SeverityBadge } from '../components/ui/SeverityBadge'
+import { EmptyState, LoadingState } from '../components/ui/page-state'
 import type { Rule, Policy } from '../types'
 import { clsx } from 'clsx'
 
@@ -400,7 +401,7 @@ export function Rulebase() {
       </div>
     <div className="page-body">
       {/* ── Filter Bar ── */}
-      <div className="bg-white border border-gray-100 rounded-xl p-3 mb-4 shadow-sm">
+      <div className="filter-bar mb-4">
         <div className="flex flex-wrap gap-2 items-center">
           {/* Search */}
           <div className="relative">
@@ -460,17 +461,16 @@ export function Rulebase() {
 
       {/* ── Table ── */}
       {loading ? (
-        <div className="flex justify-center py-16">
-          <div className="animate-spin w-8 h-8 border-b-2 border-blue-600 rounded-full" />
-        </div>
+        <LoadingState label="Loading rulebase..." />
       ) : rules.length === 0 ? (
-        <div className="text-center py-16 text-gray-400">
-          <Shield className="w-12 h-12 mx-auto mb-3 opacity-30" />
-          <p className="font-medium">No rules match the current filters</p>
-          <button onClick={clearFilters} className="mt-3 text-sm text-blue-600 hover:underline">Clear filters</button>
-        </div>
+        <EmptyState
+          icon={<Shield className="w-6 h-6" />}
+          title="No rules match the current filters"
+          description="Clear filters or search another rule name, object, service, or comment."
+          action={<button onClick={clearFilters} className="btn-secondary">Clear filters</button>}
+        />
       ) : (
-        <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-x-auto">
+        <div className="table-shell table-scroll">
           {/* Legend */}
           <div className="flex items-center gap-4 px-3 py-2 bg-gray-50 border-b border-gray-100 text-[11px] text-gray-500">
             <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-amber-100 border border-amber-300 inline-block" /> Has findings</span>

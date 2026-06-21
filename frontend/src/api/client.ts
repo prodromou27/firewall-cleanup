@@ -11,6 +11,13 @@
 
 // Same-origin base for direct fetch() calls (downloads, etc.). Empty string =>
 // relative URLs like `/api/...`, which the dev server proxies to the backend.
+import type {
+  Customer as AppCustomer,
+  Finding as AppFinding,
+  FirewallObject as AppFirewallObject,
+  Policy as AppPolicy,
+} from '../types'
+
 export const API_BASE = ''
 
 const api = axios.create({
@@ -79,23 +86,7 @@ export const getAuditEvents = (params?: Record<string, string | number>) =>
     .then(r => r.data as { total: number; page: number; page_size: number; events: AuditEvent[] })
 
 // Customers
-export interface Customer {
-  id: string
-  name: string
-  description?: string | null
-  contact_name?: string | null
-  contact_email?: string | null
-  industry?: string | null
-  status: string
-  tags?: string | null
-  notes?: string | null
-  total_policies: number
-  total_rules: number
-  total_findings: number
-  high_findings: number
-  created_at?: string | null
-  updated_at?: string | null
-}
+export type Customer = AppCustomer
 
 export const getCustomers = (params?: Record<string, string | number>) =>
   api.get('/customers', { params: params as Record<string, string> }).then(r => r.data as Customer[])
@@ -116,25 +107,7 @@ export const deleteCustomer = (id: string) =>
   api.delete(`/customers/${id}`).then(r => r.data)
 
 // Policies
-export interface PolicySummary {
-  id: string
-  customer_id: string
-  customer_name: string
-  firewall_name: string
-  vendor: string
-  policy_package?: string | null
-  upload_date?: string | null
-  original_filename?: string | null
-  rule_count: number
-  object_count: number
-  finding_count: number
-  high_finding_count: number
-  analysis_status: string
-  analysis_error?: string | null
-  complexity_score?: number | null
-  cleanup_readiness_score?: number | null
-  health_score?: number | null
-}
+export type PolicySummary = AppPolicy
 
 export interface PaginatedPolicies {
   total: number
@@ -242,7 +215,7 @@ export interface FindingListResponse {
   page: number
   page_size: number
   severity_counts: Record<string, number>
-  findings: Array<Record<string, unknown>>
+  findings: AppFinding[]
 }
 
 export const getFindings = (params?: Record<string, string | number>) =>
@@ -281,7 +254,7 @@ export interface ObjectListResponse {
   total: number
   page: number
   page_size: number
-  objects: Array<Record<string, unknown>>
+  objects: AppFirewallObject[]
 }
 export const getObjects = (params?: Record<string, string | number>) =>
   api.get('/objects', { params: params as Record<string, string> }).then(r => r.data as ObjectListResponse)

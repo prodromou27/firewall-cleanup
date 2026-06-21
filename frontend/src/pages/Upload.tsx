@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { Upload as UploadIcon, FileText, AlertCircle, CheckCircle, Loader, Plus, Users, ShieldAlert } from 'lucide-react'
 import { uploadPolicy, getCustomers } from '../api/client'
+import { ErrorState } from '../components/ui/page-state'
 import type { Customer } from '../types'
 
 interface FormValues {
@@ -121,7 +122,7 @@ export function Upload() {
           <p className="page-subtitle">Import a firewall policy export for analysis</p>
         </div>
       </div>
-    <div className="page-body max-w-2xl">
+    <div className="page-body max-w-3xl">
 
       {result ? (
         <div className="space-y-4">
@@ -377,12 +378,7 @@ export function Upload() {
             </div>
           </div>
 
-          {error && (
-            <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
-              <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-              <p className="text-sm text-red-700">{error}</p>
-            </div>
-          )}
+          {error && <ErrorState title="Upload failed" message={error} />}
 
           <button
             type="submit"

@@ -5,6 +5,7 @@ import {
   listGeneratedReports, listReportTemplates, reportDownloadUrl,
   type GeneratedReportRow, type ReportTemplate,
 } from '../../api/client'
+import { EmptyState, LoadingState } from '../../components/ui/page-state'
 
 const FMT_LABEL: Record<string, string> = {
   pdf: 'PDF', docx: 'Word', xlsx: 'Excel', html: 'HTML', csv: 'CSV', json: 'JSON',
@@ -76,7 +77,15 @@ export function ReportsDashboard() {
                 <p className="text-[11px] text-gray-400 mt-2">{t.sections.filter(s => s.enabled).length} sections · {t.default_export_format.toUpperCase()}</p>
               </button>
             ))}
-            {templates.length === 0 && !loading && <p className="text-sm text-gray-400">No templates yet.</p>}
+            {templates.length === 0 && !loading && (
+              <EmptyState
+                icon={<Settings2 className="w-6 h-6" />}
+                title="No report templates yet"
+                description="Create reusable report templates for customer-ready and internal reporting."
+                action={<button onClick={() => navigate('/reports/templates')} className="btn-secondary">Manage templates</button>}
+                className="sm:col-span-2 lg:col-span-3 min-h-[180px]"
+              />
+            )}
           </div>
         </div>
 
@@ -87,17 +96,18 @@ export function ReportsDashboard() {
             <button onClick={load} className="btn-secondary py-1 px-2 text-xs"><RefreshCw className="w-3.5 h-3.5" /> Refresh</button>
           </div>
           {loading ? (
-            <div className="flex justify-center py-12"><div className="animate-spin w-7 h-7 border-b-2 border-blue-600 rounded-full" /></div>
+            <LoadingState label="Loading reports..." />
           ) : reports.length === 0 ? (
-            <div className="card text-center py-10">
-              <FileText className="w-9 h-9 text-gray-300 mx-auto mb-2" />
-              <p className="text-gray-500 text-sm">No reports generated yet.</p>
-              <button onClick={() => navigate('/reports/new')} className="btn-primary mt-3"><Plus className="w-4 h-4" /> Create your first report</button>
-            </div>
+            <EmptyState
+              icon={<FileText className="w-6 h-6" />}
+              title="No reports generated yet"
+              description="Generate a report from an analyzed policy when you are ready to share findings."
+              action={<button onClick={() => navigate('/reports/new')} className="btn-primary"><Plus className="w-4 h-4" /> Create report</button>}
+            />
           ) : (
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b border-gray-200 text-left text-[11px] uppercase text-gray-400">
+            <div className="table-shell">
+              <table className="data-table">
+                <thead>
                   <tr><th className="px-4 py-2.5">Type</th><th className="px-4 py-2.5">Firewall</th>
                     <th className="px-4 py-2.5">Format</th><th className="px-4 py-2.5">Generated</th>
                     <th className="px-4 py-2.5">By</th><th className="px-4 py-2.5"></th></tr>

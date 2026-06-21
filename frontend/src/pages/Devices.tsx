@@ -17,6 +17,8 @@ import { useForm } from 'react-hook-form'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '../components/ui/dialog'
+import { EmptyState, LoadingState } from '../components/ui/page-state'
+import { VendorBadge, VendorMark } from '../components/ui/vendor-badge'
 
 // ── Status chip ─────────────────────────────────────────────────────────────
 function SyncStatusChip({ status }: { status: string }) {
@@ -640,9 +642,7 @@ function DeviceDetailDrawer({ device, onClose, onEdit }: {
         <div className={`bg-gradient-to-r ${vc.accent} px-6 py-5 text-white flex-shrink-0`}>
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
-                <Server className="w-5 h-5" />
-              </div>
+              <VendorMark vendor={device.vendor} className="h-10 w-10 ring-1 ring-white/20" />
               <div>
                 <h2 className="text-lg font-bold leading-tight">{device.name}</h2>
                 <p className="text-white/70 text-sm font-mono">{connection.endpoint}</p>
@@ -930,18 +930,14 @@ function DeviceCard({
         {/* Top row — name + vendor + status */}
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-3 min-w-0">
-            <div className={clsx('w-10 h-10 rounded-xl bg-gradient-to-br flex items-center justify-center flex-shrink-0 shadow-sm', vc.accent)}>
-              <Server className="w-5 h-5 text-white" />
-            </div>
+            <VendorMark vendor={device.vendor} className="flex-shrink-0" />
             <div className="min-w-0">
               <h3 className="font-bold text-gray-900 truncate">{device.name}</h3>
               <p className="text-xs text-gray-400 font-mono">{connection.endpoint}</p>
             </div>
           </div>
           <div className="flex flex-col items-end gap-1 flex-shrink-0 ml-2">
-            <span className={clsx('text-xs font-semibold px-2 py-0.5 rounded-full border', vc.chip)}>
-              {device.vendor}
-            </span>
+            <VendorBadge vendor={device.vendor} />
             {device.criticality && (
               <span className={clsx('text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide', CRITICALITY_COLORS[device.criticality] ?? 'bg-gray-100 text-gray-500')}>
                 {device.criticality}
@@ -1208,26 +1204,21 @@ export function Devices() {
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-20">
-          <div className="animate-spin w-8 h-8 border-b-2 border-blue-600 rounded-full" />
-        </div>
+        <LoadingState label="Loading devices..." />
       ) : devices.length === 0 ? (
-        <div className="text-center py-20 card">
-          <WifiOff className="w-16 h-16 text-gray-200 mx-auto mb-4" />
-          <h2 className="text-lg font-semibold text-gray-600 mb-2">No devices connected</h2>
-          <p className="text-gray-400 text-sm mb-6">
-            {customerId
-              ? <>Add a FortiGate or Check Point device to start live monitoring.<br />
-                You can also <Link to={`/upload?customer_id=${customerId}`} className="text-blue-600 hover:underline">upload a policy file</Link> for offline analysis.</>
-              : 'Navigate to a customer to add devices and start live monitoring.'}
-          </p>
-          {customerId && (
+        <EmptyState
+          icon={<WifiOff className="w-7 h-7" />}
+          title="No devices connected"
+          description={customerId
+            ? <>Add a firewall device to start live monitoring, or <Link to={`/upload?customer_id=${customerId}`} className="text-brand-600 hover:underline">upload a policy file</Link> for offline analysis.</>
+            : 'Select a customer to add devices and start live monitoring.'}
+          action={customerId ? (
             <button onClick={() => { setEditing(undefined); setShowModal(true) }}
               className="btn-primary mx-auto flex items-center gap-2 w-fit">
               <Plus className="w-4 h-4" /> Add First Device
             </button>
-          )}
-        </div>
+          ) : null}
+        />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
           {devices.map(d => (

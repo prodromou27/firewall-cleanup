@@ -11,6 +11,7 @@ import {
   type SortingState,
 } from '@tanstack/react-table'
 import { getObjects, getPolicies } from '../api/client'
+import { EmptyState, LoadingState } from '../components/ui/page-state'
 import type { FirewallObject, Policy } from '../types'
 import { clsx } from 'clsx'
 
@@ -176,7 +177,7 @@ export function Objects() {
       </div>
     <div className="page-body">
       {/* Filters */}
-      <div className="flex flex-wrap gap-2 mb-5 p-3 bg-white rounded-xl border border-gray-100 shadow-sm">
+      <div className="filter-bar mb-5">
         <select value={policyId} onChange={e => setFilter('policy_id', e.target.value)}
           className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-gray-50 focus:bg-white">
           <option value="">All Policies</option>
@@ -219,14 +220,15 @@ export function Objects() {
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-16"><div className="animate-spin w-8 h-8 border-b-2 border-blue-600 rounded-full" /></div>
+        <LoadingState label="Loading objects..." />
       ) : objects.length === 0 ? (
-        <div className="card text-center py-12">
-          <Package className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-          <p className="text-gray-500">No objects match the current filters.</p>
-        </div>
+        <EmptyState
+          icon={<Package className="w-6 h-6" />}
+          title="No objects match the current filters"
+          description="Try a different object type, policy, or hygiene category."
+        />
       ) : (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="table-shell">
           <table className="data-table">
             <thead>
               {table.getHeaderGroups().map(hg => (

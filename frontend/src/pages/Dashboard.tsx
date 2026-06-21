@@ -9,6 +9,8 @@ import {
 import { getDashboardStats, getCustomers, getFindingsTrend } from '../api/client'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useCustomer } from '../contexts/CustomerContext'
+import { EmptyState, LoadingState } from '../components/ui/page-state'
+import { VendorBadge } from '../components/ui/vendor-badge'
 import type { DashboardStats, Customer, RiskHeatmapEntry } from '../types'
 
 /* ── Helpers ─────────────────────────────────────────────── */
@@ -112,7 +114,7 @@ function RiskHeatmap({ data, showCustomer }: { data: RiskHeatmapEntry[]; showCus
         </div>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="data-table">
           <thead>
             <tr className="border-b border-gray-100">
               {['Policy', showCustomer && 'Customer', 'Vendor', 'Risk Score', 'Level', 'Rules', 'Findings', 'High', '']
@@ -127,9 +129,7 @@ function RiskHeatmap({ data, showCustomer }: { data: RiskHeatmapEntry[]; showCus
               <tr key={e.policy_id} className="hover:bg-gray-50/80 group transition-colors">
                 <td className="py-2.5 pr-4 font-medium text-gray-900 max-w-[180px] truncate">{e.firewall_name}</td>
                 {showCustomer && <td className="py-2.5 pr-4 text-gray-400 text-xs">{e.customer_name}</td>}
-                <td className="py-2.5 pr-4">
-                  <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-medium">{e.vendor}</span>
-                </td>
+                <td className="py-2.5 pr-4"><VendorBadge vendor={e.vendor} /></td>
                 <td className="py-2.5 pr-4">
                   <div className="flex items-center gap-2">
                     <div className="w-20 bg-gray-100 rounded-full h-1.5 overflow-hidden">
@@ -198,11 +198,7 @@ export function Dashboard() {
   }
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-gray-200 border-t-gray-800" />
-      </div>
-    )
+    return <LoadingState label="Loading dashboard..." className="m-7" />
   }
   if (!stats) return null
 
@@ -237,15 +233,17 @@ export function Dashboard() {
           <div><h1 className="page-title">Dashboard</h1><p className="page-subtitle">No policies yet</p></div>
         </div>
         <div className="page-body">
-          <div className="card text-center py-20">
-            <Shield className="w-14 h-14 text-gray-200 mx-auto mb-4" />
-            <h2 className="text-lg font-semibold text-gray-700 mb-1">No policies analyzed yet</h2>
-            <p className="text-sm text-gray-400 mb-6">Upload a policy file or connect a live device to start.</p>
-            <div className="flex gap-2 justify-center">
-              <Link to="/customers" className="btn-primary"><Users className="w-4 h-4" />Add Customer</Link>
-              <Link to="/upload" className="btn-secondary">Upload Policy</Link>
-            </div>
-          </div>
+          <EmptyState
+            icon={<Shield className="w-7 h-7" />}
+            title="No policies analyzed yet"
+            description="Upload a policy file or connect a live device to start building customer reports."
+            action={(
+              <div className="flex flex-wrap gap-2 justify-center">
+                <Link to="/customers" className="btn-primary"><Users className="w-4 h-4" />Add Customer</Link>
+                <Link to="/upload" className="btn-secondary">Upload Policy</Link>
+              </div>
+            )}
+          />
         </div>
       </div>
     )

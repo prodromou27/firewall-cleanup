@@ -106,3 +106,41 @@ def test_pdf_when_available():
         pytest.skip("WeasyPrint not available in this environment (works in the Docker image)")
     content, media, ext = export(_sample(), "pdf")
     assert content[:4] == b"%PDF" and media == "application/pdf"
+
+
+# ── Logos ─────────────────────────────────────────────────────────────────────
+def test_logo_save_resolve_datauri(tmp_path, monkeypatch):
+    from app.config import settings
+    from app.reporting import logos
+    monkeypatch.setattr(settings, "upload_dir", str(tmp_path))
+    # 1x1 transparent PNG
+    png = bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+        "890000000a49444154789c6360000002000154a24f9c0000000049454e44ae426082")
+    ref = logos.save_logo(png, "logo.png")
+    assert ref.startswith("branding/") and ref.endswith(".png")
+    assert logos.abs_path(ref) is not None
+    uri = logos.data_uri(ref)
+    assert uri.startswith("data:image/png;base64,")
+
+
+def test_logo_rejects_bad_type(tmp_path, monkeypatch):
+    from app.config import settings
+    from app.reporting import logos
+    monkeypatch.setattr(settings, "upload_dir", str(tmp_path))
+    with pytest.raises(ValueError):
+        logos.save_logo(b"x", "evil.exe")
+
+
+def test_logo_path_traversal_blocked(tmp_path, monkeypatch):
+    from app.config import settings
+    from app.reporting import logos
+    monkeypatch.setattr(settings, "upload_dir", str(tmp_path))
+    assert logos.abs_path("../../etc/passwd") is None
+
+
+def test_html_embeds_logo_data_uri():
+    data = _sample()
+    data.branding["company_logo"] = "data:image/png;base64,AAAA"
+    content, _, _ = export(data, "html")
+    assert 'src="data:image/png;base64,AAAA"' in content.decode()

@@ -389,6 +389,11 @@ export const cloneReportTemplate = (id: string) =>
 export const setDefaultReportTemplate = (id: string) =>
   api.post(`/report-templates/${id}/default`).then(r => r.data)
 
+export const uploadReportLogo = (file: File) => {
+  const fd = new FormData(); fd.append('file', file)
+  return api.post('/report-templates/logo', fd).then(r => r.data as { logo_ref: string; data_uri: string })
+}
+
 export interface GenerateBody {
   policy_id: string; template_id?: string; export_format: string; report_type?: string
   sections?: string[]; finding_categories?: string[]; filters?: Record<string, unknown>

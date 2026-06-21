@@ -6,7 +6,7 @@ engineer notes, workflow, or change execution.
 import os
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -156,6 +156,21 @@ def finding_categories(user: User = Depends(get_current_user)):
 
 
 # ── Template CRUD ─────────────────────────────────────────────────────────────
+@templates_router.post("/logo")
+async def upload_logo(file: UploadFile = File(...),
+                      user: User = Depends(require_capability(CAP_GENERATE_REPORT))):
+    """Upload a branding logo (company or customer). Returns a storage ref + data URI."""
+    from app.reporting import logos
+    content = await file.read()
+    if len(content) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Logo too large (max 2 MB).")
+    try:
+        ref = logos.save_logo(content, file.filename or "logo.png")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"logo_ref": ref, "data_uri": logos.data_uri(ref)}
+
+
 @templates_router.get("")
 def list_templates(db: Session = Depends(get_db), user: User = Depends(require_capability(CAP_VIEW))):
     rows = _accessible_template_q(db, user).order_by(ReportTemplate.created_at.desc()).all()

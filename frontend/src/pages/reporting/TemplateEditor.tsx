@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, ArrowUp, ArrowDown, Save, Loader2 } from 'lucide-react'
 import {
   getReportTemplate, createReportTemplate, updateReportTemplate, getReportSections,
-  getReportFindingCategories, getReportPlaceholders,
+  getReportFindingCategories, getReportPlaceholders, uploadReportLogo,
   type ReportTemplate, type TemplateSection, type ReportSectionDef,
 } from '../../api/client'
 
@@ -84,6 +84,15 @@ export function TemplateEditor() {
   const cc = (t.cover_page_config || {}) as Record<string, string>
   const setBrand = (k: string, v: string) => set({ branding_config: { ...bc, [k]: v } })
   const setCover = (k: string, v: string) => set({ cover_page_config: { ...cc, [k]: v } })
+  const [logoPreview, setLogoPreview] = useState<Record<string, string>>({})
+  const uploadLogo = async (slot: 'company_logo' | 'customer_logo', file?: File) => {
+    if (!file) return
+    try {
+      const r = await uploadReportLogo(file)
+      setBrand(slot, r.logo_ref)
+      setLogoPreview(p => ({ ...p, [slot]: r.data_uri }))
+    } catch { setError('Logo upload failed (must be an image under 2 MB).') }
+  }
 
   if (!loaded && !error) return <div className="page-body"><div className="animate-spin w-7 h-7 border-b-2 border-blue-600 rounded-full mx-auto mt-16" /></div>
 
@@ -175,6 +184,20 @@ export function TemplateEditor() {
           <label className="text-sm">Report title<input className="inp" value={bc.report_title || ''} onChange={e => setBrand('report_title', e.target.value)} placeholder="{{firewall_name}} Policy Review" /></label>
           <label className="text-sm">Cover subtitle<input className="inp" value={cc.cover_subtitle || ''} onChange={e => setCover('cover_subtitle', e.target.value)} /></label>
           <label className="text-sm">Prepared by<input className="inp" value={cc.prepared_by || ''} onChange={e => setCover('prepared_by', e.target.value)} /></label>
+          {(['company_logo', 'customer_logo'] as const).map(slot => (
+            <div key={slot} className="text-sm">
+              <span className="capitalize">{slot.replace('_', ' ')}</span>
+              <div className="flex items-center gap-3 mt-1">
+                {(logoPreview[slot] || bc[slot]) && (
+                  <img src={logoPreview[slot] || ''} alt="" className="h-10 max-w-[120px] object-contain border border-gray-100 rounded" />
+                )}
+                {!logoPreview[slot] && bc[slot] && <span className="text-[11px] text-gray-400">logo set</span>}
+                <input type="file" accept="image/*" className="text-xs"
+                  onChange={e => uploadLogo(slot, e.target.files?.[0])} />
+                {bc[slot] && <button type="button" onClick={() => { setBrand(slot, ''); setLogoPreview(p => ({ ...p, [slot]: '' })) }} className="text-xs text-red-500">remove</button>}
+              </div>
+            </div>
+          ))}
         </div>
 
         {/* Default categories */}

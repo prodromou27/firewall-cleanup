@@ -51,7 +51,15 @@ def render(data: ReportData) -> bytes:
     _add_page_number_field(fp)
 
     # ── Title page ────────────────────────────────────────────────────────────
-    for _ in range(3):
+    for logo_key in ("company_logo_path", "customer_logo_path"):
+        lp = b.get(logo_key)
+        if lp:
+            try:
+                pic = doc.add_paragraph(); pic.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                pic.add_run().add_picture(lp, width=Inches(2.2))
+            except Exception:
+                pass  # unsupported/corrupt image — skip rather than fail the report
+    for _ in range(2):
         doc.add_paragraph()
     t = doc.add_paragraph(); t.alignment = WD_ALIGN_PARAGRAPH.CENTER
     tr = t.add_run(b.get("report_title", "Firewall Policy Review")); tr.bold = True

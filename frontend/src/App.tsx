@@ -10,7 +10,6 @@ import { Policies, PolicyDetail } from './pages/Policies'
 import { Findings } from './pages/Findings'
 import { Rulebase } from './pages/Rulebase'
 import { Objects } from './pages/Objects'
-import { Reports } from './pages/Reports'
 import { ReportsDashboard } from './pages/reporting/ReportsDashboard'
 import { ReportBuilder } from './pages/reporting/ReportBuilder'
 import { TemplateManager } from './pages/reporting/TemplateManager'
@@ -52,7 +51,6 @@ function AuthenticatedApp() {
             <Route path="/reports/new" element={<ReportBuilder />} />
             <Route path="/reports/templates" element={<TemplateManager />} />
             <Route path="/reports/templates/:id" element={<TemplateEditor />} />
-            <Route path="/reports/legacy" element={<Reports />} />
             <Route path="/posture" element={<Posture />} />
             <Route path="/compliance" element={<Compliance />} />
             <Route path="/scorecard" element={<Scorecard />} />
@@ -74,7 +72,7 @@ function AuthenticatedApp() {
             <Route path="/customers/:customerId/policies/:id" element={<PolicyDetail />} />
             <Route path="/customers/:customerId/findings" element={<Findings />} />
             <Route path="/customers/:customerId/objects" element={<Objects />} />
-            <Route path="/customers/:customerId/reports" element={<Reports />} />
+            <Route path="/customers/:customerId/reports" element={<ReportsDashboard />} />
             <Route path="/customers/:customerId/vulnerabilities" element={<Vulnerabilities />} />
             <Route path="/customers/:customerId/posture" element={<Posture />} />
             <Route path="/customers/:customerId/compliance" element={<Compliance />} />

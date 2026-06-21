@@ -176,6 +176,13 @@ def build_report_data(
     for k in ("report_title", "header_text", "footer_text", "cover_subtitle", "prepared_by", "cover_custom_text"):
         if branding.get(k):
             branding[k] = placeholders.apply(str(branding[k]), ph)
+    # Embed logos: keep the on-disk path (for DOCX) and a data URI (for HTML/PDF).
+    from app.reporting import logos
+    for k in ("company_logo", "customer_logo"):
+        ref = branding.get(k)
+        if ref:
+            branding[k + "_path"] = logos.abs_path(ref)
+            branding[k] = logos.data_uri(ref) or ""
 
     # ── Resolve narrative text (with placeholders) ────────────────────────────
     resolved_texts = {}

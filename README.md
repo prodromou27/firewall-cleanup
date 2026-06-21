@@ -1,30 +1,69 @@
-# Firewall Policy Cleanup Assistant
+# PolicyInsight
 
-A web-based tool for analyzing FortiGate and Check Point firewall rulebases to identify cleanup opportunities including duplicate rules, shadowed rules, inactive rules, unused objects, overly permissive rules, and risky services.
+A web-based platform for analyzing firewall rulebases across multiple vendors to
+surface cleanup and risk-reduction opportunities — duplicate rules, shadowed
+rules, disabled/inactive rules, unused and duplicate objects, overly permissive
+rules, risky services, weak logging, and policy hygiene — with explainable risk
+scoring, compliance checks, and professional multi-format reporting.
 
-> **Safety Note:** This tool operates in read-only analysis mode. It does not make any changes to firewall policies. All recommendations require engineer review and formal change approval before implementation.
+> **Safety / read-only:** PolicyInsight operates in read-only analysis mode. It
+> never deletes, disables, modifies, reorders, or installs firewall policies or
+> objects. All findings and recommendations support review and planning only and
+> require validation and formal change approval before any implementation.
 
 ## Features
 
-- **FortiGate Parser** — Parses full `.conf` exports and JSON exports
-- **Check Point Parser** — Parses JSON policy package exports
-- **Duplicate Rule Detection** — Compares expanded normalized objects, not just names
-- **Shadow Rule Detection** — Full and partial shadowing with policy-order awareness
-- **Disabled / Inactive Rules** — Identifies disabled and zero-hit rules
-- **Overly Permissive Rules** — Any source, destination, or service detection
+### Vendor parsers
+- **FortiGate** — full `.conf` exports and JSON exports
+- **Check Point** — JSON policy package exports
+- **Palo Alto** — PAN-OS XML config exports
+- **Cisco ASA** — running-config exports
+- **Huawei USG** — config exports
+
+### Analysis
+- **Duplicate Rule Detection** — compares expanded, normalized objects, not just names
+- **Shadow Rule Detection** — full and partial shadowing with policy-order awareness
+- **Disabled / Inactive Rules** — disabled and zero-hit rules
+- **Overly Permissive Rules** — any source / destination / service
 - **Risky Service Detection** — RDP, SSH, Telnet, SMB, SQL, VNC, and more
-- **Unused Object Detection** — Finds unreferenced address and service objects
-- **Duplicate Object Detection** — Objects with the same value but different names
-- **Risk Scoring** — 0–100 score per rule with explainable factors
-- **Findings Workflow** — Status tracking: Review Required → Approved → Completed
-- **Export** — HTML report, Excel, CSV, JSON
+- **Unused & Duplicate Object Detection** — unreferenced objects; same value, different names
+- **Compliance Checks** — policy evaluated against a library of rule/object hygiene checks
+- **CVE / risky-exposure checks** and **policy health assessment**
+- **Risk Scoring** — explainable 0–100 score per rule and per finding
+- **Recommendation library** — review-only, vendor-aware remediation guidance
+
+### Platform
+- **Multi-tenant** — customers/firewalls with per-tenant data isolation
+- **Authentication & RBAC** — session login, capability-gated endpoints
+- **Audit trail** — persistent, tenant-scoped record of sensitive actions
+- **Findings workflow** — review status, priority, assignee, risk acceptance (review-only; no change execution)
+- **Dashboards** — exposure and risk posture, executive cleanup plan, "what changed since last sync"
+- **Reporting** — modular templates (customer-facing vs internal), branding/logos,
+  dynamic placeholders, and export to **HTML, PDF, DOCX, XLSX, CSV, JSON**
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.12
 - Node.js 18+
+- (Production) Docker Engine + Docker Compose v2
 
-## Quick Start
+## Production deployment (Docker + PostgreSQL)
+
+The supported production stack is Linux + Docker + PostgreSQL (FastAPI backend,
+Vite/nginx frontend, Postgres 16). On a fresh AlmaLinux/RHEL host:
+
+```bash
+git clone https://github.com/prodromou27/firewall-cleanup.git
+cd firewall-cleanup && git checkout DEV
+sudo bash deploy/almalinux-deploy.sh
+```
+
+The installer is idempotent: it installs Docker, generates `.env` + secrets,
+opens the firewall, builds, launches, runs `alembic upgrade head`, seeds the
+bootstrap admin, and health-checks the stack. See **[DEPLOY.md](DEPLOY.md)** for
+HTTPS/TLS, the DEV→PROD promotion loop, auto-update, and troubleshooting.
+
+## Local development
 
 ### Backend
 
@@ -40,8 +79,10 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-The API will be available at http://localhost:8000  
-Interactive docs: http://localhost:8000/docs
+API: http://localhost:8000  ·  Interactive docs (non-production only): http://localhost:8000/docs
+
+By default the dev backend uses SQLite. Set `DATABASE_URL=postgresql+psycopg2://...`
+to point at Postgres. See `.env.example` for all settings.
 
 ### Frontend
 
@@ -51,25 +92,30 @@ npm install
 npm run dev
 ```
 
-The UI will be available at http://localhost:3000
+UI: http://localhost:3000 (Vite proxies `/api` to the backend — same-origin, no CORS issues).
 
-## Running Tests
+## Running tests
 
 ```bash
 cd backend
 pytest tests/ -v
 ```
 
-## Sample Data
+> Note: PDF export uses WeasyPrint, which is only importable inside the Linux
+> Docker image; the PDF test skips automatically on Windows/macOS.
 
-Sample policy files are provided in `sample_data/`:
+## Sample data
 
-- `fortigate_sample.conf` — FortiGate full config with 12 rules and multiple finding types
-- `checkpoint_sample.json` — Check Point JSON policy with 8 rules
+Sample policy files for each vendor live in `sample_data/`:
 
-Upload these via the **Upload Policy** page to see the tool in action.
+- `fortigate_sample.conf`
+- `checkpoint_sample.json`
+- `paloalto_sample.xml`
+- `ciscoasa_sample.txt`
 
-## Project Structure
+Upload these via the **Upload Policy** page to see the platform in action.
+
+## Project structure
 
 ```
 cleanup_project/
@@ -80,49 +126,69 @@ cleanup_project/
 │   │   ├── database.py          # SQLAlchemy setup
 │   │   ├── models/              # Database models
 │   │   ├── api/                 # API route handlers
-│   │   ├── parsers/             # FortiGate + Check Point parsers
-│   │   └── analysis/            # Analysis engines
-│   │       ├── engine.py        # Main orchestrator
-│   │       ├── ip_utils.py      # IP/CIDR comparison
-│   │       ├── service_utils.py # Port/protocol comparison
-│   │       ├── normalizer.py    # Object expansion
-│   │       ├── duplicate_detector.py
-│   │       ├── shadow_detector.py
-│   │       └── risk_scorer.py
-│   ├── tests/                   # Unit tests
+│   │   ├── parsers/             # Vendor parsers (FortiGate, Check Point, Palo Alto, Cisco ASA, Huawei)
+│   │   ├── analysis/            # Analysis engine + detectors, scoring, compliance, health
+│   │   ├── reporting/           # Shared ReportData, section catalog, exporters (6 formats)
+│   │   ├── security/            # Auth, RBAC, crypto
+│   │   ├── connectors/          # Live read-only device sync + syslog listener
+│   │   └── services/            # Notifications and supporting services
+│   ├── alembic/                 # Database migrations (Postgres schema source of truth)
+│   ├── tests/                   # Unit/integration tests
 │   └── requirements.txt
 ├── frontend/
 │   └── src/
-│       ├── pages/               # Dashboard, Upload, Policies, Findings, etc.
+│       ├── pages/               # Dashboard, Upload, Policies, Findings, Reporting, etc.
 │       ├── components/          # Shared UI components
 │       ├── api/                 # API client
 │       └── types/               # TypeScript types
-└── sample_data/                 # Test policy files
+├── deploy/                      # Installer, update script, systemd auto-update, Caddy TLS
+├── docker-compose.yml           # Production stack (Postgres + backend + frontend)
+└── sample_data/                 # Per-vendor sample policy files
 ```
 
-## Architecture Notes
+## Architecture notes
 
-- **Database:** SQLite by default. Set `DATABASE_URL=postgresql://...` for production.
-- **Vendor parsers** are independent modules in `backend/app/parsers/`. Add a new vendor by creating a new parser class.
-- **Analysis engine** (`engine.py`) orchestrates all analyzers. New analysis types can be added as functions returning finding dicts.
-- **Frontend** uses Vite proxy to `/api` — no CORS issues in development.
+- **Database:** SQLite for local dev; **PostgreSQL** for the Docker stack. Schema
+  is managed by **Alembic** (`alembic upgrade head` runs on backend startup in
+  Docker). See [DEPLOY.md](DEPLOY.md) for migration workflow.
+- **Vendor parsers** are independent modules extending `BaseParser`. Add a vendor
+  by creating a new parser class.
+- **Analysis engine** (`engine.py`) orchestrates all detectors. New analysis types
+  are added as functions returning finding dicts.
+- **Reporting** builds one shared `ReportData` model and feeds every exporter, so
+  output stays consistent across HTML/PDF/DOCX/XLSX/CSV/JSON.
+- **Frontend** is same-origin with the API (Vite proxy in dev, nginx proxy in prod).
 
-## Adding a New Vendor
+## Adding a new vendor
 
 1. Create `backend/app/parsers/newvendor.py` extending `BaseParser`
 2. Register it in `backend/app/parsers/__init__.py`
 3. Add the vendor option to the Upload page frontend
 
-## Finding Statuses
+## Finding statuses
+
+Statuses track the **review and planning** of a finding — never change execution.
+The wording is deliberately read-only ("…Outside Tool"): any cleanup happens
+outside the platform through the approved change-management process.
 
 | Status | Description |
 |--------|-------------|
+| New | Newly produced by an analysis run |
 | Review Required | Default — needs engineer review |
-| Approved for Cleanup | Confirmed safe to remove/change |
-| Cleanup Completed | Change has been implemented |
+| In Review | Under active review |
+| Requires Business Validation | Pending confirmation of business need |
+| Requires Customer Confirmation | Pending customer sign-off |
+| Confirmed Cleanup Candidate | Reviewed and agreed as a candidate |
+| Manual Change Required | Needs a manual change (planned externally) |
+| Change Planned Outside Tool | Change scheduled in the change-management process |
+| Cleanup Completed Outside Tool | Change implemented outside the platform |
 | False Positive | Finding is not valid |
-| Accepted Risk | Risk acknowledged, no action |
+| Accepted Risk | Risk acknowledged with reason / expiry / approval reference |
+| Deferred | Intentionally postponed |
 
 ## Disclaimer
 
-The findings and recommendations generated by this tool are based on the policy data available at the time of analysis. Firewall policy cleanup should only be performed after validation of business requirements, risk assessment, and formal change approval.
+The findings and recommendations generated by this platform are based on the
+policy data available at the time of analysis. Firewall policy cleanup should
+only be performed after validation of business requirements, risk assessment,
+and formal change approval.

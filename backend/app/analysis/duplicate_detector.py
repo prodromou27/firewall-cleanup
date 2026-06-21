@@ -80,6 +80,8 @@ def detect_duplicates(
     # Pre-expand all rules
     expanded = []
     for rule in rules:
+        if not rule.get("enabled", True):
+            continue
         expanded.append({
             "rule": rule,
             "sources": expand_rule_sources(rule, obj_map),

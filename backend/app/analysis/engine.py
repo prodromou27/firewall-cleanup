@@ -333,6 +333,7 @@ def _rule_to_dict(r: FirewallRule) -> dict:
 def _obj_to_dict(o: FirewallObject) -> dict:
     return {
         "id": o.id,
+        "vendor": o.vendor,
         "object_name": o.object_name,
         "object_type": o.object_type,
         "value": o.value,
@@ -340,6 +341,7 @@ def _obj_to_dict(o: FirewallObject) -> dict:
         "port_start": o.port_start,
         "port_end": o.port_end,
         "members": o.members or [],
+        "raw_data": o.raw_data or {},
     }
 
 
@@ -445,6 +447,8 @@ def _analyze_usage(rules: List[dict], obj_map: dict) -> List[dict]:
 def _analyze_permissive(rules: List[dict], obj_map: dict) -> List[dict]:
     findings = []
     for rule in rules:
+        if not rule.get("enabled", True):
+            continue
         action = (rule.get("action") or "").lower()
         if action not in ("accept", "allow", "permit"):
             continue
@@ -520,6 +524,8 @@ def _analyze_permissive(rules: List[dict], obj_map: dict) -> List[dict]:
 def _analyze_risky_services(rules: List[dict], obj_map: dict) -> List[dict]:
     findings = []
     for rule in rules:
+        if not rule.get("enabled", True):
+            continue
         action = (rule.get("action") or "").lower()
         if action not in ("accept", "allow", "permit"):
             continue
@@ -1143,13 +1149,15 @@ def _analyze_unused_objects(
 
     # Collect all object names referenced by rules
     used_names = set()
+    reference_fields = (
+        "sources", "destinations", "services", "applications", "users", "vpn",
+        "source_interfaces", "destination_interfaces", "install_on",
+    )
     for rule in rules:
-        for src in rule.get("sources", []):
-            used_names.add(src)
-        for dst in rule.get("destinations", []):
-            used_names.add(dst)
-        for svc in rule.get("services", []):
-            used_names.add(svc)
+        for field in reference_fields:
+            for ref in rule.get(field, []) or []:
+                if isinstance(ref, str):
+                    used_names.add(ref)
 
     # Also include members of used groups
     def collect_members(name: str, visited: set):
@@ -1157,7 +1165,7 @@ def _analyze_unused_objects(
             return
         visited.add(name)
         obj = obj_map.get(name)
-        if obj and obj.get("object_type") == "group":
+        if obj and _is_group_object(obj):
             for m in obj.get("members", []):
                 used_names.add(m)
                 collect_members(m, visited)
@@ -1165,21 +1173,15 @@ def _analyze_unused_objects(
     for name in list(used_names):
         collect_members(name, set())
 
-    # Service/port object types are excluded from unused-object analysis.
-    # Port objects (TCP, UDP, ICMP services and service groups) may be referenced
-    # in other policy packages, NAT rules, or used by vendor management processes.
-    # Flagging them as unused within a single policy is not actionable.
-    _SERVICE_TYPES = {"service", "service-group"}
-
     for obj in objects:
         name = obj.get("object_name", "")
         if name.lower() in ("any", "all"):
             continue
         # Skip all service/port objects — type-based, vendor-agnostic filter.
-        if obj.get("object_type") in _SERVICE_TYPES:
+        if _is_service_object(obj):
             continue
-        # Skip CheckPoint built-in / predefined objects — vendor-managed, cannot be removed.
-        if _is_cp_predefined(name):
+        # Skip vendor built-in / predefined objects; customers cannot remove them.
+        if _is_vendor_builtin_object(obj):
             continue
         if name not in used_names:
             findings.append({
@@ -1211,7 +1213,9 @@ def _analyze_duplicate_objects(objects: List[dict]) -> List[dict]:
     # Group non-group objects by normalized value
     value_map: Dict[str, List[dict]] = {}
     for obj in objects:
-        if obj.get("object_type") in ("group", "service-group"):
+        if _is_group_object(obj):
+            continue
+        if _is_vendor_builtin_object(obj):
             continue
         val = (obj.get("value") or "").strip().lower()
         if not val or val in ("any", "all"):
@@ -1221,8 +1225,6 @@ def _analyze_duplicate_objects(objects: List[dict]) -> List[dict]:
         value_map[val].append(obj)
 
     for val, objs in value_map.items():
-        # Filter out CP predefined objects from duplicate detection
-        objs = [o for o in objs if not _is_cp_predefined(o.get("object_name", ""))]
         if len(objs) < 2:
             continue
         names = [o.get("object_name") for o in objs]
@@ -1575,6 +1577,57 @@ def _is_checkpoint_predefined(name: str) -> bool:
     return any(p.match(name) for p in _CP_PREDEFINED_PATTERNS)
 
 
+def _object_type(obj: dict) -> str:
+    return (obj.get("object_type") or "").strip().lower().replace("-", "_")
+
+
+def _is_group_object(obj: dict) -> bool:
+    return "group" in _object_type(obj)
+
+
+def _is_service_object(obj: dict) -> bool:
+    return "service" in _object_type(obj)
+
+
+def _truthy_metadata(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value == 1
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "enabled"}
+    return False
+
+
+def _is_vendor_builtin_object(obj: dict) -> bool:
+    """Return True for vendor-managed/predefined objects that customers should not clean up."""
+    name = obj.get("object_name", "")
+    if _is_cp_predefined(name) or _is_checkpoint_predefined(name):
+        return True
+
+    obj_type = _object_type(obj)
+    if "predefined" in obj_type or "builtin" in obj_type or "built_in" in obj_type:
+        return True
+
+    raw = obj.get("raw_data") or {}
+    if isinstance(raw, dict):
+        for key in (
+            "predefined", "is_predefined", "builtin", "built_in", "built-in",
+            "read_only", "read-only", "vendor_managed", "vendor-managed",
+            "system_object",
+        ):
+            if _truthy_metadata(raw.get(key)):
+                return True
+
+        domain = raw.get("domain")
+        if isinstance(domain, dict) and (domain.get("name") or "").lower() == "check point data":
+            return True
+        if isinstance(domain, str) and domain.lower() == "check point data":
+            return True
+
+    return False
+
+
 def _analyze_empty_groups(objects: List[dict]) -> List[dict]:
     """Detect group objects with no members.
 
@@ -1583,12 +1636,12 @@ def _analyze_empty_groups(objects: List[dict]) -> List[dict]:
     """
     findings = []
     for obj in objects:
-        if obj.get("object_type") not in ("group", "service-group"):
+        if not _is_group_object(obj):
             continue
         members = obj.get("members") or []
         if len(members) == 0:
-            # Suppress known CheckPoint predefined empty groups
-            if _is_checkpoint_predefined(obj.get("object_name", "")):
+            # Suppress known vendor predefined empty groups.
+            if _is_vendor_builtin_object(obj):
                 continue
             findings.append({
                 "finding_type": "empty_group",
@@ -1619,7 +1672,9 @@ def _analyze_large_groups(objects: List[dict]) -> List[dict]:
     """Detect group objects with an excessive number of members."""
     findings = []
     for obj in objects:
-        if obj.get("object_type") not in ("group", "service-group"):
+        if not _is_group_object(obj):
+            continue
+        if _is_vendor_builtin_object(obj):
             continue
         members = obj.get("members") or []
         if len(members) >= _LARGE_GROUP_THRESHOLD:
@@ -1653,9 +1708,9 @@ def _analyze_broad_networks(objects: List[dict]) -> List[dict]:
     findings = []
     _BROAD_PREFIXES = {8, 12, 16}
     for obj in objects:
-        if obj.get("object_type") not in ("network", "host"):
+        if _object_type(obj) not in ("network", "host"):
             continue
-        if _is_cp_predefined(obj.get("object_name", "")):
+        if _is_vendor_builtin_object(obj):
             continue
         value = (obj.get("value") or "").strip()
         if not value or "/" not in value:
@@ -1731,10 +1786,10 @@ def _analyze_service_ranges(objects: List[dict]) -> List[dict]:
     """Detect service objects that span large port ranges."""
     findings = []
     for obj in objects:
-        if obj.get("object_type") not in ("service", "service-group"):
+        if not _is_service_object(obj):
             continue
-        # Skip CheckPoint built-in services — they cannot be modified by customers
-        if _is_cp_predefined(obj.get("object_name", "")):
+        # Skip vendor built-in services; customers cannot modify them.
+        if _is_vendor_builtin_object(obj):
             continue
         start = obj.get("port_start")
         end = obj.get("port_end")

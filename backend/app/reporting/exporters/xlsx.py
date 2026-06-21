@@ -50,7 +50,7 @@ def render(data: ReportData) -> bytes:
 
     # Summary
     ws = wb.active; ws.title = "Summary"
-    ws.append(["PolicyInsight Report", ""])
+    ws.append([data.branding.get("report_title") or "Firewall Policy Review", ""])
     ws["A1"].font = Font(size=14, bold=True, color="1E3A5F")
     for k, v in [("Customer", m["customer_name"]), ("Firewall", m["firewall_name"]), ("Vendor", m["vendor"]),
                  ("Analysis date", m["analysis_date"]), ("Generated", m["generated_date"]),

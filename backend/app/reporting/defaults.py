@@ -23,7 +23,7 @@ _INTRO = (
     "{{total_rules}} rules and {{total_objects}} objects."
 )
 _METHODOLOGY = (
-    "PolicyInsight ingests the exported firewall configuration and evaluates it against "
+    "The analysis engine ingests the exported firewall configuration and evaluates it against "
     "a library of rule- and object-level checks (permissiveness, exposure, shadowing, "
     "duplication, usage, logging, documentation and hygiene). Findings are scored by "
     "severity and confidence using available hit-count and object-expansion data. No "
@@ -39,7 +39,7 @@ _SCORING = (
 
 def default_template_specs():
     """Return (template_dict, ordered_section_keys) tuples to seed."""
-    common_branding = {"company_name": "PolicyInsight", "accent_color": "#1e3a5f",
+    common_branding = {"company_name": "", "accent_color": "#1e3a5f",
                        "secondary_color": "#2e7d62", "confidentiality": "Confidential"}
     return [
         ({

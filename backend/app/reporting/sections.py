@@ -8,12 +8,12 @@ defaults, and every exporter.
 # Default disclaimer every formal report includes (editable per template).
 READ_ONLY_DISCLAIMER = (
     "This report was generated using read-only firewall policy data available to "
-    "PolicyInsight at the time of analysis. PolicyInsight does not perform firewall "
+    "the analysis platform at the time of analysis. The platform does not perform firewall "
     "changes and does not delete, disable, modify, reorder, or install firewall "
     "policies or objects. The findings and recommendations in this report are intended "
     "to support review and planning activities only. Any firewall changes must be "
     "validated by the responsible technical teams, approved through the appropriate "
-    "change management process, and implemented outside PolicyInsight."
+    "change management process, and implemented outside the platform."
 )
 
 # Section types

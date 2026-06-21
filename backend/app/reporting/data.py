@@ -165,7 +165,7 @@ def build_report_data(
     ph = placeholders.build_map(meta)
 
     # ── Branding defaults ─────────────────────────────────────────────────────
-    branding.setdefault("company_name", "PolicyInsight")
+    branding.setdefault("company_name", "")
     branding.setdefault("customer_name", customer_name)
     branding.setdefault("accent_color", "#1e3a5f")
     branding.setdefault("secondary_color", "#2e7d62")

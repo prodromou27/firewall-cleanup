@@ -45,6 +45,10 @@ def _text(elem: Optional[ET.Element], path: str, default: str = "") -> str:
     return default
 
 
+def _raw_xml(elem: ET.Element) -> dict:
+    return {"xml": ET.tostring(elem, encoding="unicode")}
+
+
 class PaloAltoParser(BaseParser):
     """Parser for PAN-OS / Panorama XML configuration exports."""
 
@@ -102,7 +106,7 @@ class PaloAltoParser(BaseParser):
                 else:
                     value, otype = "", "host"
                 out.append(self._obj(name, otype, value, [],
-                                      comment=_text(entry, "description")))
+                                      comment=_text(entry, "description"), raw_data=_raw_xml(entry)))
         return out
 
     def _parse_address_groups(self, root: ET.Element) -> List[dict]:
@@ -119,7 +123,7 @@ class PaloAltoParser(BaseParser):
                 if entry.find("dynamic") is not None:
                     value = "dynamic: " + _text(entry, "dynamic/filter")
                 out.append(self._obj(name, "address_group", value, members,
-                                      comment=_text(entry, "description")))
+                                      comment=_text(entry, "description"), raw_data=_raw_xml(entry)))
         return out
 
     def _parse_services(self, root: ET.Element) -> List[dict]:
@@ -141,7 +145,7 @@ class PaloAltoParser(BaseParser):
                     "object_uid": name, "object_name": name, "object_type": "service",
                     "value": f"{proto}/{port}" if proto else port, "members": [],
                     "comment": _text(entry, "description"),
-                    "protocol": proto, "port_start": ps, "port_end": pe, "raw_data": {},
+                    "protocol": proto, "port_start": ps, "port_end": pe, "raw_data": _raw_xml(entry),
                 })
         return out
 
@@ -155,7 +159,7 @@ class PaloAltoParser(BaseParser):
                     continue
                 seen.add(name)
                 members = _members(entry, "members")
-                out.append(self._obj(name, "service-group", "", members))
+                out.append(self._obj(name, "service-group", "", members, raw_data=_raw_xml(entry)))
         return out
 
     @staticmethod
@@ -172,11 +176,11 @@ class PaloAltoParser(BaseParser):
             return None, None
 
     @staticmethod
-    def _obj(name: str, otype: str, value: str, members: List[str], comment: str = "") -> dict:
+    def _obj(name: str, otype: str, value: str, members: List[str], comment: str = "", raw_data: Optional[dict] = None) -> dict:
         return {
             "object_uid": name, "object_name": name, "object_type": otype,
             "value": value, "members": members, "comment": comment,
-            "protocol": None, "port_start": None, "port_end": None, "raw_data": {},
+            "protocol": None, "port_start": None, "port_end": None, "raw_data": raw_data or {},
         }
 
     # ── security rules ───────────────────────────────────────────────────────────
@@ -236,6 +240,6 @@ class PaloAltoParser(BaseParser):
                     "first_hit": None,
                     "schedule": _text(entry, "schedule"),
                     "comments": _text(entry, "description"),
-                    "raw_data": {"tags": tags, "rule_type": _text(entry, "rule-type")},
+                    "raw_data": {**_raw_xml(entry), "tags": tags, "rule_type": _text(entry, "rule-type")},
                 })
         return rules

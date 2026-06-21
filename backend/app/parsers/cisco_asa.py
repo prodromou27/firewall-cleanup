@@ -90,7 +90,8 @@ class CiscoASAParser(BaseParser):
             objects.append({
                 "object_uid": alias, "object_name": alias, "object_type": "host",
                 "value": ip, "members": [], "comment": "name alias",
-                "protocol": None, "port_start": None, "port_end": None, "raw_data": {},
+                "protocol": None, "port_start": None, "port_end": None,
+                "raw_data": {"raw": f"name {ip} {alias}"},
             })
 
         return rules, objects, warnings
@@ -149,7 +150,7 @@ class CiscoASAParser(BaseParser):
                     "object_uid": mn.group(1), "object_name": mn.group(1),
                     "object_type": otype, "value": value, "members": [],
                     "comment": "", "protocol": None, "port_start": None,
-                    "port_end": None, "raw_data": {},
+                    "port_end": None, "raw_data": {"raw_lines": [ln] + body},
                 })
                 i = nxt
                 continue
@@ -174,7 +175,7 @@ class CiscoASAParser(BaseParser):
                     "object_uid": ms.group(1), "object_name": ms.group(1),
                     "object_type": "service", "value": value, "members": [],
                     "comment": "", "protocol": proto, "port_start": ps_i,
-                    "port_end": pe_i, "raw_data": {},
+                    "port_end": pe_i, "raw_data": {"raw_lines": [ln] + body},
                 })
                 i = nxt
                 continue
@@ -234,7 +235,7 @@ class CiscoASAParser(BaseParser):
                 "value": (proto_hint or (value_bits[0] if value_bits else "")),
                 "members": members, "comment": "",
                 "protocol": proto_hint, "port_start": None, "port_end": None,
-                "raw_data": {},
+                "raw_data": {"raw_lines": [ln] + body},
             })
             i = nxt
         return groups

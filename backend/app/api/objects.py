@@ -9,6 +9,7 @@ from app.models.user import User
 from app.security.identity import (
     get_current_user, require_customer_access, accessible_customer_ids,
 )
+from app.api.common import validate_choice, validate_sort
 
 router = APIRouter(prefix="/api/objects", tags=["objects"])
 
@@ -45,11 +46,22 @@ def list_objects(
     search: Optional[str] = None,
     unused_only: Optional[bool] = None,
     category: Optional[str] = None,
+    sort_by: Optional[str] = None,
+    sort_dir: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    if category:
+        validate_choice(category, tuple(_CATEGORY_FINDING_TYPE), "category")
+    _OBJECT_SORTS = {
+        "object_name": FirewallObject.object_name,
+        "object_type": FirewallObject.object_type,
+        "value": FirewallObject.value,
+        "created_at": FirewallObject.created_at,
+    }
+    sort_field, direction = validate_sort(sort_by, sort_dir, tuple(_OBJECT_SORTS), "object_name")
     q = db.query(FirewallObject)
 
     # Per-user tenant scope: the set of customers this user may access.
@@ -61,7 +73,7 @@ def list_objects(
         # Confirm the user can access the policy's owning customer.
         pol = db.query(FirewallPolicy).filter(FirewallPolicy.id == policy_id).first()
         if not pol:
-            return {"total": 0, "page": page, "page_size": page_size, "objects": []}
+            raise HTTPException(status_code=404, detail="Policy not found")
         require_customer_access(db, user, pol.customer_id)
         q = q.filter(FirewallObject.policy_id == policy_id)
         scoped_policy_ids = [policy_id]
@@ -113,7 +125,10 @@ def list_objects(
             return {"total": 0, "page": page, "page_size": page_size, "objects": []}
 
     total = q.count()
-    objects = q.order_by(FirewallObject.object_name).offset((page - 1) * page_size).limit(page_size).all()
+    sort_col = _OBJECT_SORTS[sort_field]
+    if direction == "desc":
+        sort_col = sort_col.desc()
+    objects = q.order_by(sort_col).offset((page - 1) * page_size).limit(page_size).all()
 
     return {
         "total": total,

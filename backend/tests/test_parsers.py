@@ -1,4 +1,4 @@
-"""End-to-end parser correctness tests for FortiGate, Check Point, and Huawei.
+"""End-to-end parser correctness tests for supported firewall vendors.
 
 Each test parses a representative export, asserts the normalized rule/object
 shape the analysis engine depends on, and runs a port-based detector to confirm
@@ -142,3 +142,128 @@ def test_huawei_service_not_collapsed_to_any():
     _, objects, _ = get_parser("Huawei").parse(HUAWEI_CONF)
     rdp = _svc_obj(objects, "RDP")
     assert not service_is_any(normalize_service(rdp))
+
+
+# Cisco ASA
+
+CISCO_ASA_CONF = """
+ASA Version 9.16
+object network DB-Server
+ host 10.0.0.5
+object-group service RDP-GROUP tcp
+ port-object eq 3389
+access-group OUTSIDE in interface outside
+access-list OUTSIDE extended permit tcp any object DB-Server eq 3389 log (hitcnt=12)
+"""
+
+
+def test_cisco_asa_parse_and_exposure():
+    rules, objects, warnings = get_parser("CiscoASA").parse(CISCO_ASA_CONF)
+    assert len(rules) == 1
+    r = rules[0]
+    assert r["sources"] == ["any"]
+    assert r["destinations"] == ["DB-Server"]
+    assert r["services"] == ["tcp/3389"]
+    assert r["hit_count"] == 12
+    assert r["source_interfaces"] == ["outside"]
+    assert r["raw_data"]["raw"].startswith("access-list OUTSIDE")
+
+    db = next((o for o in objects if o["object_name"] == "DB-Server"), None)
+    assert db and db["raw_data"]["raw_lines"][0] == "object network DB-Server"
+
+    findings = _analyze_exposed_services(rules, build_object_map(objects))
+    assert any(f["finding_type"] == "rdp_exposed" for f in findings)
+
+
+# Palo Alto
+
+PALO_ALTO_XML = """
+<config>
+  <devices>
+    <entry name="localhost.localdomain">
+      <vsys>
+        <entry name="vsys1">
+          <address>
+            <entry name="DB-Server">
+              <ip-netmask>10.0.0.5/32</ip-netmask>
+            </entry>
+          </address>
+          <service>
+            <entry name="RDP">
+              <protocol><tcp><port>3389</port></tcp></protocol>
+            </entry>
+          </service>
+          <rulebase>
+            <security>
+              <rules>
+                <entry name="allow-rdp">
+                  <from><member>untrust</member></from>
+                  <to><member>trust</member></to>
+                  <source><member>any</member></source>
+                  <destination><member>DB-Server</member></destination>
+                  <service><member>RDP</member></service>
+                  <application><member>any</member></application>
+                  <action>allow</action>
+                  <log-end>yes</log-end>
+                </entry>
+              </rules>
+            </security>
+          </rulebase>
+        </entry>
+      </vsys>
+    </entry>
+  </devices>
+</config>
+"""
+
+
+def test_paloalto_parse_and_exposure():
+    rules, objects, warnings = get_parser("PaloAlto").parse(PALO_ALTO_XML)
+    assert len(rules) == 1
+    r = rules[0]
+    assert r["sources"] == ["any"]
+    assert r["destinations"] == ["DB-Server"]
+    assert r["services"] == ["RDP"]
+    assert r["action"] == "accept"
+    assert "xml" in r["raw_data"]
+
+    rdp = _svc_obj(objects, "RDP")
+    assert rdp and rdp["protocol"] == "tcp" and rdp["port_start"] == 3389
+    assert "xml" in rdp["raw_data"]
+
+    findings = _analyze_exposed_services(rules, build_object_map(objects))
+    assert any(f["finding_type"] == "rdp_exposed" for f in findings)
+
+
+def test_all_vendor_parsers_tolerate_malformed_input():
+    for vendor in ("FortiGate", "CheckPoint", "Huawei", "CiscoASA", "PaloAlto"):
+        rules, objects, warnings = get_parser(vendor).parse("this is not a valid firewall export {{{")
+        assert isinstance(rules, list)
+        assert isinstance(objects, list)
+        assert isinstance(warnings, list)
+        assert warnings, f"{vendor} should explain why malformed input was not useful"
+
+
+def test_parser_warnings_include_circular_group_references():
+    conf = """
+config firewall addrgrp
+    edit "Group-A"
+        set member "Group-B"
+    next
+    edit "Group-B"
+        set member "Group-A"
+    next
+end
+config firewall policy
+    edit 1
+        set srcaddr "Group-A"
+        set dstaddr "all"
+        set service "ALL"
+        set action accept
+    next
+end
+"""
+    rules, objects, warnings = get_parser("FortiGate").parse(conf)
+    assert len(rules) == 1
+    assert any("circular group reference" in w.lower() for w in warnings)
+    assert all(isinstance(o.get("raw_data"), dict) for o in objects)

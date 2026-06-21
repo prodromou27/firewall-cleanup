@@ -23,6 +23,7 @@ from app.security.identity import (
 )
 from app.security.rbac import CAP_VIEW_GLOBAL, CAP_DELETE_DATA, CAP_UPLOAD
 from app.security.audit import audit_log
+from app.api.common import validate_csv_choices, validate_sort
 
 
 def _authz_policy(policy_id: str, db: Session, user: User) -> FirewallPolicy:
@@ -100,13 +101,27 @@ def _policy_risk_score(p: FirewallPolicy, db: Session,
 
 @router.get("")
 def list_policies(
+    id: Optional[str] = None,
     customer_id: Optional[str] = None,
     vendor: Optional[str] = None,
+    search: Optional[str] = None,
+    sort_by: Optional[str] = None,
+    sort_dir: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    _POLICY_SORTS = {
+        "upload_date": FirewallPolicy.upload_date,
+        "firewall_name": FirewallPolicy.firewall_name,
+        "vendor": FirewallPolicy.vendor,
+        "rule_count": FirewallPolicy.rule_count,
+        "finding_count": FirewallPolicy.finding_count,
+        "high_finding_count": FirewallPolicy.high_finding_count,
+        "analysis_status": FirewallPolicy.analysis_status,
+    }
+    sort_field, direction = validate_sort(sort_by, sort_dir or "desc", tuple(_POLICY_SORTS), "upload_date")
     q = db.query(FirewallPolicy)
     if customer_id:
         require_customer_access(db, user, customer_id)
@@ -115,11 +130,24 @@ def list_policies(
         allowed = accessible_customer_ids(db, user)
         if allowed is not None:
             q = q.filter(FirewallPolicy.customer_id.in_(allowed)) if allowed else q.filter(False)
+    if id:
+        q = q.filter(FirewallPolicy.id == id)
     if vendor:
         q = q.filter(FirewallPolicy.vendor == vendor)
+    if search:
+        q = q.filter(
+            or_(
+                FirewallPolicy.firewall_name.ilike(f"%{search}%"),
+                FirewallPolicy.policy_package.ilike(f"%{search}%"),
+                FirewallPolicy.original_filename.ilike(f"%{search}%"),
+            )
+        )
     total = q.count()
+    sort_col = _POLICY_SORTS[sort_field]
+    if direction == "desc":
+        sort_col = sort_col.desc()
     policies = (
-        q.order_by(FirewallPolicy.upload_date.desc())
+        q.order_by(sort_col)
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
@@ -840,7 +868,7 @@ def get_rules(
     zero_hits: Optional[bool] = None,
     has_findings: Optional[bool] = None,
     has_any: Optional[bool] = None,       # any source/dest/service
-    min_risk: Optional[int] = None,       # minimum risk score
+    min_risk: Optional[int] = Query(None, ge=0, le=100),       # minimum risk score
     sort_by: Optional[str] = None,        # rule_number|risk_score|hit_count|rule_name
     sort_dir: Optional[str] = None,       # asc|desc
     export: Optional[bool] = None,        # return CSV
@@ -848,6 +876,11 @@ def get_rules(
     user: User = Depends(get_current_user),
 ):
     _authz_policy(policy_id, db, user)
+    sort_by, sort_dir = validate_sort(
+        sort_by, sort_dir,
+        ("rule_number", "risk_score", "hit_count", "rule_name"),
+        "rule_number",
+    )
     q = db.query(FirewallRule).filter(FirewallRule.policy_id == policy_id)
 
     if search:
@@ -861,14 +894,18 @@ def get_rules(
         )
     if action:
         # Support comma-separated list (e.g. "accept,allow,permit") and case-insensitive match
-        action_values = [a.strip().lower() for a in action.split(",") if a.strip()]
+        action_values = [
+            a.lower() for a in validate_csv_choices(
+                action.lower(), ("accept", "allow", "permit", "deny", "drop", "reject"), "action"
+            )
+        ]
         q = q.filter(func.lower(FirewallRule.action).in_(action_values))
     if enabled is not None:
         q = q.filter(FirewallRule.enabled == enabled)
     if zero_hits:
         q = q.filter(
             FirewallRule.enabled == True,
-            or_(FirewallRule.hit_count == 0, FirewallRule.hit_count == None),
+            FirewallRule.hit_count == 0,
         )
     if min_risk is not None:
         q = q.filter(FirewallRule.risk_score >= min_risk)
@@ -880,8 +917,8 @@ def get_rules(
         "rule_name": FirewallRule.rule_name,
         "rule_number": FirewallRule.rule_number,
     }
-    sort_col = sort_col_map.get(sort_by or "rule_number", FirewallRule.rule_number)
-    if (sort_dir or "asc") == "desc":
+    sort_col = sort_col_map[sort_by]
+    if sort_dir == "desc":
         sort_col = sort_col.desc()
 
     # Pre-load finding counts for this policy (needed for has_findings filter too)

@@ -16,6 +16,7 @@ from app.security.identity import (
 )
 from app.security.rbac import CAP_COMMENT
 from pydantic import BaseModel
+from app.api.common import validate_choice
 
 router = APIRouter(prefix="/api/findings", tags=["findings"])
 
@@ -95,6 +96,11 @@ def list_findings(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    validate_choice(severity, ("Critical", "High", "Medium", "Low", "Informational"), "severity")
+    validate_choice(confidence, ("High", "Medium", "Low"), "confidence")
+    validate_choice(status, tuple(VALID_STATUSES), "status")
+    validate_choice(priority, tuple(VALID_PRIORITIES), "priority")
+
     q = db.query(Finding)
 
     # Tenant isolation: restrict to policies owned by customers this user may access.
@@ -117,6 +123,12 @@ def list_findings(
         q = q.filter(Finding.policy_id.in_(scoped_policy_ids))
 
     if policy_id:
+        policy = db.query(FirewallPolicy).filter(FirewallPolicy.id == policy_id).first()
+        if not policy:
+            raise HTTPException(status_code=404, detail="Policy not found")
+        require_customer_access(db, user, policy.customer_id)
+        if customer_id and policy.customer_id != customer_id:
+            raise HTTPException(status_code=404, detail="Policy not found for customer")
         q = q.filter(Finding.policy_id == policy_id)
     if confidence:
         q = q.filter(Finding.confidence == confidence)

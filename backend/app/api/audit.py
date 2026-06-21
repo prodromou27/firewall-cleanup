@@ -3,13 +3,13 @@ import json
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.audit import AuditEvent
 from app.models.user import User
-from app.security.identity import require_capability, accessible_customer_ids
+from app.security.identity import require_capability, require_customer_access, accessible_customer_ids
 from app.security.rbac import CAP_VIEW_AUDIT
 
 router = APIRouter(prefix="/api/audit", tags=["audit"])
@@ -22,7 +22,7 @@ def _parse_dt(value: Optional[str]) -> Optional[datetime]:
         # Accept date (YYYY-MM-DD) or full ISO timestamp.
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
-        return None
+        raise HTTPException(status_code=400, detail=f"Invalid datetime value: {value}")
 
 
 def _serialize(e: AuditEvent) -> dict:
@@ -78,6 +78,7 @@ def list_audit_events(
     if actor:
         q = q.filter(AuditEvent.actor_email.ilike(f"%{actor}%"))
     if customer_id:
+        require_customer_access(db, user, customer_id)
         q = q.filter(AuditEvent.customer_id == customer_id)
     since_dt = _parse_dt(since)
     if since_dt:

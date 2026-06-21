@@ -1,6 +1,6 @@
 """Policy revision history — change tracking (Tufin-style)."""
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.revision import PolicyRevision
@@ -31,22 +31,37 @@ def _revision_customer_id(r: PolicyRevision, db: Session) -> Optional[str]:
 def list_revisions(
     policy_id: Optional[str] = None,
     device_id: Optional[str] = None,
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     q = db.query(PolicyRevision)
     if policy_id:
+        p = db.query(FirewallPolicy).filter(FirewallPolicy.id == policy_id).first()
+        if not p:
+            raise HTTPException(status_code=404, detail="Policy not found")
+        require_customer_access(db, user, p.customer_id)
         q = q.filter(PolicyRevision.policy_id == policy_id)
     if device_id:
+        d = db.query(FirewallDevice).filter(FirewallDevice.id == device_id).first()
+        if not d:
+            raise HTTPException(status_code=404, detail="Device not found")
+        require_customer_access(db, user, d.customer_id)
         q = q.filter(PolicyRevision.device_id == device_id)
-    revisions = q.order_by(PolicyRevision.synced_at.desc()).limit(limit).all()
 
-    # Per-user tenant filtering: drop revisions whose owning customer is out of scope.
+    # Per-user tenant filtering before the limit so result size is predictable.
     allowed = accessible_customer_ids(db, user)  # None => global (all)
-    if allowed is not None:
-        allowed_set = set(allowed)
-        revisions = [r for r in revisions if _revision_customer_id(r, db) in allowed_set]
+    if allowed is not None and not (policy_id or device_id):
+        if not allowed:
+            return []
+        policy_ids = [pid for (pid,) in db.query(FirewallPolicy.id).filter(FirewallPolicy.customer_id.in_(allowed)).all()]
+        device_ids = [did for (did,) in db.query(FirewallDevice.id).filter(FirewallDevice.customer_id.in_(allowed)).all()]
+        q = q.filter(
+            (PolicyRevision.policy_id.in_(policy_ids)) |
+            (PolicyRevision.device_id.in_(device_ids))
+        )
+
+    revisions = q.order_by(PolicyRevision.synced_at.desc()).limit(limit).all()
     return [_rev_dict(r) for r in revisions]
 
 

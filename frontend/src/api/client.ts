@@ -79,8 +79,26 @@ export const getAuditEvents = (params?: Record<string, string | number>) =>
     .then(r => r.data as { total: number; page: number; page_size: number; events: AuditEvent[] })
 
 // Customers
-export const getCustomers = (params?: Record<string, string>) =>
-  api.get('/customers', { params }).then(r => r.data)
+export interface Customer {
+  id: string
+  name: string
+  description?: string | null
+  contact_name?: string | null
+  contact_email?: string | null
+  industry?: string | null
+  status: string
+  tags?: string | null
+  notes?: string | null
+  total_policies: number
+  total_rules: number
+  total_findings: number
+  high_findings: number
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export const getCustomers = (params?: Record<string, string | number>) =>
+  api.get('/customers', { params: params as Record<string, string> }).then(r => r.data as Customer[])
 
 export const getCustomer = (id: string) =>
   api.get(`/customers/${id}`).then(r => r.data)
@@ -98,11 +116,41 @@ export const deleteCustomer = (id: string) =>
   api.delete(`/customers/${id}`).then(r => r.data)
 
 // Policies
-export const getPolicies = (params?: Record<string, string>) =>
+export interface PolicySummary {
+  id: string
+  customer_id: string
+  customer_name: string
+  firewall_name: string
+  vendor: string
+  policy_package?: string | null
+  upload_date?: string | null
+  original_filename?: string | null
+  rule_count: number
+  object_count: number
+  finding_count: number
+  high_finding_count: number
+  analysis_status: string
+  analysis_error?: string | null
+  complexity_score?: number | null
+  cleanup_readiness_score?: number | null
+  health_score?: number | null
+}
+
+export interface PaginatedPolicies {
+  total: number
+  page: number
+  page_size: number
+  policies: PolicySummary[]
+}
+
+export const getPolicies = (params?: Record<string, string | number>) =>
   api.get('/policies', { params }).then(r =>
     // API returns paginated wrapper; unwrap for backwards compat with list consumers
-    Array.isArray(r.data) ? r.data : (r.data.policies ?? r.data)
+    (Array.isArray(r.data) ? r.data : (r.data.policies ?? r.data)) as PolicySummary[]
   )
+
+export const getPoliciesPage = (params?: Record<string, string | number>) =>
+  api.get('/policies', { params }).then(r => r.data as PaginatedPolicies)
 
 export const getPolicy = (id: string) =>
   api.get(`/policies/${id}`).then(r => r.data)
@@ -189,8 +237,16 @@ export const getRule = (policyId: string, ruleId: string) =>
   api.get(`/policies/${policyId}/rules/${ruleId}`).then(r => r.data)
 
 // Findings
+export interface FindingListResponse {
+  total: number
+  page: number
+  page_size: number
+  severity_counts: Record<string, number>
+  findings: Array<Record<string, unknown>>
+}
+
 export const getFindings = (params?: Record<string, string | number>) =>
-  api.get('/findings', { params: params as Record<string, string> }).then(r => r.data)
+  api.get('/findings', { params: params as Record<string, string> }).then(r => r.data as FindingListResponse)
 
 export const getFinding = (id: string) =>
   api.get(`/findings/${id}`).then(r => r.data)
@@ -221,8 +277,14 @@ export const bulkUpdateFindings = (
 }
 
 // Objects
+export interface ObjectListResponse {
+  total: number
+  page: number
+  page_size: number
+  objects: Array<Record<string, unknown>>
+}
 export const getObjects = (params?: Record<string, string | number>) =>
-  api.get('/objects', { params: params as Record<string, string> }).then(r => r.data)
+  api.get('/objects', { params: params as Record<string, string> }).then(r => r.data as ObjectListResponse)
 
 // Upload
 export const uploadPolicy = (formData: FormData) =>

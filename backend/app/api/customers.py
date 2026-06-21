@@ -14,6 +14,7 @@ from app.security.identity import (
 )
 from app.security.rbac import CAP_MANAGE_CUSTOMERS
 from app.security.audit import audit_log
+from app.api.common import validate_choice, validate_sort
 
 router = APIRouter(prefix="/api/customers", tags=["customers"])
 
@@ -26,6 +27,9 @@ class CustomerCreate(BaseModel):
     industry: Optional[str] = None
     tags: Optional[str] = None
     notes: Optional[str] = None
+
+    def normalized_name(self) -> str:
+        return self.name.strip()
 
 
 class CustomerUpdate(BaseModel):
@@ -43,9 +47,19 @@ class CustomerUpdate(BaseModel):
 def list_customers(
     status: Optional[str] = None,
     search: Optional[str] = None,
+    sort_by: Optional[str] = None,
+    sort_dir: Optional[str] = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    validate_choice(status, ("active", "inactive", "archived"), "status")
+    _CUSTOMER_SORTS = {
+        "name": Customer.name,
+        "status": Customer.status,
+        "created_at": Customer.created_at,
+        "updated_at": Customer.updated_at,
+    }
+    sort_field, direction = validate_sort(sort_by, sort_dir, tuple(_CUSTOMER_SORTS), "name")
     q = db.query(Customer)
     if status:
         q = q.filter(Customer.status == status)
@@ -55,7 +69,10 @@ def list_customers(
     allowed = accessible_customer_ids(db, user)
     if allowed is not None:
         q = q.filter(Customer.id.in_(allowed)) if allowed else q.filter(False)
-    customers = q.order_by(Customer.name).all()
+    sort_col = _CUSTOMER_SORTS[sort_field]
+    if direction == "desc":
+        sort_col = sort_col.desc()
+    customers = q.order_by(sort_col).all()
     return [_customer_summary(c) for c in customers]
 
 
@@ -65,13 +82,16 @@ def create_customer(
     db: Session = Depends(get_db),
     user: User = Depends(require_capability(CAP_MANAGE_CUSTOMERS)),
 ):
-    existing = db.query(Customer).filter(Customer.name == body.name).first()
+    name = body.normalized_name()
+    if not name:
+        raise HTTPException(status_code=400, detail="Customer name is required.")
+    existing = db.query(Customer).filter(func.lower(Customer.name) == name.lower()).first()
     if existing:
-        raise HTTPException(status_code=409, detail=f"Customer '{body.name}' already exists.")
+        raise HTTPException(status_code=409, detail=f"Customer '{name}' already exists.")
     import uuid
     c = Customer(
         id=str(uuid.uuid4()),
-        name=body.name,
+        name=name,
         description=body.description,
         contact_name=body.contact_name,
         contact_email=body.contact_email,
@@ -112,7 +132,17 @@ def update_customer(
     if not c:
         raise HTTPException(status_code=404, detail="Customer not found")
     if body.name is not None:
-        c.name = body.name
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Customer name is required.")
+        existing = (
+            db.query(Customer)
+            .filter(func.lower(Customer.name) == name.lower(), Customer.id != customer_id)
+            .first()
+        )
+        if existing:
+            raise HTTPException(status_code=409, detail=f"Customer '{name}' already exists.")
+        c.name = name
     if body.description is not None:
         c.description = body.description
     if body.contact_name is not None:
@@ -122,6 +152,7 @@ def update_customer(
     if body.industry is not None:
         c.industry = body.industry
     if body.status is not None:
+        validate_choice(body.status, ("active", "inactive", "archived"), "status")
         c.status = body.status
     if body.tags is not None:
         c.tags = body.tags

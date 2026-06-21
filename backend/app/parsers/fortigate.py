@@ -131,11 +131,12 @@ class FortiGateParser(BaseParser):
             line = lines[i].strip()
             if line.startswith("edit "):
                 entry_id = line[5:].strip().strip('"')
-                entry = {"_id": entry_id, "_fields": {}}
+                entry = {"_id": entry_id, "_fields": {}, "_raw_lines": [line]}
                 i += 1
                 depth = 1
                 while i < len(lines):
                     l = lines[i].strip()
+                    entry["_raw_lines"].append(lines[i])
                     if l == "next":
                         break
                     if l.startswith("set "):
@@ -167,6 +168,7 @@ class FortiGateParser(BaseParser):
         entries = self._parse_entries(content)
         for entry in entries:
             f = entry["_fields"]
+            raw = {**f, "_id": entry["_id"], "_raw_lines": entry.get("_raw_lines", [])}
             name = entry["_id"]
             subnet = f.get("subnet", "")
             obj_type = f.get("type", "ipmask")
@@ -183,7 +185,7 @@ class FortiGateParser(BaseParser):
                     "port_end": None,
                     "members": [],
                     "comment": f.get("comment", ""),
-                    "raw_data": f,
+                    "raw_data": raw,
                 })
             elif obj_type == "iprange":
                 start = f.get("start-ip", "")
@@ -197,7 +199,7 @@ class FortiGateParser(BaseParser):
                     "port_end": None,
                     "members": [],
                     "comment": f.get("comment", ""),
-                    "raw_data": f,
+                    "raw_data": raw,
                 })
             elif obj_type == "fqdn":
                 objects.append({
@@ -209,7 +211,7 @@ class FortiGateParser(BaseParser):
                     "port_end": None,
                     "members": [],
                     "comment": f.get("comment", ""),
-                    "raw_data": f,
+                    "raw_data": raw,
                 })
             else:
                 objects.append({
@@ -221,7 +223,7 @@ class FortiGateParser(BaseParser):
                     "port_end": None,
                     "members": [],
                     "comment": f.get("comment", ""),
-                    "raw_data": f,
+                    "raw_data": raw,
                 })
         return objects
 
@@ -230,6 +232,7 @@ class FortiGateParser(BaseParser):
         entries = self._parse_entries(content)
         for entry in entries:
             f = entry["_fields"]
+            raw = {**f, "_id": entry["_id"], "_raw_lines": entry.get("_raw_lines", [])}
             name = entry["_id"]
             # Members are space-separated quoted names
             member_str = f.get("member", "")
@@ -243,7 +246,7 @@ class FortiGateParser(BaseParser):
                 "port_end": None,
                 "members": members,
                 "comment": f.get("comment", ""),
-                "raw_data": f,
+                "raw_data": raw,
             })
         return objects
 
@@ -252,6 +255,7 @@ class FortiGateParser(BaseParser):
         entries = self._parse_entries(content)
         for entry in entries:
             f = entry["_fields"]
+            raw = {**f, "_id": entry["_id"], "_raw_lines": entry.get("_raw_lines", [])}
             name = entry["_id"]
             protocol = f.get("protocol", "TCP/UDP/SCTP").upper()
 
@@ -270,7 +274,7 @@ class FortiGateParser(BaseParser):
                     "port_end": pe,
                     "members": [],
                     "comment": f.get("comment", ""),
-                    "raw_data": f,
+                    "raw_data": raw,
                 })
             elif udp_portrange:
                 ps, pe = self._parse_portrange(udp_portrange)
@@ -283,7 +287,7 @@ class FortiGateParser(BaseParser):
                     "port_end": pe,
                     "members": [],
                     "comment": f.get("comment", ""),
-                    "raw_data": f,
+                    "raw_data": raw,
                 })
             elif "ICMP" in protocol:
                 objects.append({
@@ -295,7 +299,7 @@ class FortiGateParser(BaseParser):
                     "port_end": 0,
                     "members": [],
                     "comment": f.get("comment", ""),
-                    "raw_data": f,
+                    "raw_data": raw,
                 })
             else:
                 objects.append({
@@ -307,7 +311,7 @@ class FortiGateParser(BaseParser):
                     "port_end": 65535,
                     "members": [],
                     "comment": f.get("comment", ""),
-                    "raw_data": f,
+                    "raw_data": raw,
                 })
         return objects
 
@@ -316,6 +320,7 @@ class FortiGateParser(BaseParser):
         entries = self._parse_entries(content)
         for entry in entries:
             f = entry["_fields"]
+            raw = {**f, "_id": entry["_id"], "_raw_lines": entry.get("_raw_lines", [])}
             name = entry["_id"]
             member_str = f.get("member", "")
             members = self._parse_space_list(member_str)
@@ -328,7 +333,7 @@ class FortiGateParser(BaseParser):
                 "port_end": None,
                 "members": members,
                 "comment": f.get("comment", ""),
-                "raw_data": f,
+                "raw_data": raw,
             })
         return objects
 
@@ -339,6 +344,7 @@ class FortiGateParser(BaseParser):
 
         for idx, entry in enumerate(entries):
             f = entry["_fields"]
+            raw = {**f, "_id": entry["_id"], "_raw_lines": entry.get("_raw_lines", [])}
             rule_id = entry["_id"]
             rule_name = f.get("name", f"Policy {rule_id}")
 
@@ -406,7 +412,7 @@ class FortiGateParser(BaseParser):
                 "last_hit": last_hit,
                 "first_hit": first_hit,
                 "install_on": [],
-                "raw_data": f,
+                "raw_data": raw,
             })
         return rules
 

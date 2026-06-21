@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
 from app.database import get_db
 from app.config import settings
@@ -119,7 +120,6 @@ def _accessible_template_q(db: Session, user: User):
     allowed = accessible_customer_ids(db, user)
     q = db.query(ReportTemplate)
     if allowed is not None:
-        from sqlalchemy import or_
         q = q.filter(or_(ReportTemplate.customer_id.is_(None), ReportTemplate.customer_id.in_(allowed or ["__none__"])))
     return q
 
@@ -133,12 +133,33 @@ def _authz_template(db: Session, user: User, tid: str) -> ReportTemplate:
     return t
 
 
+def _authz_template_write(db: Session, user: User, tid: str) -> ReportTemplate:
+    """Authorize template mutation without letting tenant users alter global state."""
+    t = _authz_template(db, user, tid)
+    if t.customer_id is None and accessible_customer_ids(db, user) is not None:
+        raise HTTPException(
+            status_code=403,
+            detail="Global report templates can only be modified by global administrators.",
+        )
+    return t
+
+
 def _authz_policy(db: Session, user: User, policy_id: str) -> FirewallPolicy:
     p = db.query(FirewallPolicy).filter(FirewallPolicy.id == policy_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Policy not found")
     require_customer_access(db, user, p.customer_id)
     return p
+
+
+def _report_customer_id(db: Session, report: GeneratedReport) -> Optional[str]:
+    if report.customer_id:
+        return report.customer_id
+    if report.policy_id:
+        policy = db.query(FirewallPolicy.customer_id).filter(FirewallPolicy.id == report.policy_id).first()
+        if policy:
+            return policy[0]
+    return None
 
 
 def _safe_report_path(path: str) -> bool:
@@ -204,6 +225,11 @@ def create_template(body: TemplateIn, db: Session = Depends(get_db),
                     user: User = Depends(require_capability(CAP_GENERATE_REPORT))):
     if body.customer_id:
         require_customer_access(db, user, body.customer_id)
+    elif accessible_customer_ids(db, user) is not None:
+        raise HTTPException(
+            status_code=403,
+            detail="Tenant users must create report templates for an authorized customer.",
+        )
     data = body.dict(exclude={"sections"})
     t = ReportTemplate(created_by=user.email, **data)
     db.add(t); db.flush()
@@ -222,7 +248,9 @@ def get_template(tid: str, db: Session = Depends(get_db), user: User = Depends(r
 @templates_router.put("/{tid}")
 def update_template(tid: str, body: TemplateIn, db: Session = Depends(get_db),
                     user: User = Depends(require_capability(CAP_GENERATE_REPORT))):
-    t = _authz_template(db, user, tid)
+    t = _authz_template_write(db, user, tid)
+    if body.customer_id != t.customer_id:
+        raise HTTPException(status_code=400, detail="Template customer_id cannot be changed.")
     for k, v in body.dict(exclude={"sections", "customer_id"}).items():
         setattr(t, k, v)
     _set_sections(db, t, body.sections)
@@ -234,7 +262,7 @@ def update_template(tid: str, body: TemplateIn, db: Session = Depends(get_db),
 @templates_router.delete("/{tid}")
 def delete_template(tid: str, db: Session = Depends(get_db),
                     user: User = Depends(require_capability(CAP_GENERATE_REPORT))):
-    t = _authz_template(db, user, tid)
+    t = _authz_template_write(db, user, tid)
     db.delete(t); db.commit()
     audit_log("report.template_delete", user_id=user.id, email=user.email, template_id=tid)
     return {"deleted": tid}
@@ -243,7 +271,7 @@ def delete_template(tid: str, db: Session = Depends(get_db),
 @templates_router.post("/{tid}/clone")
 def clone_template(tid: str, db: Session = Depends(get_db),
                    user: User = Depends(require_capability(CAP_GENERATE_REPORT))):
-    t = _authz_template(db, user, tid)
+    t = _authz_template_write(db, user, tid)
     clone = ReportTemplate(
         name=f"{t.name} (copy)", description=t.description, template_type=t.template_type,
         audience=t.audience, is_customer_facing=t.is_customer_facing,
@@ -268,8 +296,13 @@ def clone_template(tid: str, db: Session = Depends(get_db),
 @templates_router.post("/{tid}/default")
 def set_default(tid: str, db: Session = Depends(get_db),
                 user: User = Depends(require_capability(CAP_GENERATE_REPORT))):
-    t = _authz_template(db, user, tid)
-    for other in db.query(ReportTemplate).filter(ReportTemplate.audience == t.audience).all():
+    t = _authz_template_write(db, user, tid)
+    q = db.query(ReportTemplate).filter(ReportTemplate.audience == t.audience)
+    if t.customer_id is None:
+        q = q.filter(ReportTemplate.customer_id.is_(None))
+    else:
+        q = q.filter(ReportTemplate.customer_id == t.customer_id)
+    for other in q.all():
         other.is_default = False
     t.is_default = True
     db.commit()
@@ -435,8 +468,7 @@ def download_report(report_id: str, db: Session = Depends(get_db),
     r = db.query(GeneratedReport).filter(GeneratedReport.id == report_id).first()
     if not r:
         raise HTTPException(status_code=404, detail="Report not found")
-    if r.customer_id:
-        require_customer_access(db, user, r.customer_id)
+    require_customer_access(db, user, _report_customer_id(db, r))
     if not r.file_path or not _safe_report_path(r.file_path) or not os.path.exists(r.file_path):
         raise HTTPException(status_code=410, detail="Report file no longer available; regenerate it.")
     from app.reporting.exporters import _MEDIA
@@ -451,8 +483,7 @@ def get_report(report_id: str, db: Session = Depends(get_db),
     r = db.query(GeneratedReport).filter(GeneratedReport.id == report_id).first()
     if not r:
         raise HTTPException(status_code=404, detail="Report not found")
-    if r.customer_id:
-        require_customer_access(db, user, r.customer_id)
+    require_customer_access(db, user, _report_customer_id(db, r))
     return {"id": r.id, "report_type": r.report_type, "export_format": r.export_format,
             "customer_id": r.customer_id, "firewall_name": r.firewall_name, "file_name": r.file_name,
             "generated_at": r.generated_at.isoformat() if r.generated_at else None,

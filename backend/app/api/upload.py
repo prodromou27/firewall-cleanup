@@ -163,6 +163,19 @@ async def upload_policy(
             pass
         raise HTTPException(status_code=422, detail=f"Failed to parse file: {str(e)}")
 
+    if not rules and not objects:
+        try:
+            os.remove(file_path)
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "No firewall rules or objects were parsed from the uploaded file.",
+                "warnings": warnings,
+            },
+        )
+
     # ── Persist ───────────────────────────────────────────────────────────────
     policy = FirewallPolicy(
         id=str(uuid.uuid4()),

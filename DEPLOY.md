@@ -182,7 +182,11 @@ openssl rand -base64 32 | tr '+/' '-_'
 See `.env.example` for the full list. Notable:
 - `DATABASE_URL` is assembled in compose as
   `postgresql+psycopg2://<user>:<pass>@db:5432/<db>`.
-- `ENVIRONMENT=production` disables the interactive API docs.
+- `ENVIRONMENT` controls the security posture. `production` disables the API docs
+  **and** enforces the HTTPS gate (HTTPS-only cookies + non-localhost origins) —
+  use it only behind TLS. For a plain-HTTP DEV/LAN box use `development` so
+  http/localhost origins are allowed. The installer sets this automatically:
+  `development` for plain HTTP, `production` when `APP_DOMAIN` (TLS) is set.
 - `ALLOWED_ORIGINS` must include the URL users hit (e.g. `http://localhost:8080`).
 - `ALLOWED_ORIGIN_SUBNETS` optionally allows whole LAN CIDRs (also editable at
   runtime in Settings → Security).

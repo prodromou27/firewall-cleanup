@@ -34,7 +34,14 @@ fi
 APP_DOMAIN="${APP_DOMAIN:-}"
 ACME_EMAIL="${ACME_EMAIL:-}"
 TLS=0; [ -n "$APP_DOMAIN" ] && TLS=1
-if [ "$TLS" = "1" ]; then COOKIE_SECURE="${COOKIE_SECURE:-true}"; else COOKIE_SECURE="${COOKIE_SECURE:-false}"; fi
+# Plain HTTP (DEV/LAN) runs as "development" so the production HTTPS security gate
+# (validate_security_posture) is not tripped by http/localhost origins. TLS mode
+# runs as "production" (docs off, HTTPS-only cookies, real origin).
+if [ "$TLS" = "1" ]; then
+  COOKIE_SECURE="${COOKIE_SECURE:-true}";  APP_ENV="${ENVIRONMENT:-production}"
+else
+  COOKIE_SECURE="${COOKIE_SECURE:-false}"; APP_ENV="${ENVIRONMENT:-development}"
+fi
 
 COMPOSE=(-f docker-compose.yml)
 [ "$TLS" = "1" ] && COMPOSE+=(-f docker-compose.tls.yml)
@@ -69,7 +76,7 @@ POSTGRES_PASSWORD=$(gen_pass)
 POSTGRES_DB=policyinsight
 
 SECRET_KEY=$(gen_key)
-ENVIRONMENT=production
+ENVIRONMENT=${APP_ENV}
 ALLOWED_ORIGINS=${ORIGINS}
 ALLOWED_ORIGIN_SUBNETS=
 COOKIE_SECURE=${COOKIE_SECURE}
@@ -88,6 +95,14 @@ EOF
   NEW_ENV=1
 else
   log ".env already exists — keeping existing secrets."
+  # A present-but-incomplete .env (e.g. copied from .env.example) makes compose
+  # fall back to insecure defaults and the backend crash-loops. Fail loud instead.
+  if ! grep -qE '^SECRET_KEY=.+' "$ENV_FILE"; then
+    die ".env exists but SECRET_KEY is empty/missing. Run 'rm .env' and re-run this script to regenerate it, or set SECRET_KEY in .env."
+  fi
+  if grep -qE '^ENVIRONMENT=production' "$ENV_FILE" && grep -qE '^COOKIE_SECURE=false' "$ENV_FILE"; then
+    die ".env has ENVIRONMENT=production with COOKIE_SECURE=false — the security gate will reject this. For plain HTTP set ENVIRONMENT=development; for HTTPS set COOKIE_SECURE=true and an https origin. Or 'rm .env' and re-run."
+  fi
   NEW_ENV=0
 fi
 

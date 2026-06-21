@@ -68,10 +68,64 @@ def default_template_specs():
     ]
 
 
+# Product-named text that early seeds stored; used to detect un-edited rows so
+# the de-branding fix-up never clobbers a user's own edits.
+_OLD_METHODOLOGY = (
+    "PolicyInsight ingests the exported firewall configuration and evaluates it against "
+    "a library of rule- and object-level checks (permissiveness, exposure, shadowing, "
+    "duplication, usage, logging, documentation and hygiene). Findings are scored by "
+    "severity and confidence using available hit-count and object-expansion data. No "
+    "changes are made to the firewall during analysis."
+)
+_OLD_DISCLAIMER = (
+    "This report was generated using read-only firewall policy data available to "
+    "PolicyInsight at the time of analysis. PolicyInsight does not perform firewall "
+    "changes and does not delete, disable, modify, reorder, or install firewall "
+    "policies or objects. The findings and recommendations in this report are intended "
+    "to support review and planning activities only. Any firewall changes must be "
+    "validated by the responsible technical teams, approved through the appropriate "
+    "change management process, and implemented outside PolicyInsight."
+)
+
+
+def debrand_seeded_templates(db) -> int:
+    """Strip the product name from system-seeded global templates already in the DB.
+
+    Idempotent and conservative: only touches rows created_by 'system' with no
+    customer, and only replaces values still equal to the old hardcoded seeds
+    (so user edits are never overwritten). Returns the number of rows changed.
+    """
+    from app.models.report import ReportTemplate
+    changed = 0
+    rows = (db.query(ReportTemplate)
+            .filter(ReportTemplate.customer_id.is_(None),
+                    ReportTemplate.created_by == "system")
+            .all())
+    for t in rows:
+        touched = False
+        bc = dict(t.branding_config or {})
+        if bc.get("company_name") == "PolicyInsight":
+            bc["company_name"] = ""
+            t.branding_config = bc
+            touched = True
+        if t.methodology_text == _OLD_METHODOLOGY:
+            t.methodology_text = _METHODOLOGY
+            touched = True
+        if t.disclaimer_text == _OLD_DISCLAIMER:
+            t.disclaimer_text = S.READ_ONLY_DISCLAIMER
+            touched = True
+        if touched:
+            changed += 1
+    if changed:
+        db.commit()
+    return changed
+
+
 def ensure_default_templates(db) -> int:
     """Create the global default templates if none exist. Returns count created."""
     from app.models.report import ReportTemplate, ReportTemplateSection
     if db.query(ReportTemplate).count() > 0:
+        debrand_seeded_templates(db)
         return 0
     created = 0
     for tmpl_dict, section_keys in default_template_specs():

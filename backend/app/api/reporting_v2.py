@@ -440,19 +440,65 @@ def list_policy_analysis_runs(
 
 
 @reports_router.get("")
-def list_reports(customer_id: Optional[str] = None, limit: int = Query(100, ge=1, le=500),
-                 db: Session = Depends(get_db), user: User = Depends(require_capability(CAP_VIEW))):
+def list_reports(
+    customer_id: Optional[str] = None,
+    search: Optional[str] = None,
+    export_format: Optional[str] = None,
+    sort_by: Optional[str] = None,
+    sort_dir: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
+    limit: Optional[int] = Query(None, ge=1, le=500),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_capability(CAP_VIEW)),
+):
     allowed = accessible_customer_ids(db, user)
     q = db.query(GeneratedReport)
     if allowed is not None:
         if not allowed:
-            return {"reports": []}
+            return {"total": 0, "page": page, "page_size": page_size, "reports": []}
         q = q.filter(GeneratedReport.customer_id.in_(allowed))
     if customer_id:
         require_customer_access(db, user, customer_id)
         q = q.filter(GeneratedReport.customer_id == customer_id)
-    rows = q.order_by(GeneratedReport.generated_at.desc()).limit(limit).all()
-    return {"reports": [{
+    if search:
+        like = f"%{search.strip()}%"
+        q = q.filter(or_(
+            GeneratedReport.firewall_name.ilike(like),
+            GeneratedReport.file_name.ilike(like),
+            GeneratedReport.report_type.ilike(like),
+            GeneratedReport.generated_by.ilike(like),
+        ))
+    if export_format:
+        q = q.filter(GeneratedReport.export_format == export_format)
+
+    sort_map = {
+        "generated_at": GeneratedReport.generated_at,
+        "firewall_name": GeneratedReport.firewall_name,
+        "report_type": GeneratedReport.report_type,
+        "export_format": GeneratedReport.export_format,
+        "generated_by": GeneratedReport.generated_by,
+    }
+    if page < 1:
+        raise HTTPException(status_code=422, detail="page must be >= 1")
+    if page_size < 1 or page_size > 250:
+        raise HTTPException(status_code=422, detail="page_size must be between 1 and 250")
+    if sort_by is None:
+        sort_by = "generated_at"
+    if sort_by not in sort_map:
+        raise HTTPException(status_code=422, detail="Invalid sort_by")
+    if sort_dir is None:
+        sort_dir = "desc"
+    if sort_dir not in ("asc", "desc"):
+        raise HTTPException(status_code=422, detail="Invalid sort_dir")
+    sort_col = sort_map[sort_by]
+    if sort_dir == "desc":
+        sort_col = sort_col.desc()
+
+    total = q.count()
+    effective_page_size = limit or page_size
+    rows = q.order_by(sort_col).offset((page - 1) * effective_page_size).limit(effective_page_size).all()
+    return {"total": total, "page": page, "page_size": effective_page_size, "reports": [{
         "id": r.id, "report_type": r.report_type, "export_format": r.export_format,
         "customer_id": r.customer_id, "firewall_name": r.firewall_name, "file_name": r.file_name,
         "generated_by": r.generated_by,

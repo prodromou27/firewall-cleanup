@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { FileText, Plus, Settings2, Download, RefreshCw } from 'lucide-react'
+import { FileText, Plus, Settings2, Download, RefreshCw, Search, ArrowUpDown } from 'lucide-react'
 import {
-  listGeneratedReports, listReportTemplates, reportDownloadUrl,
+  listGeneratedReportsPage, listReportTemplates, reportDownloadUrl,
   type GeneratedReportRow, type ReportTemplate,
 } from '../../api/client'
 import { EmptyState, LoadingState } from '../../components/ui/page-state'
+
+const REPORT_PAGE_SIZE = 50
 
 const FMT_LABEL: Record<string, string> = {
   pdf: 'PDF', docx: 'Word', xlsx: 'Excel', html: 'HTML', csv: 'CSV', json: 'JSON',
@@ -38,15 +40,40 @@ export function ReportsDashboard() {
   const [reports, setReports] = useState<GeneratedReportRow[]>([])
   const [templates, setTemplates] = useState<ReportTemplate[]>([])
   const [loading, setLoading] = useState(true)
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [search, setSearch] = useState('')
+  const [format, setFormat] = useState('')
+  const [sortBy, setSortBy] = useState('generated_at')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
   const load = () => {
     setLoading(true)
+    const p: Record<string, string | number> = {
+      page,
+      page_size: REPORT_PAGE_SIZE,
+      sort_by: sortBy,
+      sort_dir: sortDir,
+    }
+    if (search.trim()) p.search = search.trim()
+    if (format) p.export_format = format
     Promise.all([
-      listGeneratedReports().then(d => setReports(d.reports)).catch(() => setReports([])),
+      listGeneratedReportsPage(p).then(d => { setReports(d.reports); setTotal(d.total) }).catch(() => { setReports([]); setTotal(0) }),
       listReportTemplates().then(d => setTemplates(d.templates)).catch(() => setTemplates([])),
     ]).finally(() => setLoading(false))
   }
-  useEffect(load, [])
+  useEffect(load, [page, search, format, sortBy, sortDir])
+
+  const toggleSort = (field: string) => {
+    if (sortBy === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else {
+      setSortBy(field)
+      setSortDir(field === 'firewall_name' || field === 'report_type' ? 'asc' : 'desc')
+    }
+    setPage(1)
+  }
+
+  const pageCount = Math.max(1, Math.ceil(total / REPORT_PAGE_SIZE))
 
   return (
     <div>
@@ -95,6 +122,23 @@ export function ReportsDashboard() {
             <h2 className="text-sm font-semibold text-gray-700">Recent reports</h2>
             <button onClick={load} className="btn-secondary py-1 px-2 text-xs"><RefreshCw className="w-3.5 h-3.5" /> Refresh</button>
           </div>
+          <div className="filter-bar mb-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                value={search}
+                onChange={e => { setSearch(e.target.value); setPage(1) }}
+                className="pl-9 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm w-64 bg-gray-50 focus:bg-white"
+                placeholder="Search reports, firewall, user..."
+              />
+            </div>
+            <select value={format} onChange={e => { setFormat(e.target.value); setPage(1) }}
+              className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-gray-50 focus:bg-white">
+              <option value="">All Formats</option>
+              {Object.entries(FMT_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+            <span className="ml-auto text-xs text-gray-400">{total.toLocaleString()} reports</span>
+          </div>
           {loading ? (
             <LoadingState label="Loading reports..." />
           ) : reports.length === 0 ? (
@@ -105,12 +149,25 @@ export function ReportsDashboard() {
               action={<button onClick={() => navigate('/reports/new')} className="btn-primary"><Plus className="w-4 h-4" /> Create report</button>}
             />
           ) : (
-            <div className="table-shell">
+            <div className="table-shell table-scroll max-h-[70vh]">
               <table className="data-table">
-                <thead>
-                  <tr><th className="px-4 py-2.5">Type</th><th className="px-4 py-2.5">Firewall</th>
-                    <th className="px-4 py-2.5">Format</th><th className="px-4 py-2.5">Generated</th>
-                    <th className="px-4 py-2.5">By</th><th className="px-4 py-2.5"></th></tr>
+                <thead className="sticky top-0 z-10">
+                  <tr>
+                    {[
+                      ['Type', 'report_type'],
+                      ['Firewall', 'firewall_name'],
+                      ['Format', 'export_format'],
+                      ['Generated', 'generated_at'],
+                      ['By', 'generated_by'],
+                    ].map(([label, field]) => (
+                      <th key={field} className="px-4 py-2.5">
+                        <button onClick={() => toggleSort(field)} className="inline-flex items-center gap-1 hover:text-blue-600">
+                          {label}<ArrowUpDown className="w-3 h-3 opacity-50" />
+                        </button>
+                      </th>
+                    ))}
+                    <th className="px-4 py-2.5"></th>
+                  </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {reports.map(r => (
@@ -128,6 +185,13 @@ export function ReportsDashboard() {
                   ))}
                 </tbody>
               </table>
+              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 text-sm bg-gray-50">
+                <span className="text-gray-500">Page {page} of {pageCount}</span>
+                <div className="flex gap-2">
+                  <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="btn-secondary py-1 px-3 text-xs disabled:opacity-40">Prev</button>
+                  <button onClick={() => setPage(p => Math.min(pageCount, p + 1))} disabled={page === pageCount} className="btn-secondary py-1 px-3 text-xs disabled:opacity-40">Next</button>
+                </div>
+              </div>
             </div>
           )}
         </div>

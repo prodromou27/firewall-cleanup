@@ -5,10 +5,10 @@ import {
   Server, Plus, Trash2, RefreshCw, CheckCircle2, XCircle,
   AlertCircle, Clock, Wifi, WifiOff, Settings, X, Eye, EyeOff,
   Activity, History, Network, Cpu, MapPin, Shield, Info,
-  ChevronRight, Globe,
+  ChevronRight, Globe, Search,
 } from 'lucide-react'
 import {
-  getDevices, createDevice, updateDevice, deleteDevice,
+  getDevicesPage, createDevice, updateDevice, deleteDevice,
   testDevice, syncDevice, getDeviceSyncStatus, resetDeviceSync
 } from '../api/client'
 import type { FirewallDeviceT } from '../types'
@@ -19,6 +19,8 @@ import {
 } from '../components/ui/dialog'
 import { EmptyState, LoadingState } from '../components/ui/page-state'
 import { VendorBadge, VendorMark } from '../components/ui/vendor-badge'
+
+const DEVICE_PAGE_SIZE = 24
 
 // ── Status chip ─────────────────────────────────────────────────────────────
 function SyncStatusChip({ status }: { status: string }) {
@@ -1116,11 +1118,30 @@ export function Devices() {
   const [editing, setEditing] = useState<FirewallDeviceT | undefined>()
   const [syncingId, setSyncingId] = useState<string | null>(null)
   const [detailDevice, setDetailDevice] = useState<FirewallDeviceT | null>(null)
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [search, setSearch] = useState('')
+  const [vendorFilter, setVendorFilter] = useState('')
+  const [syncStatus, setSyncStatus] = useState('')
+  const [sortBy, setSortBy] = useState('created_at')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
   const load = useCallback(() => {
     setLoading(true)
-    getDevices(customerId || undefined).then(setDevices).finally(() => setLoading(false))
-  }, [customerId])
+    const p: Record<string, string | number> = {
+      page,
+      page_size: DEVICE_PAGE_SIZE,
+      sort_by: sortBy,
+      sort_dir: sortDir,
+    }
+    if (customerId) p.customer_id = customerId
+    if (search.trim()) p.search = search.trim()
+    if (vendorFilter) p.vendor = vendorFilter
+    if (syncStatus) p.sync_status = syncStatus
+    getDevicesPage(p)
+      .then(r => { setDevices(r.devices); setTotal(r.total) })
+      .finally(() => setLoading(false))
+  }, [customerId, page, search, vendorFilter, syncStatus, sortBy, sortDir])
 
   useEffect(() => { load() }, [load])
 
@@ -1176,6 +1197,8 @@ export function Devices() {
     } catch { /* ignore */ }
   }
 
+  const pageCount = Math.max(1, Math.ceil(total / DEVICE_PAGE_SIZE))
+
   return (
     <div className="p-8">
       <div className="flex items-center justify-between mb-8">
@@ -1201,6 +1224,41 @@ export function Devices() {
           It never modifies, deletes, or reorders firewall rules. All recommendations require manual review
           and change approval before implementation.
         </div>
+      </div>
+
+      <div className="filter-bar mb-5">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            value={search}
+            onChange={e => { setSearch(e.target.value); setPage(1) }}
+            className="pl-9 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm w-64 bg-gray-50 focus:bg-white"
+            placeholder="Search devices, host, vendor..."
+          />
+        </div>
+        <select value={vendorFilter} onChange={e => { setVendorFilter(e.target.value); setPage(1) }}
+          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-gray-50 focus:bg-white">
+          <option value="">All Vendors</option>
+          {['FortiGate', 'CheckPoint', 'PaloAlto', 'CiscoASA', 'HuaweiUSG'].map(v => <option key={v} value={v}>{v}</option>)}
+        </select>
+        <select value={syncStatus} onChange={e => { setSyncStatus(e.target.value); setPage(1) }}
+          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-gray-50 focus:bg-white">
+          <option value="">All Sync States</option>
+          {['never', 'running', 'ok', 'error'].map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <select value={`${sortBy}:${sortDir}`} onChange={e => {
+          const [field, dir] = e.target.value.split(':')
+          setSortBy(field)
+          setSortDir(dir as 'asc' | 'desc')
+          setPage(1)
+        }} className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-gray-50 focus:bg-white">
+          <option value="created_at:desc">Newest first</option>
+          <option value="name:asc">Name A-Z</option>
+          <option value="vendor:asc">Vendor A-Z</option>
+          <option value="last_sync_at:desc">Recently synced</option>
+          <option value="criticality:desc">Criticality high-low</option>
+        </select>
+        <span className="ml-auto text-xs text-gray-400">{total.toLocaleString()} devices</span>
       </div>
 
       {loading ? (
@@ -1234,6 +1292,13 @@ export function Devices() {
               onClick={() => setDetailDevice(d)}
             />
           ))}
+          <div className="md:col-span-2 xl:col-span-3 flex items-center justify-between px-1 py-3 text-sm">
+            <span className="text-gray-500">Page {page} of {pageCount}</span>
+            <div className="flex gap-2">
+              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="btn-secondary py-1 px-3 text-xs disabled:opacity-40">Prev</button>
+              <button onClick={() => setPage(p => Math.min(pageCount, p + 1))} disabled={page === pageCount} className="btn-secondary py-1 px-3 text-xs disabled:opacity-40">Next</button>
+            </div>
+          </div>
         </div>
       )}
 

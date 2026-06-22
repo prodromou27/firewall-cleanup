@@ -5,7 +5,7 @@ import {
   ChevronDown, ChevronUp, MessageSquare, Check, Filter,
   CheckSquare, Square, AlertTriangle, Shield, Clock, Copy,
   Eye, EyeOff, Layers, ZapOff, Wifi, Activity, Download, X,
-  Send, User, FileText,
+  Send, User, FileText, Search,
 } from 'lucide-react'
 import {
   getFindings, updateFinding, bulkUpdateFindings, getPolicies, getRemediation, type Remediation,
@@ -927,6 +927,7 @@ export function Findings() {
   const policyId = searchParams.get('policy_id') || ''
   const priority = searchParams.get('priority') || ''
   const assignedTo = searchParams.get('assigned_to') || ''
+  const search = searchParams.get('search') || ''
 
   const load = useCallback(() => {
     setLoading(true)
@@ -938,10 +939,11 @@ export function Findings() {
     if (status) p.status = status
     if (priority) p.priority = priority
     if (assignedTo) p.assigned_to = assignedTo
+    if (search) p.search = search
     getFindings(p)
       .then(r => { setFindings(r.findings); setTotal(r.total); setSeverityCounts(r.severity_counts || {}) })
       .finally(() => setLoading(false))
-  }, [page, customerId, policyId, severity, findingType, status, priority, assignedTo])
+  }, [page, customerId, policyId, severity, findingType, status, priority, assignedTo, search])
 
   useEffect(() => { load() }, [load])
   useEffect(() => {
@@ -971,7 +973,7 @@ export function Findings() {
     setSearchParams(p); setPage(1)
   }
 
-  const hasFilters = !!(severity || findingType || status || policyId || priority || assignedTo)
+  const hasFilters = !!(severity || findingType || status || policyId || priority || assignedTo || search)
   const mineActive = !!(assignedTo && user?.email && assignedTo === user.email)
   const toggleMine = () => setFilter('assigned_to', mineActive ? '' : (user?.email || ''))
 
@@ -988,6 +990,7 @@ export function Findings() {
       if (status) params.status = status
       if (priority) params.priority = priority
       if (assignedTo) params.assigned_to = assignedTo
+      if (search) params.search = search
       const url = getFindingsExportUrl(params)
       const res = await fetch(url, { credentials: 'include' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -1083,6 +1086,16 @@ export function Findings() {
       <div className="filter-bar mb-5">
         <Filter className="w-4 h-4 text-gray-400 mt-2 flex-shrink-0" />
 
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            value={search}
+            onChange={e => setFilter('search', e.target.value)}
+            className="pl-9 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm w-64 bg-gray-50 focus:bg-white"
+            placeholder="Search findings, evidence, recommendations..."
+          />
+        </div>
+
         <select
           value={policyId}
           onChange={e => setFilter('policy_id', e.target.value)}
@@ -1158,7 +1171,7 @@ export function Findings() {
           ) : null}
         />
       ) : (
-        <div className="table-shell">
+        <div className="table-shell table-scroll max-h-[70vh]">
           {/* Bulk action bar */}
           {selected.size > 0 && (
             <div className="flex items-center gap-3 px-4 py-2.5 bg-blue-50 border-b border-blue-200">
@@ -1200,7 +1213,7 @@ export function Findings() {
           )}
 
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
+            <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="px-2 py-3 w-8">
                   <button onClick={toggleAll} className="flex items-center">

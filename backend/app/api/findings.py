@@ -4,7 +4,7 @@ import io
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from typing import Optional, List
 from app.database import get_db
 from app.models.finding import Finding, FindingComment
@@ -90,6 +90,7 @@ def list_findings(
     priority: Optional[str] = None,
     assigned_to: Optional[str] = None,
     vendor: Optional[str] = None,
+    search: Optional[str] = None,
     export: Optional[bool] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
@@ -142,6 +143,18 @@ def list_findings(
         q = q.filter(Finding.assigned_to == assigned_to)
     if vendor:
         q = q.filter(Finding.vendor == vendor)
+    if search:
+        if len(search) > 200:
+            raise HTTPException(status_code=422, detail="search must be 200 characters or fewer")
+        term = f"%{search.strip()}%"
+        q = q.filter(or_(
+            Finding.title.ilike(term),
+            Finding.description.ilike(term),
+            Finding.recommendation.ilike(term),
+            Finding.finding_type.ilike(term),
+            Finding.vendor.ilike(term),
+            Finding.engineer_comment.ilike(term),
+        ))
 
     # Severity distribution for the summary bar — computed over all filters
     # EXCEPT severity itself, so users always see the full breakdown for the

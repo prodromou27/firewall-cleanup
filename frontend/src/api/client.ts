@@ -14,6 +14,7 @@
 import type {
   Customer as AppCustomer,
   Finding as AppFinding,
+  FirewallDeviceT as AppFirewallDevice,
   FirewallObject as AppFirewallObject,
   Policy as AppPolicy,
 } from '../types'
@@ -291,7 +292,19 @@ export const getSettings = () =>
 
 // Devices
 export const getDevices = (customerId?: string) =>
-  api.get('/devices', { params: customerId ? { customer_id: customerId } : undefined }).then(r => r.data)
+  api.get('/devices', { params: customerId ? { customer_id: customerId } : undefined }).then(r =>
+    Array.isArray(r.data) ? r.data : (r.data.devices ?? [])
+  )
+
+export interface PaginatedDevices {
+  total: number
+  page: number
+  page_size: number
+  devices: AppFirewallDevice[]
+}
+
+export const getDevicesPage = (params?: Record<string, string | number>) =>
+  api.get('/devices', { params }).then(r => r.data as PaginatedDevices)
 
 export const createDevice = (data: Record<string, unknown>) =>
   api.post('/devices', data).then(r => r.data)
@@ -402,6 +415,12 @@ export interface GeneratedReportRow {
   firewall_name: string | null; file_name: string; generated_by: string | null; generated_at: string | null
   selected_sections: string[]; template_id: string | null; policy_id: string | null; analysis_run_id: string | null
 }
+export interface GeneratedReportsPage {
+  total: number
+  page: number
+  page_size: number
+  reports: GeneratedReportRow[]
+}
 export interface ReportAnalysisRun {
   id: string
   status: string
@@ -452,5 +471,7 @@ export const generateReport = (body: GenerateBody) =>
 export const previewReportUrl = '/api/reports/preview'   // POST → HTML (use fetch for srcdoc)
 export const listGeneratedReports = (customerId?: string) =>
   api.get('/reports', { params: customerId ? { customer_id: customerId } : undefined })
-    .then(r => r.data as { reports: GeneratedReportRow[] })
+    .then(r => r.data as GeneratedReportsPage)
+export const listGeneratedReportsPage = (params?: Record<string, string | number>) =>
+  api.get('/reports', { params }).then(r => r.data as GeneratedReportsPage)
 export const reportDownloadUrl = (id: string) => `/api/reports/${id}/download`

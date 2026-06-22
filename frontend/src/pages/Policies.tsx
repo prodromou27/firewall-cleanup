@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useCustomer } from '../contexts/CustomerContext'
-import { Loader, RefreshCw, Trash2, Eye, FileText, GitCompare, Shield, BarChart2, TrendingUp } from 'lucide-react'
-import { getPolicies, deletePolicy, reanalyzePolicy, getPolicy } from '../api/client'
+import { Loader, RefreshCw, Trash2, Eye, FileText, GitCompare, Shield, BarChart2, TrendingUp, Search, ArrowUpDown } from 'lucide-react'
+import { getPoliciesPage, deletePolicy, reanalyzePolicy, getPolicy } from '../api/client'
 import { SeverityBadge } from '../components/ui/SeverityBadge'
+import { EmptyState, LoadingState } from '../components/ui/page-state'
+import { VendorBadge } from '../components/ui/vendor-badge'
 import type { Policy } from '../types'
 import { clsx } from 'clsx'
 
@@ -24,32 +26,54 @@ function StatusChip({ status }: { status: string }) {
   )
 }
 
-const VENDOR_STYLES: Record<string, string> = {
-  FortiGate:  'bg-orange-100 text-orange-800',
-  CheckPoint: 'bg-sky-100 text-sky-800',
-  PaloAlto:   'bg-purple-100 text-purple-800',
-  CiscoASA:   'bg-blue-100 text-blue-800',
-}
+const POLICY_PAGE_SIZE = 50
 
 export function Policies() {
   const [policies, setPolicies] = useState<Policy[]>([])
   const [loading, setLoading] = useState(true)
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [search, setSearch] = useState('')
+  const [vendor, setVendor] = useState('')
+  const [status, setStatus] = useState('')
+  const [sortBy, setSortBy] = useState('upload_date')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const navigate = useNavigate()
   const params = useParams<{ customerId?: string }>()
   const { activeCustomer } = useCustomer()
   const customerId = params.customerId || activeCustomer?.id || ''
 
   const load = () => {
-    const pp: Record<string, string> = {}
+    const pp: Record<string, string | number> = {
+      page,
+      page_size: POLICY_PAGE_SIZE,
+      sort_by: sortBy,
+      sort_dir: sortDir,
+    }
     if (customerId) pp.customer_id = customerId
-    getPolicies(pp).then(data => setPolicies(Array.isArray(data) ? data : [])).finally(() => setLoading(false))
+    if (search.trim()) pp.search = search.trim()
+    if (vendor) pp.vendor = vendor
+    if (status) pp.analysis_status = status
+    getPoliciesPage(pp)
+      .then(data => { setPolicies(data.policies); setTotal(data.total) })
+      .finally(() => setLoading(false))
   }
 
   useEffect(() => {
+    setLoading(true)
     load()
     const interval = setInterval(load, 5000)
     return () => clearInterval(interval)
-  }, [customerId])
+  }, [customerId, page, search, vendor, status, sortBy, sortDir])
+
+  const toggleSort = (field: string) => {
+    if (sortBy === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else {
+      setSortBy(field)
+      setSortDir(field === 'firewall_name' || field === 'vendor' || field === 'policy_package' ? 'asc' : 'desc')
+    }
+    setPage(1)
+  }
 
   const handleDelete = async (id: string, name: string) => {
     if (!confirm(`Delete policy for ${name}? This cannot be undone.`)) return
@@ -62,11 +86,10 @@ export function Policies() {
     load()
   }
 
-  if (loading) {
-    return <div className="flex justify-center items-center h-64"><Loader className="animate-spin w-8 h-8 text-blue-600" /></div>
-  }
+  if (loading && policies.length === 0) return <LoadingState label="Loading policies..." className="m-7" />
 
   const uploadLink = customerId ? `/upload?customer_id=${customerId}` : '/upload'
+  const pageCount = Math.max(1, Math.ceil(total / POLICY_PAGE_SIZE))
 
   return (
     <div>
@@ -74,7 +97,7 @@ export function Policies() {
         <div>
           <h1 className="page-title">Policy Inventory</h1>
           <p className="page-subtitle">
-            {policies.length} {policies.length === 1 ? 'policy' : 'policies'} · uploaded firewall configurations and analysis status
+            {total.toLocaleString()} {total === 1 ? 'policy' : 'policies'} - uploaded firewall configurations and analysis status
           </p>
         </div>
         <Link to={uploadLink} className="btn-primary">
@@ -83,21 +106,58 @@ export function Policies() {
       </div>
 
       <div className="page-body">
-        {policies.length === 0 ? (
-          <div className="card empty-state">
-            <Shield className="w-12 h-12 text-gray-200 mb-4" />
-            <p className="text-lg font-semibold text-gray-500 mb-1">No policies yet</p>
-            <p className="text-sm text-gray-400 mb-6">Upload a firewall configuration to begin analysis.</p>
-            <Link to={uploadLink} className="btn-primary">Upload your first policy</Link>
+        <div className="filter-bar mb-5">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input
+              value={search}
+              onChange={e => { setSearch(e.target.value); setPage(1) }}
+              className="pl-9 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm w-64 bg-gray-50 focus:bg-white"
+              placeholder="Search firewall, package, customer..."
+            />
           </div>
+          <select value={vendor} onChange={e => { setVendor(e.target.value); setPage(1) }}
+            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-gray-50 focus:bg-white">
+            <option value="">All Vendors</option>
+            {['FortiGate', 'CheckPoint', 'PaloAlto', 'CiscoASA', 'HuaweiUSG'].map(v => <option key={v} value={v}>{v}</option>)}
+          </select>
+          <select value={status} onChange={e => { setStatus(e.target.value); setPage(1) }}
+            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-gray-50 focus:bg-white">
+            <option value="">All Statuses</option>
+            {['pending', 'parsing', 'running', 'completed', 'failed'].map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+
+        {policies.length === 0 ? (
+          <EmptyState
+            icon={<Shield className="w-7 h-7" />}
+            title="No policies match the current filters"
+            description="Upload a firewall configuration or clear the current search and filters."
+            action={<Link to={uploadLink} className="btn-primary">Upload policy</Link>}
+          />
         ) : (
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="table-shell table-scroll max-h-[70vh]">
             <table className="data-table">
-              <thead>
+              <thead className="sticky top-0 z-10">
                 <tr>
-                  {['Customer', 'Firewall', 'Vendor', 'Package', 'Uploaded', 'Rules', 'Findings', 'High Risk', 'Status', ''].map(h => (
-                    <th key={h}>{h}</th>
+                  <th>Customer</th>
+                  {[
+                    ['Firewall', 'firewall_name'],
+                    ['Vendor', 'vendor'],
+                    ['Package', 'policy_package'],
+                    ['Uploaded', 'upload_date'],
+                    ['Rules', 'rule_count'],
+                    ['Findings', 'finding_count'],
+                    ['High Risk', 'high_finding_count'],
+                    ['Status', 'analysis_status'],
+                  ].map(([label, field]) => (
+                    <th key={field}>
+                      <button onClick={() => toggleSort(field)} className="inline-flex items-center gap-1 hover:text-blue-600">
+                        {label}<ArrowUpDown className="w-3 h-3 opacity-50" />
+                      </button>
+                    </th>
                   ))}
+                  <th />
                 </tr>
               </thead>
               <tbody>
@@ -109,24 +169,17 @@ export function Policies() {
                   >
                     <td className="font-semibold text-gray-900">{p.customer_name}</td>
                     <td className="font-medium text-gray-800">{p.firewall_name}</td>
-                    <td onClick={e => e.stopPropagation()}>
-                      <span className={clsx(
-                        'text-xs font-semibold px-2 py-0.5 rounded',
-                        VENDOR_STYLES[p.vendor] || 'bg-teal-100 text-teal-800'
-                      )}>
-                        {p.vendor}
-                      </span>
-                    </td>
-                    <td className="text-gray-500">{p.policy_package || '—'}</td>
+                    <td onClick={e => e.stopPropagation()}><VendorBadge vendor={p.vendor} /></td>
+                    <td className="text-gray-500">{p.policy_package || '-'}</td>
                     <td className="text-gray-500 whitespace-nowrap">
-                      {p.upload_date ? new Date(p.upload_date).toLocaleDateString() : '—'}
+                      {p.upload_date ? new Date(p.upload_date).toLocaleDateString() : '-'}
                     </td>
                     <td className="text-gray-700 font-medium">{p.rule_count}</td>
                     <td className="text-gray-700">{p.finding_count}</td>
                     <td>
                       {p.high_finding_count > 0 ? (
                         <span className="badge-high">{p.high_finding_count}</span>
-                      ) : <span className="text-gray-300 text-xs">—</span>}
+                      ) : <span className="text-gray-300 text-xs">-</span>}
                     </td>
                     <td><StatusChip status={p.analysis_status} /></td>
                     <td onClick={e => e.stopPropagation()}>
@@ -162,6 +215,15 @@ export function Policies() {
                 ))}
               </tbody>
             </table>
+            <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 text-sm bg-gray-50">
+              <span className="text-gray-500">Page {page} of {pageCount} - {total.toLocaleString()} policies</span>
+              <div className="flex gap-2">
+                <button onClick={() => setPage(1)} disabled={page === 1} className="btn-secondary py-1 px-2 text-xs disabled:opacity-40">First</button>
+                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="btn-secondary py-1 px-3 text-xs disabled:opacity-40">Prev</button>
+                <button onClick={() => setPage(p => Math.min(pageCount, p + 1))} disabled={page === pageCount} className="btn-secondary py-1 px-3 text-xs disabled:opacity-40">Next</button>
+                <button onClick={() => setPage(pageCount)} disabled={page === pageCount} className="btn-secondary py-1 px-2 text-xs disabled:opacity-40">Last</button>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -243,7 +305,7 @@ export function PolicyDetail() {
       <div className="page-header sticky top-0 z-10">
         <div>
           <h1 className="page-title">{policy.firewall_name}</h1>
-          <p className="page-subtitle">{policy.customer_name} · {policy.vendor}{policy.policy_package ? ` · ${policy.policy_package}` : ''}</p>
+          <p className="page-subtitle">{policy.customer_name} Â· {policy.vendor}{policy.policy_package ? ` Â· ${policy.policy_package}` : ''}</p>
         </div>
         <div className="flex gap-2">
           <Link to={`/policies/${id}/rules`} className="btn-secondary">View Rulebase</Link>

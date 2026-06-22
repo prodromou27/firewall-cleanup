@@ -23,8 +23,9 @@ import ipaddress
 import re
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from pydantic import BaseModel, field_validator
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -362,6 +363,13 @@ def _build_connector_for_device(d: FirewallDevice):
 @router.get("")
 def list_devices(
     customer_id: Optional[str] = None,
+    search: Optional[str] = None,
+    vendor: Optional[str] = None,
+    sync_status: Optional[str] = None,
+    sort_by: Optional[str] = None,
+    sort_dir: Optional[str] = None,
+    page: Optional[int] = None,
+    page_size: int = 50,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -374,7 +382,49 @@ def list_devices(
         allowed = accessible_customer_ids(db, user)
         if allowed is not None:
             q = q.filter(FirewallDevice.customer_id.in_(allowed)) if allowed else q.filter(False)
-    return [_device_dict(d) for d in q.order_by(FirewallDevice.created_at).all()]
+    if search:
+        like = f"%{search.strip()}%"
+        q = q.filter(or_(
+            FirewallDevice.name.ilike(like),
+            FirewallDevice.host.ilike(like),
+            FirewallDevice.fw_model.ilike(like),
+            FirewallDevice.location.ilike(like),
+        ))
+    if vendor:
+        q = q.filter(FirewallDevice.vendor == vendor)
+    if sync_status:
+        q = q.filter(FirewallDevice.sync_status == sync_status)
+
+    sort_map = {
+        "created_at": FirewallDevice.created_at,
+        "name": FirewallDevice.name,
+        "vendor": FirewallDevice.vendor,
+        "host": FirewallDevice.host,
+        "sync_status": FirewallDevice.sync_status,
+        "last_sync_at": FirewallDevice.last_sync_at,
+        "criticality": FirewallDevice.criticality,
+    }
+    if page is not None and page < 1:
+        raise HTTPException(status_code=422, detail="page must be >= 1")
+    if page_size < 1 or page_size > 250:
+        raise HTTPException(status_code=422, detail="page_size must be between 1 and 250")
+    if sort_by is None:
+        sort_by = "created_at"
+    if sort_by not in sort_map:
+        raise HTTPException(status_code=422, detail="Invalid sort_by")
+    if sort_dir is None:
+        sort_dir = "desc"
+    if sort_dir not in ("asc", "desc"):
+        raise HTTPException(status_code=422, detail="Invalid sort_dir")
+    sort_col = sort_map[sort_by]
+    if sort_dir == "desc":
+        sort_col = sort_col.desc()
+
+    total = q.count()
+    if page is not None:
+        rows = q.order_by(sort_col).offset((page - 1) * page_size).limit(page_size).all()
+        return {"total": total, "page": page, "page_size": page_size, "devices": [_device_dict(d) for d in rows]}
+    return [_device_dict(d) for d in q.order_by(sort_col).all()]
 
 
 @router.post("", status_code=201)

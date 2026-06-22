@@ -479,7 +479,7 @@ export function Rulebase() {
           </div>
 
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
+            <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
               <tr>
                 <SortHeader label="#" field="rule_number" current={sortBy} dir={sortDir} onClick={handleSort} />
                 <SortHeader label="Rule Name" field="rule_name" current={sortBy} dir={sortDir} onClick={handleSort} />

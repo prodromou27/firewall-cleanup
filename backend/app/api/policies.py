@@ -23,7 +23,7 @@ from app.security.identity import (
 )
 from app.security.rbac import CAP_VIEW_GLOBAL, CAP_DELETE_DATA, CAP_UPLOAD
 from app.security.audit import audit_log
-from app.api.common import validate_csv_choices, validate_sort
+from app.api.common import validate_choice, validate_csv_choices, validate_sort
 
 
 def _authz_policy(policy_id: str, db: Session, user: User) -> FirewallPolicy:
@@ -104,6 +104,7 @@ def list_policies(
     id: Optional[str] = None,
     customer_id: Optional[str] = None,
     vendor: Optional[str] = None,
+    analysis_status: Optional[str] = None,
     search: Optional[str] = None,
     sort_by: Optional[str] = None,
     sort_dir: Optional[str] = None,
@@ -116,6 +117,7 @@ def list_policies(
         "upload_date": FirewallPolicy.upload_date,
         "firewall_name": FirewallPolicy.firewall_name,
         "vendor": FirewallPolicy.vendor,
+        "policy_package": FirewallPolicy.policy_package,
         "rule_count": FirewallPolicy.rule_count,
         "finding_count": FirewallPolicy.finding_count,
         "high_finding_count": FirewallPolicy.high_finding_count,
@@ -134,6 +136,9 @@ def list_policies(
         q = q.filter(FirewallPolicy.id == id)
     if vendor:
         q = q.filter(FirewallPolicy.vendor == vendor)
+    if analysis_status:
+        validate_choice(analysis_status, ("pending", "parsing", "running", "completed", "failed"), "analysis_status")
+        q = q.filter(FirewallPolicy.analysis_status == analysis_status)
     if search:
         q = q.filter(
             or_(

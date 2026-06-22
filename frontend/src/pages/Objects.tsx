@@ -5,7 +5,6 @@ import { Package, Search, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react'
 import {
   useReactTable,
   getCoreRowModel,
-  getSortedRowModel,
   flexRender,
   createColumnHelper,
   type SortingState,
@@ -88,7 +87,12 @@ export function Objects() {
 
   const load = useCallback(() => {
     setLoading(true)
+    const activeSort = sorting[0]
     const p: Record<string, string | number | boolean> = { page, page_size: 100 }
+    if (activeSort) {
+      p.sort_by = activeSort.id
+      p.sort_dir = activeSort.desc ? 'desc' : 'asc'
+    }
     if (policyId) p.policy_id = policyId
     else if (customerId) p.customer_id = customerId
     if (objectType) p.object_type = objectType
@@ -100,7 +104,7 @@ export function Objects() {
         setTotal(r.total)
       })
       .finally(() => setLoading(false))
-  }, [page, policyId, customerId, objectType, search, category])
+  }, [page, policyId, customerId, objectType, search, category, sorting])
 
   useEffect(() => { load() }, [load])
   useEffect(() => {
@@ -135,6 +139,7 @@ export function Objects() {
     col.accessor(row => (row.members ? row.members.length : 0), {
       id: 'members',
       header: 'Members',
+      enableSorting: false,
       cell: info => {
         const obj = info.row.original
         return obj.members && obj.members.length > 0
@@ -145,6 +150,7 @@ export function Objects() {
     col.accessor(row => row.comment || '', {
       id: 'comment',
       header: 'Comment',
+      enableSorting: false,
       cell: info => (
         <span className="text-gray-400 text-xs max-w-[200px] truncate block">{info.getValue() || '—'}</span>
       ),
@@ -152,6 +158,7 @@ export function Objects() {
     col.display({
       id: 'status',
       header: 'Status',
+      enableSorting: false,
       cell: info => <StatusBadges obj={info.row.original} />,
     }),
   ], [])
@@ -161,8 +168,8 @@ export function Objects() {
     columns,
     state: { sorting },
     onSortingChange: setSorting,
+    manualSorting: true,
     getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
   })
 
   const pageCount = Math.ceil(total / 100)
@@ -228,9 +235,9 @@ export function Objects() {
           description="Try a different object type, policy, or hygiene category."
         />
       ) : (
-        <div className="table-shell">
+        <div className="table-shell table-scroll max-h-[70vh]">
           <table className="data-table">
-            <thead>
+            <thead className="sticky top-0 z-10">
               {table.getHeaderGroups().map(hg => (
                 <tr key={hg.id}>
                   {hg.headers.map(header => {
@@ -274,7 +281,6 @@ export function Objects() {
             <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 text-sm">
               <span className="text-gray-500">
                 Page {page} of {pageCount} ({total} objects)
-                <span className="text-gray-400 ml-2">· sorting applies to this page</span>
               </span>
               <div className="flex gap-2">
                 <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="btn-secondary py-1 px-3">Prev</button>

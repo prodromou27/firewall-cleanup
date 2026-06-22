@@ -37,8 +37,8 @@ def upgrade() -> None:
     for col in ("total_policies", "total_rules", "total_findings", "high_findings"):
         bind.execute(sa.text(f"UPDATE customers SET {col} = 0 WHERE {col} IS NULL"))
 
-    bind.execute(sa.text("UPDATE firewall_devices SET use_ssl = 1 WHERE use_ssl IS NULL"))
-    bind.execute(sa.text("UPDATE firewall_devices SET verify_ssl = 0 WHERE verify_ssl IS NULL"))
+    bind.execute(sa.text("UPDATE firewall_devices SET use_ssl = TRUE WHERE use_ssl IS NULL"))
+    bind.execute(sa.text("UPDATE firewall_devices SET verify_ssl = FALSE WHERE verify_ssl IS NULL"))
     bind.execute(sa.text("UPDATE firewall_devices SET environment_type = 'production' WHERE environment_type IS NULL"))
     bind.execute(sa.text("UPDATE firewall_devices SET fw_role = 'perimeter' WHERE fw_role IS NULL"))
     bind.execute(sa.text("UPDATE firewall_devices SET criticality = 'high' WHERE criticality IS NULL"))
@@ -49,9 +49,9 @@ def upgrade() -> None:
     for col in ("rule_count", "object_count", "finding_count", "high_finding_count"):
         bind.execute(sa.text(f"UPDATE firewall_policies SET {col} = 0 WHERE {col} IS NULL"))
 
-    bind.execute(sa.text("UPDATE firewall_rules SET enabled = 1 WHERE enabled IS NULL"))
-    bind.execute(sa.text("UPDATE firewall_rules SET logging_enabled = 1 WHERE logging_enabled IS NULL"))
-    bind.execute(sa.text("UPDATE firewall_rules SET nat_enabled = 0 WHERE nat_enabled IS NULL"))
+    bind.execute(sa.text("UPDATE firewall_rules SET enabled = TRUE WHERE enabled IS NULL"))
+    bind.execute(sa.text("UPDATE firewall_rules SET logging_enabled = TRUE WHERE logging_enabled IS NULL"))
+    bind.execute(sa.text("UPDATE firewall_rules SET nat_enabled = FALSE WHERE nat_enabled IS NULL"))
     bind.execute(sa.text("UPDATE firewall_rules SET risk_score = 0 WHERE risk_score IS NULL"))
 
     bind.execute(sa.text("UPDATE analysis_runs SET status = 'running' WHERE status IS NULL"))

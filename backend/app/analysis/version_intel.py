@@ -16,6 +16,8 @@ _ADVISORY = (
     "management process if applicable."
 )
 
+_CHECKPOINT_OS_RE = re.compile(r"[Rr]\d+(?:\.\d+)?")
+
 
 # ── version normalization ────────────────────────────────────────────────────
 def _digits(v: str) -> tuple:
@@ -36,6 +38,65 @@ def release_train(vendor: str, version: str) -> str:
         return m.group(1)
     m = re.search(r"(V\d+R\d+)", v, re.IGNORECASE)  # Huawei
     return m.group(1).upper() if m else v
+
+
+def is_management_api_version(vendor: str, version: Optional[str]) -> bool:
+    """True when a stored version is a management/API version, not firewall OS."""
+    raw = (version or "").strip()
+    if not raw:
+        return False
+    return vendor.lower() in ("checkpoint", "check point") and raw.upper().startswith("API ")
+
+
+def extract_checkpoint_gateway_version(*values: Optional[str]) -> str:
+    """Extract a Check Point gateway OS version from inventory strings.
+
+    Existing rows may have only stored gateway versions inside fw_model, e.g.
+    "GW: R81.20" or "6500 (GW: R81.10, R81.20)". Prefer the highest numeric
+    version when multiple gateway versions are present.
+    """
+    matches: list[str] = []
+    for value in values:
+        matches.extend(_CHECKPOINT_OS_RE.findall(value or ""))
+    if not matches:
+        return ""
+    return sorted(matches, key=_digits, reverse=True)[0].upper()
+
+
+def resolve_device_os_version(device) -> Dict[str, Any]:
+    """Return the effective firewall OS version for advisory/CVE checks.
+
+    This intentionally rejects Check Point management API versions such as
+    "API 2.0.1"; those are not gateway OS versions and cannot be mapped safely
+    to NVD CPEs.
+    """
+    vendor = getattr(device, "vendor", "") or ""
+    raw_os = (getattr(device, "os_version", "") or "").strip()
+    fw_model = getattr(device, "fw_model", "") or ""
+    ha_peer = getattr(device, "ha_peer", "") or ""
+
+    if is_management_api_version(vendor, raw_os):
+        gateway_version = extract_checkpoint_gateway_version(fw_model, ha_peer)
+        if gateway_version:
+            return {
+                "os_version": gateway_version,
+                "source": "gateway_inventory",
+                "raw_os_version": raw_os,
+                "queryable": True,
+            }
+        return {
+            "os_version": "",
+            "source": "management_api_version",
+            "raw_os_version": raw_os,
+            "queryable": False,
+        }
+
+    return {
+        "os_version": raw_os,
+        "source": "device_os_version" if raw_os else "missing",
+        "raw_os_version": raw_os,
+        "queryable": bool(raw_os),
+    }
 
 
 def normalize_version(vendor: str, os_version: Optional[str], *, fw_model: str = "",
@@ -170,11 +231,16 @@ def evaluate(norm: dict, catalog: List[dict]) -> List[dict]:
 
 def analyze_device(device, catalog: List[dict]) -> Dict[str, Any]:
     """Convenience wrapper for a FirewallDevice-like object."""
+    resolved = resolve_device_os_version(device)
     norm = normalize_version(
-        getattr(device, "vendor", ""), getattr(device, "os_version", ""),
+        getattr(device, "vendor", ""), resolved["os_version"],
         fw_model=getattr(device, "fw_model", "") or "",
+        management_version=getattr(device, "management_platform", "") or "",
         ha_peer_version=getattr(device, "ha_peer", "") or "",
     )
+    norm["source"] = resolved["source"]
+    norm["raw_os_version"] = resolved["raw_os_version"]
+    norm["queryable"] = resolved["queryable"]
     return {
         "normalized": norm,
         "catalog_available": bool(catalog),

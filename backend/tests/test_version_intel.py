@@ -23,6 +23,30 @@ def test_unparseable_version_is_unknown_informational():
     assert fs[0]["severity"] == "Informational"
 
 
+class _Device:
+    vendor = "CheckPoint"
+    os_version = "API 2.0.1"
+    fw_model = ""
+    management_platform = "Check Point Management API 2.0.1"
+    ha_peer = ""
+
+
+def test_checkpoint_api_version_is_not_treated_as_gateway_os():
+    resolved = V.resolve_device_os_version(_Device())
+    assert resolved["os_version"] == ""
+    assert resolved["queryable"] is False
+    assert resolved["source"] == "management_api_version"
+
+
+def test_checkpoint_gateway_version_can_be_recovered_from_inventory():
+    d = _Device()
+    d.fw_model = "6500 Plus (GW: R81.10, R81.20)"
+    resolved = V.resolve_device_os_version(d)
+    assert resolved["os_version"] == "R81.20"
+    assert resolved["queryable"] is True
+    assert resolved["source"] == "gateway_inventory"
+
+
 # ── catalog matching ─────────────────────────────────────────────────────────
 def _cat(**o):
     base = {"vendor": "CheckPoint", "release_train": "R81", "recommended_version": "R81.20",

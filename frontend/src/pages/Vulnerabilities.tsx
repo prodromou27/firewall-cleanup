@@ -36,6 +36,8 @@ interface DeviceVulnState {
   cves: CVEEntry[]
   error?: string
   cached?: boolean
+  os_version?: string | null
+  queryable?: boolean
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -55,6 +57,16 @@ function scoreLabel(score: number | null, severity: string) {
   return severity || 'N/A'
 }
 
+function displayOsVersion(device: FirewallDeviceT): string | null {
+  const ov = device.os_version || null
+  if (device.vendor === 'CheckPoint' && ov && /^API\s/i.test(ov) && device.fw_model) {
+    const m = device.fw_model.match(/[Rr]\d+(?:\.\d+)?/)
+    if (m) return m[0]
+  }
+  if (device.vendor === 'CheckPoint' && ov && /^API\s/i.test(ov)) return null
+  return ov
+}
+
 // ── Device row ─────────────────────────────────────────────────────────────────
 
 function DeviceVulnRow({
@@ -70,7 +82,8 @@ function DeviceVulnRow({
   const critCount = state.cves.filter(c => c.cvss_severity === 'CRITICAL').length
   const highCount = state.cves.filter(c => c.cvss_severity === 'HIGH').length
   const hasData   = state.status === 'done'
-  const noCVEs    = hasData && state.cves.length === 0
+  const noCVEs    = hasData && state.cves.length === 0 && !state.error
+  const osVersion = displayOsVersion(device)
 
   return (
     <div className="card mb-3">
@@ -88,7 +101,7 @@ function DeviceVulnRow({
             <p className="font-semibold text-gray-900 text-sm truncate">{device.name}</p>
             <p className="text-xs text-gray-400 truncate">
               {device.vendor} · {device.host}
-              {device.os_version ? ` · ${device.os_version}` : ''}
+              {osVersion ? ` · ${osVersion}` : ''}
             </p>
           </div>
         </div>
@@ -120,10 +133,15 @@ function DeviceVulnRow({
             {state.cached && <span className="text-gray-400 ml-0.5">(cached)</span>}
           </span>
         )}
+        {hasData && state.error && (
+          <span className="flex items-center gap-1 text-xs font-semibold text-amber-600 flex-shrink-0">
+            <AlertTriangle className="w-3.5 h-3.5" /> CVE lookup unavailable
+          </span>
+        )}
 
         {/* Actions */}
         <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
-          {state.status === 'idle' && device.os_version && (
+          {state.status === 'idle' && osVersion && (
             <button
               onClick={onLoad}
               className="text-xs px-3 py-1.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 font-medium rounded-lg transition-colors flex items-center gap-1.5"
@@ -131,8 +149,12 @@ function DeviceVulnRow({
               <Shield className="w-3 h-3" /> Check CVEs
             </button>
           )}
-          {state.status === 'idle' && !device.os_version && (
-            <span className="text-xs text-gray-400 italic">Sync to discover OS version</span>
+          {state.status === 'idle' && !osVersion && (
+            <span className="text-xs text-gray-400 italic">
+              {device.vendor === 'CheckPoint' && device.os_version && /^API\s/i.test(device.os_version)
+                ? 'Sync gateway inventory to discover firewall OS version'
+                : 'Sync to discover OS version'}
+            </span>
           )}
           {state.status === 'loading' && (
             <span className="flex items-center gap-1.5 text-xs text-blue-600">
@@ -243,10 +265,11 @@ export function Vulnerabilities() {
       .then((data: FirewallDeviceT[]) => {
         const list = Array.isArray(data) ? data : []
         setDevices(list)
-        // Auto-load CVEs for devices that have been synced (have an OS version)
+        // Initialize CVE state for devices. Check Point management API versions
+        // are intentionally not treated as firewall OS versions.
         const initial: Record<string, DeviceVulnState> = {}
         list.forEach(d => {
-          initial[d.id] = { status: d.os_version ? 'idle' : 'idle', cves: [] }
+          initial[d.id] = { status: 'idle', cves: [] }
         })
         setVulnState(initial)
       })
@@ -265,6 +288,8 @@ export function Vulnerabilities() {
           cves: result.cves || [],
           error: result.error,
           cached: result.cached,
+          os_version: result.os_version,
+          queryable: result.queryable,
         },
       }))
     } catch {
@@ -277,7 +302,7 @@ export function Vulnerabilities() {
 
   const loadAll = () => {
     devices
-      .filter(d => d.os_version)
+      .filter(d => displayOsVersion(d))
       .forEach(d => loadVulns(d.id))
   }
 
@@ -287,7 +312,7 @@ export function Vulnerabilities() {
   const highCount = allCVEs.filter(c => c.cvss_severity === 'HIGH').length
   const medCount  = allCVEs.filter(c => c.cvss_severity === 'MEDIUM').length
   const checkedCount = Object.values(vulnState).filter(s => s.status === 'done').length
-  const syncedDevices = devices.filter(d => d.os_version)
+  const syncedDevices = devices.filter(d => displayOsVersion(d))
 
   return (
     <div>

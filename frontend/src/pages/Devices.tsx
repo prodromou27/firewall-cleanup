@@ -602,7 +602,7 @@ function DeviceDetailDrawer({ device, onClose, onEdit }: {
     catch { return [] }
   })()
 
-  const [cveData, setCveData]     = useState<{ cves: CVEEntry[]; error?: string; cached?: boolean } | null>(null)
+  const [cveData, setCveData]     = useState<{ cves: CVEEntry[]; error?: string; cached?: boolean; os_version?: string | null; queryable?: boolean; version_source?: string; raw_os_version?: string | null } | null>(null)
   const [cveLoading, setCveLoading] = useState(false)
   const [verData, setVerData] = useState<{ catalog_available: boolean; normalized: { os_version: string; release_train: string; parseable: boolean }; findings: Array<{ severity: string; title: string; description: string }> } | null>(null)
   const [verLoading, setVerLoading] = useState(false)
@@ -622,11 +622,12 @@ function DeviceDetailDrawer({ device, onClose, onEdit }: {
       const m = device.fw_model.match(/[Rr]\d+(?:\.\d+)?/)
       if (m) return m[0]
     }
+    if (device.vendor === 'CheckPoint' && ov && /^API\s/i.test(ov)) return null
     return ov
   })()
 
   const loadCVEs = async (refresh = false) => {
-    if (!device.os_version) return
+    if (!displayOsVersion) return
     setCveLoading(true)
     try {
       const { getDeviceVulnerabilities } = await import('../api/client')
@@ -836,8 +837,11 @@ function DeviceDetailDrawer({ device, onClose, onEdit }: {
             <h3 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
               <Shield className="w-3 h-3" /> CVE Vulnerability Check
             </h3>
-            {!device.os_version ? (
-              <p className="text-xs text-gray-400 italic">Sync device to discover OS version for CVE lookup.</p>
+            {!displayOsVersion ? (
+              <p className="text-xs text-gray-400 italic">
+                Sync device gateway inventory to discover a firewall OS version for CVE lookup.
+                {device.vendor === 'CheckPoint' && device.os_version && /^API\s/i.test(device.os_version) ? ' The current value is a management API version, not a gateway OS version.' : ''}
+              </p>
             ) : !cveData ? (
               <button
                 onClick={() => loadCVEs()}
@@ -851,10 +855,12 @@ function DeviceDetailDrawer({ device, onClose, onEdit }: {
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <p className="text-xs text-gray-600">
-                    {cveData.cves.length > 0
+                    {cveData.error
+                      ? <span className="font-semibold text-amber-600">CVE lookup unavailable</span>
+                      : cveData.cves.length > 0
                       ? <span className="font-semibold text-red-600">{cveData.cves.length} CVE(s) found</span>
                       : <span className="font-semibold text-green-600">No CVEs found</span>
-                    } for {displayOsVersion}
+                    } for {cveData.os_version || displayOsVersion}
                     {cveData.cached && <span className="text-gray-400 ml-1">(cached)</span>}
                   </p>
                   <button onClick={() => loadCVEs(true)} className="text-[10px] text-blue-500 hover:underline">Refresh</button>

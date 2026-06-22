@@ -1249,7 +1249,7 @@ def sync_device(device: FirewallDevice, db: Session) -> dict:
             # info = {"api_server_version": "1.9.1", "uid": "...", ...}
             api_ver = info.get("api_server_version", "")
             if api_ver:
-                device.management_platform = f"Check Point Management R{api_ver.split('.')[0]}" if api_ver else None
+                device.management_platform = f"Check Point Management API {api_ver}" if api_ver else None
             # gateway versions come from raw["gateways"] — prefer GW OS version
             gateways = raw.get("gateways", [])
             if gateways:
@@ -1258,16 +1258,14 @@ def sync_device(device: FirewallDevice, db: Session) -> dict:
                     sorted_gw = sorted(gw_versions)
                     device.os_version = sorted_gw[0]   # e.g. "R81.20"
                     device.fw_model   = f"GW: {', '.join(sorted_gw[:3])}"
-                elif api_ver:
-                    device.os_version = f"API {api_ver}"  # fallback when no GW version
                 # Store gateway IPs as "interfaces" for display
                 ifaces = [{"name": g.get("name",""), "ip": g.get("ipv4-address",""),
                            "type": g.get("type","gateway"), "status": "up"}
                           for g in gateways if g.get("ipv4-address")]
                 if ifaces:
                     device.device_interfaces = json.dumps(ifaces)
-            elif api_ver:
-                device.os_version = f"API {api_ver}"  # fallback when no GW data
+            if device.os_version and device.os_version.upper().startswith("API "):
+                device.os_version = None
 
         elif device.vendor == "PaloAlto":
             pa_ver = info.get("version") or info.get("sw-version", "")

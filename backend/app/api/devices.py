@@ -1030,7 +1030,7 @@ def test_device(
         elif d.vendor == "CheckPoint":
             api_ver = info.get("api_server_version", "")
             if api_ver:
-                d.management_platform = f"Check Point Management R{api_ver.split('.')[0]}"
+                d.management_platform = f"Check Point Management API {api_ver}"
             gws = info.get("gateways", [])
             gw_versions = list({g.get("version") for g in gws if g.get("version")})
             if gw_versions:
@@ -1042,6 +1042,8 @@ def test_device(
                 # No gateway versions available — store API version as fallback
                 # (CVE checker will skip "API x.y" strings gracefully)
                 d.os_version = f"API {api_ver}"
+            if d.os_version and d.os_version.upper().startswith("API "):
+                d.os_version = None
             # Populate the inventory (interfaces, HA, hardware) from the primary
             # gateway's full topology so the device detail panel is meaningful.
             try:
@@ -1461,6 +1463,7 @@ def get_device_vulnerabilities(
     d = _get_device_authz(device_id, db, user)
 
     from app.analysis.cve_checker import get_device_cves
+    from app.analysis.version_intel import resolve_device_os_version
     from app.models.customer import Customer
 
     customer = db.query(Customer).filter(Customer.id == d.customer_id).first()
@@ -1479,6 +1482,9 @@ def get_device_vulnerabilities(
             if m:
                 os_ver = m.group(0)
 
+    resolved_version = resolve_device_os_version(d)
+    os_ver = resolved_version["os_version"] or None
+
     result = get_device_cves(
         device_id=device_id,
         vendor=d.vendor,
@@ -1489,6 +1495,9 @@ def get_device_vulnerabilities(
     result["device_name"]    = d.name
     result["vendor"]         = d.vendor
     result["customer_name"]  = customer_name
+    result["version_source"] = resolved_version["source"]
+    result["raw_os_version"] = resolved_version["raw_os_version"]
+    result["queryable"]      = resolved_version["queryable"]
 
     # Add severity summary
     cves = result.get("cves", [])

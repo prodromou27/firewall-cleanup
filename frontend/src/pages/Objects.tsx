@@ -10,9 +10,10 @@ import {
   type SortingState,
 } from '@tanstack/react-table'
 import { getObjects, getPolicies } from '../api/client'
-import { EmptyState, LoadingState } from '../components/ui/page-state'
+import { EmptyState, ErrorState, LoadingState } from '../components/ui/page-state'
 import type { FirewallObject, Policy } from '../types'
 import { clsx } from 'clsx'
+import { friendlyErrorMessage } from '../utils/errors'
 
 const CATEGORIES = [
   { value: 'unused', label: '📦 Unused' },
@@ -80,6 +81,7 @@ export function Objects() {
   const [loading, setLoading] = useState(true)
   const [policies, setPolicies] = useState<Policy[]>([])
   const [sorting, setSorting] = useState<SortingState>([])
+  const [error, setError] = useState('')
 
   const policyId = searchParams.get('policy_id') || ''
   const objectType = searchParams.get('object_type') || ''
@@ -87,6 +89,7 @@ export function Objects() {
 
   const load = useCallback(() => {
     setLoading(true)
+    setError('')
     const activeSort = sorting[0]
     const p: Record<string, string | number | boolean> = { page, page_size: 100 }
     if (activeSort) {
@@ -103,6 +106,11 @@ export function Objects() {
         setObjects(r.objects)
         setTotal(r.total)
       })
+      .catch(e => {
+        setObjects([])
+        setTotal(0)
+        setError(friendlyErrorMessage(e, 'Objects could not be loaded. Please refresh and try again.'))
+      })
       .finally(() => setLoading(false))
   }, [page, policyId, customerId, objectType, search, category, sorting])
 
@@ -110,7 +118,7 @@ export function Objects() {
   useEffect(() => {
     const pp: Record<string, string> = {}
     if (customerId) pp.customer_id = customerId
-    getPolicies(pp).then(data => setPolicies(Array.isArray(data) ? data : []))
+    getPolicies(pp).then(data => setPolicies(Array.isArray(data) ? data : [])).catch(() => setPolicies([]))
   }, [customerId])
 
   const setFilter = (key: string, val: string) => {
@@ -226,13 +234,17 @@ export function Objects() {
         </div>
       </div>
 
-      {loading ? (
+      {error ? (
+        <ErrorState title="Objects unavailable" message={error} />
+      ) : loading ? (
         <LoadingState label="Loading objects..." />
       ) : objects.length === 0 ? (
         <EmptyState
           icon={<Package className="w-6 h-6" />}
-          title="No objects match the current filters"
-          description="Try a different object type, policy, or hygiene category."
+          title={policyId || objectType || category || search ? 'No objects match the current filters' : 'No objects imported yet'}
+          description={policyId || objectType || category || search
+            ? 'Try a different object type, policy, hygiene category, or search term.'
+            : 'Upload or sync a policy to extract address, service, and group objects for analysis.'}
         />
       ) : (
         <div className="table-shell table-scroll max-h-[70vh]">

@@ -1,0 +1,31 @@
+sysname HUAWEI-USG
+#
+ip address-set DB-Server type object
+ address 0 10.0.0.5 mask 255.255.255.255
+#
+ip address-set Web-Subnet type object
+ address 0 10.0.10.0 mask 255.255.255.0
+#
+ip service-set RDP type object
+ service 0 protocol tcp destination-port 3389
+#
+ip service-set WEB type group
+ service 0 protocol tcp destination-port 80
+ service 1 protocol tcp destination-port 443
+#
+security-policy
+ rule name allow-rdp-from-internet
+  source-zone untrust
+  destination-zone trust
+  source-address address-set Any
+  destination-address address-set DB-Server
+  service service-set RDP
+  action permit
+ rule name allow-web
+  source-zone trust
+  destination-zone dmz
+  source-address address-set Web-Subnet
+  destination-address address-set DB-Server
+  service service-set WEB
+  action permit
+#

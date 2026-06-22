@@ -1,5 +1,5 @@
 """FirewallDevice model — stores live firewall connection credentials (encrypted at rest)."""
-from sqlalchemy import Column, String, Integer, Boolean, DateTime, Text, ForeignKey
+from sqlalchemy import Column, String, Integer, Boolean, DateTime, Text, ForeignKey, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import uuid
@@ -13,6 +13,12 @@ def _uuid():
 
 class FirewallDevice(Base):
     __tablename__ = "firewall_devices"
+    __table_args__ = (
+        Index("ix_firewall_devices_customer_vendor", "customer_id", "vendor"),
+        Index("ix_firewall_devices_customer_sync_status", "customer_id", "sync_status"),
+        Index("ix_firewall_devices_host", "host"),
+        Index("ix_firewall_devices_last_policy_id", "last_policy_id"),
+    )
 
     id = Column(String, primary_key=True, default=_uuid)
     customer_id = Column(String, ForeignKey("customers.id", ondelete="CASCADE"), nullable=False)
@@ -29,8 +35,8 @@ class FirewallDevice(Base):
     password = Column(String, nullable=True)        # password (encrypted)
 
     # Connection options
-    use_ssl = Column(Boolean, default=True)
-    verify_ssl = Column(Boolean, default=False)     # False = accept self-signed certs
+    use_ssl = Column(Boolean, nullable=False, default=True)
+    verify_ssl = Column(Boolean, nullable=False, default=False)     # False = accept self-signed certs
     vdom = Column(String, nullable=True)            # FortiGate VDOM ("root" default)
 
     # Check Point specific
@@ -42,10 +48,10 @@ class FirewallDevice(Base):
     fw_model = Column(String, nullable=True)        # e.g. "FortiGate-600F"
     os_version = Column(String, nullable=True)      # e.g. "7.2.5", "R81.20"
     management_platform = Column(String, nullable=True)  # e.g. "FortiManager", "SmartCenter"
-    environment_type = Column(String, default="production")  # production/staging/development/dr
+    environment_type = Column(String, nullable=False, default="production")  # production/staging/development/dr
     location = Column(String, nullable=True)        # e.g. "HQ DataCenter", "London DC"
-    fw_role = Column(String, default="perimeter")   # perimeter/datacenter/internal/branch/dr/vpn/cloud
-    criticality = Column(String, default="high")    # critical/high/medium/low
+    fw_role = Column(String, nullable=False, default="perimeter")   # perimeter/datacenter/internal/branch/dr/vpn/cloud
+    criticality = Column(String, nullable=False, default="high")    # critical/high/medium/low
 
     # Network interfaces discovered during last sync (JSON list of {name, ip, mask, type, status})
     device_interfaces = Column(Text, nullable=True)    # JSON-encoded list
@@ -59,7 +65,7 @@ class FirewallDevice(Base):
 
     # Status tracking
     last_sync_at = Column(DateTime, nullable=True)
-    sync_status = Column(String, default="never")   # "never"|"running"|"ok"|"error"
+    sync_status = Column(String, nullable=False, default="never")   # "never"|"running"|"ok"|"error"
     last_error = Column(Text, nullable=True)
     last_policy_id = Column(String, nullable=True)
 
@@ -68,3 +74,5 @@ class FirewallDevice(Base):
 
     # Relationship
     customer = relationship("Customer", back_populates="devices")
+    policies = relationship("FirewallPolicy", back_populates="device", passive_deletes=True)
+    revisions = relationship("PolicyRevision", back_populates="device", passive_deletes=True)

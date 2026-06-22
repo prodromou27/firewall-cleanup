@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useCustomer } from '../contexts/CustomerContext'
-import { Loader, RefreshCw, Trash2, Eye, FileText, GitCompare, Shield, BarChart2, TrendingUp, Search, ArrowUpDown } from 'lucide-react'
+import { RefreshCw, Trash2, Eye, FileText, GitCompare, Shield, BarChart2, TrendingUp, Search, ArrowUpDown } from 'lucide-react'
 import { getPoliciesPage, deletePolicy, reanalyzePolicy, getPolicy } from '../api/client'
 import { SeverityBadge } from '../components/ui/SeverityBadge'
-import { EmptyState, LoadingState } from '../components/ui/page-state'
+import { EmptyState, ErrorState, LoadingState } from '../components/ui/page-state'
 import { VendorBadge } from '../components/ui/vendor-badge'
 import type { Policy } from '../types'
 import { clsx } from 'clsx'
+import { friendlyErrorMessage } from '../utils/errors'
 
 function StatusChip({ status }: { status: string }) {
   const cls = clsx('inline-flex items-center text-xs font-semibold px-2.5 py-0.5 rounded-full', {
@@ -38,12 +39,14 @@ export function Policies() {
   const [status, setStatus] = useState('')
   const [sortBy, setSortBy] = useState('upload_date')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [error, setError] = useState('')
   const navigate = useNavigate()
   const params = useParams<{ customerId?: string }>()
   const { activeCustomer } = useCustomer()
   const customerId = params.customerId || activeCustomer?.id || ''
 
   const load = () => {
+    setError('')
     const pp: Record<string, string | number> = {
       page,
       page_size: POLICY_PAGE_SIZE,
@@ -56,6 +59,11 @@ export function Policies() {
     if (status) pp.analysis_status = status
     getPoliciesPage(pp)
       .then(data => { setPolicies(data.policies); setTotal(data.total) })
+      .catch(e => {
+        setPolicies([])
+        setTotal(0)
+        setError(friendlyErrorMessage(e, 'Policies could not be loaded. Please refresh and try again.'))
+      })
       .finally(() => setLoading(false))
   }
 
@@ -77,13 +85,21 @@ export function Policies() {
 
   const handleDelete = async (id: string, name: string) => {
     if (!confirm(`Delete policy for ${name}? This cannot be undone.`)) return
-    await deletePolicy(id)
-    load()
+    try {
+      await deletePolicy(id)
+      load()
+    } catch (e) {
+      setError(friendlyErrorMessage(e, 'Policy could not be deleted. Please try again.'))
+    }
   }
 
   const handleReanalyze = async (id: string) => {
-    await reanalyzePolicy(id)
-    load()
+    try {
+      await reanalyzePolicy(id)
+      load()
+    } catch (e) {
+      setError(friendlyErrorMessage(e, 'Analysis could not be started. Please try again.'))
+    }
   }
 
   if (loading && policies.length === 0) return <LoadingState label="Loading policies..." className="m-7" />
@@ -128,11 +144,15 @@ export function Policies() {
           </select>
         </div>
 
-        {policies.length === 0 ? (
+        {error ? (
+          <ErrorState title="Policies unavailable" message={error} />
+        ) : policies.length === 0 ? (
           <EmptyState
             icon={<Shield className="w-7 h-7" />}
-            title="No policies match the current filters"
-            description="Upload a firewall configuration or clear the current search and filters."
+            title={search || vendor || status ? 'No policies match the current filters' : 'No policies imported yet'}
+            description={search || vendor || status
+              ? 'Clear filters or adjust the search to find an imported policy.'
+              : 'Upload a firewall configuration to run read-only analysis and start generating findings.'}
             action={<Link to={uploadLink} className="btn-primary">Upload policy</Link>}
           />
         ) : (
@@ -234,14 +254,26 @@ export function Policies() {
 export function PolicyDetail() {
   const [policy, setPolicy] = useState<Policy & { findings_by_type: Array<{ type: string; count: number }> } | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const { id } = useParams<{ id: string }>()
 
   useEffect(() => {
-    if (id) getPolicy(id).then(setPolicy).finally(() => setLoading(false))
+    if (id) {
+      setLoading(true)
+      setError('')
+      getPolicy(id)
+        .then(setPolicy)
+        .catch(e => {
+          setPolicy(null)
+          setError(friendlyErrorMessage(e, 'Policy details could not be loaded. Please return to the policy inventory and try again.'))
+        })
+        .finally(() => setLoading(false))
+    }
   }, [id])
 
-  if (loading) return <div className="flex justify-center items-center h-64"><Loader className="animate-spin w-8 h-8 text-blue-600" /></div>
-  if (!policy) return <div className="p-8 text-red-600">Policy not found.</div>
+  if (loading) return <LoadingState label="Loading policy..." className="m-7" />
+  if (error) return <div className="p-7"><ErrorState title="Policy unavailable" message={error} /></div>
+  if (!policy) return <div className="p-7"><ErrorState title="Policy unavailable" message="This policy could not be found or is no longer accessible." /></div>
 
   const TYPE_LABELS: Record<string, string> = {
     duplicate_rule: 'Duplicate Rules',

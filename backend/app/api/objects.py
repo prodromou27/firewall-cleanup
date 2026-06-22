@@ -24,18 +24,24 @@ _CATEGORY_FINDING_TYPE = {
 }
 
 
-def _object_ids_for_finding_type(
-    db: Session, finding_type: str, scoped_policy_ids: Optional[list]
-) -> set:
-    """Collect object IDs referenced by findings of a given type, within scope."""
-    ids: set = set()
-    fq = db.query(Finding).filter(Finding.finding_type == finding_type)
+def _object_ids_for_finding_types(
+    db: Session, finding_types: list[str], scoped_policy_ids: Optional[list]
+) -> dict[str, set]:
+    """Collect object IDs referenced by hygiene findings in one query."""
+    ids_by_type: dict[str, set] = {t: set() for t in finding_types}
+    if not finding_types:
+        return ids_by_type
+    fq = (
+        db.query(Finding.finding_type, Finding.affected_objects)
+        .filter(Finding.finding_type.in_(finding_types))
+    )
     if scoped_policy_ids:
         fq = fq.filter(Finding.policy_id.in_(scoped_policy_ids))
-    for f in fq.all():
-        for oid in (f.affected_objects or []):
-            ids.add(oid)
-    return ids
+    for finding_type, affected_objects in fq.all():
+        target = ids_by_type.setdefault(finding_type, set())
+        for oid in (affected_objects or []):
+            target.add(oid)
+    return ids_by_type
 
 
 @router.get("")
@@ -101,24 +107,14 @@ def list_objects(
             | FirewallObject.value.ilike(f"%{search}%")
         )
 
-    # Build hygiene category sets from findings (single source of truth = engine)
-    unused_ids = _object_ids_for_finding_type(db, "unused_object", scoped_policy_ids)
-    duplicate_ids = _object_ids_for_finding_type(db, "duplicate_object", scoped_policy_ids)
-    empty_group_ids = _object_ids_for_finding_type(db, "empty_group", scoped_policy_ids)
-    large_group_ids = _object_ids_for_finding_type(db, "large_group", scoped_policy_ids)
-
-    flag_sets = {
-        "unused": unused_ids,
-        "duplicates": duplicate_ids,
-        "empty_groups": empty_group_ids,
-        "large_groups": large_group_ids,
-    }
-
     # Apply category filter (unused_only kept for backward compatibility)
     if unused_only:
         category = category or "unused"
-    if category in flag_sets:
-        target = flag_sets[category]
+    category_sets: dict[str, set] = {}
+    if category in _CATEGORY_FINDING_TYPE:
+        finding_type = _CATEGORY_FINDING_TYPE[category]
+        category_sets = _object_ids_for_finding_types(db, [finding_type], scoped_policy_ids)
+        target = category_sets.get(finding_type, set())
         if target:
             q = q.filter(FirewallObject.id.in_(target))
         else:
@@ -129,6 +125,14 @@ def list_objects(
     if direction == "desc":
         sort_col = sort_col.desc()
     objects = q.order_by(sort_col).offset((page - 1) * page_size).limit(page_size).all()
+
+    hygiene_sets = _object_ids_for_finding_types(db, list(_CATEGORY_FINDING_TYPE.values()), scoped_policy_ids)
+    flag_sets = {
+        "unused": hygiene_sets.get("unused_object", set()),
+        "duplicates": hygiene_sets.get("duplicate_object", set()),
+        "empty_groups": hygiene_sets.get("empty_group", set()),
+        "large_groups": hygiene_sets.get("large_group", set()),
+    }
 
     return {
         "total": total,

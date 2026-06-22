@@ -2,7 +2,8 @@
 PolicyRevision — stores a snapshot hash of each policy sync so we can
 detect changes between syncs (Tufin-style change tracking).
 """
-from sqlalchemy import Column, String, Integer, DateTime, Text, JSON, ForeignKey
+from sqlalchemy import Column, String, Integer, DateTime, Text, JSON, ForeignKey, Index
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import uuid
 
@@ -15,24 +16,29 @@ def _uuid():
 
 class PolicyRevision(Base):
     __tablename__ = "policy_revisions"
+    __table_args__ = (
+        Index("ix_policy_revisions_policy_revision", "policy_id", "revision_number"),
+        Index("ix_policy_revisions_policy_synced", "policy_id", "synced_at"),
+        Index("ix_policy_revisions_device_synced", "device_id", "synced_at"),
+    )
 
     id = Column(String, primary_key=True, default=_uuid)
     policy_id = Column(String, ForeignKey("firewall_policies.id", ondelete="CASCADE"), nullable=False)
-    device_id = Column(String, nullable=True)        # FirewallDevice.id if from live sync
+    device_id = Column(String, ForeignKey("firewall_devices.id", ondelete="SET NULL"), nullable=True)
 
     revision_number = Column(Integer, nullable=False)    # 1, 2, 3 …
     synced_at = Column(DateTime, server_default=func.now())
-    sync_source = Column(String, default="upload")   # "upload" | "live_sync"
+    sync_source = Column(String, nullable=False, default="upload")   # "upload" | "live_sync"
 
-    rule_count = Column(Integer, default=0)
-    object_count = Column(Integer, default=0)
-    finding_count = Column(Integer, default=0)
-    high_finding_count = Column(Integer, default=0)
+    rule_count = Column(Integer, nullable=False, default=0)
+    object_count = Column(Integer, nullable=False, default=0)
+    finding_count = Column(Integer, nullable=False, default=0)
+    high_finding_count = Column(Integer, nullable=False, default=0)
 
     # Diff vs previous revision
-    rules_added = Column(Integer, default=0)
-    rules_removed = Column(Integer, default=0)
-    rules_modified = Column(Integer, default=0)
+    rules_added = Column(Integer, nullable=False, default=0)
+    rules_removed = Column(Integer, nullable=False, default=0)
+    rules_modified = Column(Integer, nullable=False, default=0)
 
     # SHA-256 of sorted rule IDs + action + src/dst/svc — change detection
     policy_hash = Column(String, nullable=True)
@@ -43,3 +49,6 @@ class PolicyRevision(Base):
     change_detail = Column(JSON, nullable=True)
 
     notes = Column(Text, nullable=True)
+
+    policy = relationship("FirewallPolicy", back_populates="revisions")
+    device = relationship("FirewallDevice", back_populates="revisions")

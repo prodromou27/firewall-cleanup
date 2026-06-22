@@ -29,16 +29,18 @@ if (-not $pythonCmd) {
 
 # Backend setup
 Write-Host "`nSetting up backend..." -ForegroundColor Cyan
-Push-Location ".\backend"
 
-if (-not (Test-Path "venv")) {
+if (-not (Test-Path ".\.venv")) {
     Write-Host "Creating virtual environment..." -ForegroundColor Yellow
-    & $pythonCmd -m venv venv
+    & $pythonCmd -m venv .venv
 }
 
 Write-Host "Installing Python dependencies..." -ForegroundColor Yellow
-& ".\venv\Scripts\pip.exe" install -r requirements.txt --quiet
+& ".\.venv\Scripts\pip.exe" install -r ".\backend\requirements.txt" --quiet
 
+Write-Host "Running database migrations..." -ForegroundColor Yellow
+Push-Location ".\backend"
+& "..\.venv\Scripts\python.exe" -m alembic upgrade head
 Pop-Location
 
 # Frontend setup
@@ -50,3 +52,4 @@ Pop-Location
 
 Write-Host "`n=== Setup Complete! ===" -ForegroundColor Green
 Write-Host "To start the application, run: .\start.ps1" -ForegroundColor Green
+Write-Host "To add demo data, run: .\.venv\Scripts\python.exe backend\scripts\seed_demo.py" -ForegroundColor Green

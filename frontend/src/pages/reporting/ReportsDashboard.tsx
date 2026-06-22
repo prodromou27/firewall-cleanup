@@ -5,7 +5,8 @@ import {
   listGeneratedReportsPage, listReportTemplates, reportDownloadUrl,
   type GeneratedReportRow, type ReportTemplate,
 } from '../../api/client'
-import { EmptyState, LoadingState } from '../../components/ui/page-state'
+import { EmptyState, ErrorState, LoadingState } from '../../components/ui/page-state'
+import { fetchFailureMessage, friendlyErrorMessage } from '../../utils/errors'
 
 const REPORT_PAGE_SIZE = 50
 
@@ -27,7 +28,7 @@ function safeDownloadName(name: string) {
 
 async function download(id: string, name: string) {
   const res = await fetch(reportDownloadUrl(id), { credentials: 'include' })
-  if (!res.ok) return
+  if (!res.ok) throw new Error(await fetchFailureMessage(res, 'Report download could not be prepared. Please try again.'))
   const blob = await res.blob()
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = safeDownloadName(name); a.click()
   URL.revokeObjectURL(a.href)
@@ -53,9 +54,14 @@ export function ReportsDashboard() {
   const [format, setFormat] = useState('')
   const [sortBy, setSortBy] = useState('generated_at')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [reportsError, setReportsError] = useState('')
+  const [templatesError, setTemplatesError] = useState('')
+  const [actionError, setActionError] = useState('')
 
   const load = () => {
     setLoading(true)
+    setReportsError('')
+    setTemplatesError('')
     const p: Record<string, string | number> = {
       page,
       page_size: REPORT_PAGE_SIZE,
@@ -65,8 +71,15 @@ export function ReportsDashboard() {
     if (search.trim()) p.search = search.trim()
     if (format) p.export_format = format
     Promise.all([
-      listGeneratedReportsPage(p).then(d => { setReports(d.reports); setTotal(d.total) }).catch(() => { setReports([]); setTotal(0) }),
-      listReportTemplates().then(d => setTemplates(d.templates)).catch(() => setTemplates([])),
+      listGeneratedReportsPage(p).then(d => { setReports(d.reports); setTotal(d.total) }).catch(e => {
+        setReports([])
+        setTotal(0)
+        setReportsError(friendlyErrorMessage(e, 'Generated reports could not be loaded. Please refresh and try again.'))
+      }),
+      listReportTemplates().then(d => setTemplates(d.templates)).catch(e => {
+        setTemplates([])
+        setTemplatesError(friendlyErrorMessage(e, 'Report templates could not be loaded. Please refresh and try again.'))
+      }),
     ]).finally(() => setLoading(false))
   }
   useEffect(load, [page, search, format, sortBy, sortDir])
@@ -96,11 +109,15 @@ export function ReportsDashboard() {
       </div>
 
       <div className="page-body space-y-6">
+        {actionError && <ErrorState title="Report action failed" message={actionError} />}
         {/* Templates */}
         <div>
           <h2 className="text-sm font-semibold text-gray-700 mb-2">Templates</h2>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {templates.map(t => (
+            {templatesError && (
+              <ErrorState title="Templates unavailable" message={templatesError} className="sm:col-span-2 lg:col-span-3 min-h-[180px]" />
+            )}
+            {!templatesError && templates.map(t => (
               <button key={t.id} onClick={() => navigate(`/reports/templates/${t.id}`)} className="card text-left hover:border-blue-300">
                 <div className="flex items-center justify-between">
                   <h3 className="font-semibold text-sm">{t.name}</h3>
@@ -111,7 +128,7 @@ export function ReportsDashboard() {
                 <p className="text-[11px] text-gray-400 mt-2">{t.sections.filter(s => s.enabled).length} sections · {t.default_export_format.toUpperCase()}</p>
               </button>
             ))}
-            {templates.length === 0 && !loading && (
+            {!templatesError && templates.length === 0 && !loading && (
               <EmptyState
                 icon={<Settings2 className="w-6 h-6" />}
                 title="No report templates yet"
@@ -146,13 +163,17 @@ export function ReportsDashboard() {
             </select>
             <span className="ml-auto text-xs text-gray-400">{total.toLocaleString()} reports</span>
           </div>
-          {loading ? (
+          {reportsError ? (
+            <ErrorState title="Reports unavailable" message={reportsError} />
+          ) : loading ? (
             <LoadingState label="Loading reports..." />
           ) : reports.length === 0 ? (
             <EmptyState
               icon={<FileText className="w-6 h-6" />}
-              title="No reports generated yet"
-              description="Generate a report from an analyzed policy when you are ready to share findings."
+              title={search || format ? 'No reports match the current filters' : 'No reports generated yet'}
+              description={search || format
+                ? 'Adjust the search or format filter to find an existing report.'
+                : 'Generate a report from an analyzed policy when you are ready to share findings.'}
               action={<button onClick={() => navigate('/reports/new')} className="btn-primary"><Plus className="w-4 h-4" /> Create report</button>}
             />
           ) : (
@@ -185,7 +206,10 @@ export function ReportsDashboard() {
                       <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{fmtDate(r.generated_at)}</td>
                       <td className="px-4 py-2.5 text-gray-500">{r.generated_by || '—'}</td>
                       <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                        <button onClick={() => download(r.id, r.file_name)} className="text-blue-600 hover:text-blue-800 inline-flex items-center gap-1 text-xs"><Download className="w-3.5 h-3.5" /> Download</button>
+                        <button onClick={() => {
+                          setActionError('')
+                          download(r.id, r.file_name).catch(e => setActionError(e instanceof Error ? e.message : 'Report download could not be prepared. Please try again.'))
+                        }} className="text-blue-600 hover:text-blue-800 inline-flex items-center gap-1 text-xs"><Download className="w-3.5 h-3.5" /> Download</button>
                         <button onClick={() => navigate(regenerateUrl(r))} className="ml-3 text-gray-500 hover:text-gray-700 text-xs">Regenerate</button>
                       </td>
                     </tr>

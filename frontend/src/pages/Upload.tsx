@@ -8,6 +8,7 @@ import {
 import { getCustomers, getDevices, getPolicy, uploadPolicy } from '../api/client'
 import { ErrorState } from '../components/ui/page-state'
 import type { Customer, FirewallDeviceT, Policy } from '../types'
+import { friendlyErrorMessage } from '../utils/errors'
 
 interface FormValues {
   customer_id: string
@@ -155,6 +156,8 @@ export function Upload() {
   const [result, setResult] = useState<UploadResult | null>(null)
   const [policy, setPolicy] = useState<Policy | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [customerLoadError, setCustomerLoadError] = useState('')
+  const [deviceLoadError, setDeviceLoadError] = useState('')
 
   const preselectedCustomer = searchParams.get('customer_id') || ''
   const { register, handleSubmit, formState: { errors }, watch, setValue } = useForm<FormValues>({
@@ -173,16 +176,26 @@ export function Upload() {
   const uploading = ['uploading', 'parsing', 'analysis'].includes(phase)
 
   useEffect(() => {
-    getCustomers({ status: 'active' }).then(setCustomers).catch(() => setCustomers([]))
+    setCustomerLoadError('')
+    getCustomers({ status: 'active' })
+      .then(setCustomers)
+      .catch(e => {
+        setCustomers([])
+        setCustomerLoadError(friendlyErrorMessage(e, 'Active customers could not be loaded. Please refresh and try again.'))
+      })
   }, [])
 
   useEffect(() => {
     setSelectedDeviceId('')
     setDevices([])
+    setDeviceLoadError('')
     if (!selectedCustomerId) return
     getDevices(selectedCustomerId)
       .then(rows => setDevices(rows))
-      .catch(() => setDevices([]))
+      .catch(e => {
+        setDevices([])
+        setDeviceLoadError(friendlyErrorMessage(e, 'Firewall devices for this customer could not be loaded. You can still enter the firewall name manually.'))
+      })
   }, [selectedCustomerId])
 
   useEffect(() => {
@@ -212,8 +225,11 @@ export function Upload() {
         } else if (tries < 90) {
           window.setTimeout(poll, 2000)
         }
-      } catch {
-        if (!cancelled && tries < 90) window.setTimeout(poll, 2500)
+      } catch (e) {
+        if (!cancelled && tries >= 90) {
+          setPhase('failed')
+          setError(friendlyErrorMessage(e, 'Analysis status could not be confirmed. Check the policy inventory before retrying.'))
+        } else if (!cancelled) window.setTimeout(poll, 2500)
       }
     }
     poll()
@@ -256,7 +272,7 @@ export function Upload() {
     } catch (e: unknown) {
       const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
       setPhase('failed')
-      setError(uploadDetailMessage(detail))
+      setError(detail ? uploadDetailMessage(detail) : friendlyErrorMessage(e, 'Upload failed. Please verify the file and try again.'))
     }
   }
 
@@ -292,7 +308,9 @@ export function Upload() {
                 <Users className="h-3 w-3" /> Manage customers
               </Link>
             </div>
-            {customers.length === 0 ? (
+            {customerLoadError ? (
+              <ErrorState title="Customers unavailable" message={customerLoadError} />
+            ) : customers.length === 0 ? (
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm">
                 <p className="mb-2 font-medium text-amber-800">No active customers are available.</p>
                 <Link to="/customers" className="btn-primary w-fit text-sm"><Plus className="h-3.5 w-3.5" /> Onboard customer</Link>
@@ -310,6 +328,11 @@ export function Upload() {
                     {selectedCustomer.total_policies} existing policies, {selectedCustomer.total_findings} findings
                     {selectedCustomer.contact_name ? `, contact: ${selectedCustomer.contact_name}` : ''}
                   </div>
+                )}
+                {deviceLoadError && (
+                  <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    {deviceLoadError}
+                  </p>
                 )}
               </>
             )}

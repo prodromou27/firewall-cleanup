@@ -65,24 +65,57 @@ HTTPS/TLS, the DEV→PROD promotion loop, auto-update, and troubleshooting.
 
 ## Local development
 
-### Backend
+### Quick start on Windows
+
+```powershell
+.\setup.ps1
+.\start.ps1 -SeedDemo
+```
+
+`setup.ps1` creates a root `.venv`, installs backend and frontend dependencies,
+and runs Alembic migrations. `start.ps1 -SeedDemo` starts both servers and, on
+first run, imports the sample vendor policies into a demo tenant.
+
+Demo login created by the seed script:
+
+- Email: `demo@policyinsight.local`
+- Password: `PolicyInsightDemo!2026`
+
+### Manual backend setup
 
 ```bash
-cd backend
-python -m venv venv
+python -m venv .venv
 # Windows:
-venv\Scripts\activate
+.venv\Scripts\activate
 # Linux/Mac:
-source venv/bin/activate
+source .venv/bin/activate
 
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+pip install -r backend/requirements.txt
+cd backend
+python -m alembic upgrade head
+python -m uvicorn app.main:app --reload --port 8000
 ```
 
 API: http://localhost:8000  ·  Interactive docs (non-production only): http://localhost:8000/docs
 
 By default the dev backend uses SQLite. Set `DATABASE_URL=postgresql+psycopg2://...`
-to point at Postgres. See `.env.example` for all settings.
+to point at Postgres. See `.env.example` and [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md)
+for all settings.
+
+### Demo seed data
+
+After migrations, seed a realistic local workspace:
+
+```bash
+python backend/scripts/seed_demo.py
+```
+
+Use `--replace` to reimport the demo policies after changing parser or analysis
+logic:
+
+```bash
+python backend/scripts/seed_demo.py --replace
+```
 
 ### Frontend
 
@@ -97,8 +130,10 @@ UI: http://localhost:3000 (Vite proxies `/api` to the backend — same-origin, n
 ## Running tests
 
 ```bash
-cd backend
-pytest tests/ -v
+python -m pytest backend/tests/ -v
+cd frontend
+npm test
+npm run build
 ```
 
 > Note: PDF export uses WeasyPrint, which is only importable inside the Linux
@@ -112,8 +147,10 @@ Sample policy files for each vendor live in `sample_data/`:
 - `checkpoint_sample.json`
 - `paloalto_sample.xml`
 - `ciscoasa_sample.txt`
+- `huawei_sample.txt`
 
-Upload these via the **Upload Policy** page to see the platform in action.
+Upload these via the **Upload Policy** page or run `backend/scripts/seed_demo.py`
+to import all samples automatically.
 
 ## Project structure
 
@@ -146,6 +183,17 @@ cleanup_project/
 └── sample_data/                 # Per-vendor sample policy files
 ```
 
+## Developer landmarks
+
+```text
+backend/scripts/seed_demo.py      Demo tenant, user, policies, findings, and report templates
+docs/ENVIRONMENT.md               Environment variable reference
+frontend/src/api/http.ts          Shared axios instance and session handling
+frontend/src/api/client.ts        Typed frontend endpoint helpers
+frontend/src/utils/errors.ts      Frontend API error normalization
+sample_data/                      Realistic parser/import samples
+```
+
 ## Architecture notes
 
 - **Database:** SQLite for local dev; **PostgreSQL** for the Docker stack. Schema
@@ -158,6 +206,8 @@ cleanup_project/
 - **Reporting** builds one shared `ReportData` model and feeds every exporter, so
   output stays consistent across HTML/PDF/DOCX/XLSX/CSV/JSON.
 - **Frontend** is same-origin with the API (Vite proxy in dev, nginx proxy in prod).
+- **API client** code is split between `frontend/src/api/http.ts` for the shared
+  axios/session setup and `frontend/src/api/client.ts` for typed endpoint helpers.
 
 ## Adding a new vendor
 

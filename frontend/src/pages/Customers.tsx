@@ -14,6 +14,8 @@ import {
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../components/ui/select'
+import { EmptyState, ErrorState, LoadingState } from '../components/ui/page-state'
+import { friendlyErrorMessage } from '../utils/errors'
 
 // ── Risk indicator ──────────────────────────────────────────
 function RiskPill({ high, total }: { high: number; total: number }) {
@@ -81,9 +83,7 @@ function CustomerModal({
       onSaved()
       onClose()
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-        || 'Failed to save customer.'
-      setError(msg)
+      setError(friendlyErrorMessage(e, 'Customer could not be saved. Please review the details and try again.'))
     } finally {
       setSaving(false)
     }
@@ -333,10 +333,18 @@ export function Customers() {
   const [showModal, setShowModal] = useState(false)
   const [editingCustomer, setEditingCustomer] = useState<Customer | undefined>()
   const [pendingDelete, setPendingDelete] = useState<Customer | undefined>()
+  const [error, setError] = useState('')
 
   const load = useCallback(() => {
     setLoading(true)
-    getCustomers().then(setCustomers).finally(() => setLoading(false))
+    setError('')
+    getCustomers()
+      .then(setCustomers)
+      .catch(e => {
+        setCustomers([])
+        setError(friendlyErrorMessage(e, 'Customers could not be loaded. Please refresh and try again.'))
+      })
+      .finally(() => setLoading(false))
   }, [])
 
   useEffect(() => { load() }, [load])
@@ -345,9 +353,14 @@ export function Customers() {
 
   const confirmDelete = async () => {
     if (!pendingDelete) return
-    await deleteCustomer(pendingDelete.id)
-    setPendingDelete(undefined)
-    load()
+    try {
+      await deleteCustomer(pendingDelete.id)
+      setPendingDelete(undefined)
+      load()
+    } catch (e) {
+      setPendingDelete(undefined)
+      setError(friendlyErrorMessage(e, 'Customer could not be deleted. Please try again.'))
+    }
   }
 
   const filtered = customers.filter(c =>
@@ -392,29 +405,23 @@ export function Customers() {
       </div>
     <div className="page-body">
 
-      {loading ? (
-        <div className="flex justify-center py-20">
-          <div className="animate-spin w-8 h-8 border-b-2 border-blue-600 rounded-full" />
-        </div>
+      {error ? (
+        <ErrorState title="Customers unavailable" message={error} />
+      ) : loading ? (
+        <LoadingState label="Loading customers..." />
       ) : filtered.length === 0 ? (
-        <div className="text-center py-20">
-          <div className="w-16 h-16 rounded-2xl bg-blue-50 flex items-center justify-center mx-auto mb-4">
-            <Users className="w-8 h-8 text-blue-400" />
-          </div>
-          <h2 className="text-lg font-semibold text-gray-700 mb-1">
-            {customers.length === 0 ? 'No customers yet' : 'No results'}
-          </h2>
-          <p className="text-gray-400 text-sm mb-6">
-            {customers.length === 0
-              ? 'Onboard your first customer to get started.'
-              : 'Try a different search term.'}
-          </p>
-          {customers.length === 0 && (
+        <EmptyState
+          icon={<Users className="w-7 h-7" />}
+          title={customers.length === 0 ? 'No customers yet' : 'No customers match your search'}
+          description={customers.length === 0
+            ? 'Onboard the first customer before uploading policies, connecting devices, or generating reports.'
+            : 'Try a different customer name, description, or clear the search box.'}
+          action={customers.length === 0 ? (
             <button onClick={() => { setEditingCustomer(undefined); setShowModal(true) }} className="btn-primary">
               Onboard First Customer
             </button>
-          )}
-        </div>
+          ) : null}
+        />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
           {filtered.map(c => (

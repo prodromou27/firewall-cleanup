@@ -1,16 +1,5 @@
-﻿import axios from 'axios'
+﻿import api, { API_BASE } from './http'
 
-// Authentication is session-cookie based. On login the backend sets an
-// HttpOnly cookie (pi_session); the browser sends it automatically on every
-// same-origin request. The frontend never sees or stores the token.
-//
-// All requests go through the same-origin path (`/api`, proxied to the backend
-// in dev) so the cookie is included without any CORS credential gymnastics.
-// `withCredentials` ensures the cookie rides along even if a request ends up
-// being treated as cross-origin.
-
-// Same-origin base for direct fetch() calls (downloads, etc.). Empty string =>
-// relative URLs like `/api/...`, which the dev server proxies to the backend.
 import type {
   Customer as AppCustomer,
   Finding as AppFinding,
@@ -19,30 +8,7 @@ import type {
   Policy as AppPolicy,
 } from '../types'
 
-export const API_BASE = ''
-
-const api = axios.create({
-  baseURL: '/api',
-  timeout: 60000,
-  withCredentials: true,
-})
-
-// On any 401, drop to the login screen. A custom event lets the AuthProvider
-// react without this module importing React.
-let _redirectingToLogin = false
-api.interceptors.response.use(
-  r => r,
-  err => {
-    if (err?.response?.status === 401 && !_redirectingToLogin) {
-      _redirectingToLogin = true
-      window.dispatchEvent(new CustomEvent('auth:unauthorized'))
-      // allow subsequent 401s after a tick (e.g. parallel requests)
-      setTimeout(() => { _redirectingToLogin = false }, 500)
-    }
-    return Promise.reject(err)
-  },
-)
-
+export { API_BASE }
 export default api
 
 // ── Auth ─────────────────────────────────────────────────────────────────────

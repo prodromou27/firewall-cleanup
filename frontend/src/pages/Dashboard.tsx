@@ -9,8 +9,9 @@ import {
 import { getDashboardStats, getCustomers, getFindingsTrend } from '../api/client'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useCustomer } from '../contexts/CustomerContext'
-import { EmptyState, LoadingState } from '../components/ui/page-state'
+import { EmptyState, ErrorState, LoadingState } from '../components/ui/page-state'
 import { VendorBadge } from '../components/ui/vendor-badge'
+import { friendlyErrorMessage } from '../utils/errors'
 import type { DashboardStats, Customer, RiskHeatmapEntry } from '../types'
 
 /* ── Helpers ─────────────────────────────────────────────── */
@@ -172,18 +173,27 @@ export function Dashboard() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [trend, setTrend] = useState<Array<{ date: string; total: number }>>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const [customers, setCustomers] = useState<Customer[]>([])
   // Use global customer context; fall back to URL param for backwards compat
   const [selectedCustomer, setSelectedCustomer] = useState(
     searchParams.get('customer_id') || activeCustomer?.id || ''
   )
 
-  useEffect(() => { getCustomers().then(setCustomers).catch(() => {}) }, [])
+  useEffect(() => {
+    getCustomers().then(setCustomers).catch(() => setCustomers([]))
+  }, [])
 
   useEffect(() => {
     setLoading(true)
+    setError('')
     getDashboardStats(selectedCustomer || undefined)
-      .then(setStats).catch(console.error).finally(() => setLoading(false))
+      .then(setStats)
+      .catch(e => {
+        setStats(null)
+        setError(friendlyErrorMessage(e, 'Dashboard data could not be loaded. Please refresh or try another customer.'))
+      })
+      .finally(() => setLoading(false))
     getFindingsTrend(selectedCustomer || undefined, 90)
       .then(r => setTrend(r.points.map(p => ({ date: p.date, total: p.total }))))
       .catch(() => setTrend([]))
@@ -199,6 +209,13 @@ export function Dashboard() {
 
   if (loading) {
     return <LoadingState label="Loading dashboard..." className="m-7" />
+  }
+  if (error) {
+    return (
+      <div className="p-7">
+        <ErrorState title="Dashboard unavailable" message={error} />
+      </div>
+    )
   }
   if (!stats) return null
 

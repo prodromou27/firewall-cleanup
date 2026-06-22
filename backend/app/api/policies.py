@@ -4,7 +4,7 @@ import io
 import json
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import func, or_
 from typing import Optional
 from app.database import get_db
@@ -269,10 +269,23 @@ def get_dashboard_stats(
     )
 
     # Policy risk heatmap data
-    heatmap_q = db.query(FirewallPolicy).filter(FirewallPolicy.analysis_status == "completed")
+    heatmap_q = (
+        db.query(FirewallPolicy)
+        .options(selectinload(FirewallPolicy.customer))
+        .filter(FirewallPolicy.analysis_status == "completed")
+    )
     if scoped_policy_ids is not None:
         heatmap_q = heatmap_q.filter(FirewallPolicy.id.in_(scoped_policy_ids))
-    policies = heatmap_q.all()
+    policies = (
+        heatmap_q
+        .order_by(
+            FirewallPolicy.high_finding_count.desc(),
+            FirewallPolicy.finding_count.desc(),
+            FirewallPolicy.rule_count.desc(),
+        )
+        .limit(100)
+        .all()
+    )
 
     # Preload all rules and findings for heatmap policies in 2 bulk queries (avoids N+1)
     heatmap_policy_ids = [p.id for p in policies]

@@ -1,10 +1,30 @@
-# Firewall Policy Cleanup Assistant - Start Script
+# PolicyInsight - Start Script
+param(
+    [switch]$SeedDemo
+)
 
-Write-Host "=== Firewall Policy Cleanup Assistant ===" -ForegroundColor Cyan
+Write-Host "=== PolicyInsight ===" -ForegroundColor Cyan
 Write-Host "Starting backend and frontend..." -ForegroundColor Yellow
 
+$PythonExe = ".\.venv\Scripts\python.exe"
+if (-not (Test-Path $PythonExe)) {
+    $PythonExe = ".\backend\venv\Scripts\python.exe"
+}
+if (-not (Test-Path $PythonExe)) {
+    Write-Host "Python environment not found. Run .\setup.ps1 first." -ForegroundColor Red
+    exit 1
+}
+
+Push-Location ".\backend"
+& "..\$PythonExe" -m alembic upgrade head
+Pop-Location
+
+if ($SeedDemo) {
+    & $PythonExe "backend\scripts\seed_demo.py"
+}
+
 # Start backend
-$backend = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "cd backend && venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000" -WindowStyle Normal -PassThru
+$backend = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "$PythonExe -m uvicorn app.main:app --reload --port 8000 --app-dir backend" -WindowStyle Normal -PassThru
 
 # Give backend time to start
 Start-Sleep -Seconds 3

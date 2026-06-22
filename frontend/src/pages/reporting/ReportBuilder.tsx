@@ -10,6 +10,7 @@ import {
   type ReportAnalysisRun,
 } from '../../api/client'
 import type { Policy } from '../../types'
+import { fetchFailureMessage, friendlyErrorMessage } from '../../utils/errors'
 
 const SEVERITIES = ['Critical', 'High', 'Medium', 'Low', 'Informational']
 const FORMATS: Array<{ key: string; label: string; hint: string }> = [
@@ -50,10 +51,10 @@ export function ReportBuilder() {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    getPolicies({}).then(d => setPolicies(Array.isArray(d) ? d : [])).catch(() => {})
-    listReportTemplates().then(d => setTemplates(d.templates)).catch(() => {})
-    getReportSections().then(d => setCatalog(d.sections)).catch(() => {})
-    getReportFindingCategories().then(d => setCategories(d.categories)).catch(() => {})
+    getPolicies({}).then(d => setPolicies(Array.isArray(d) ? d : [])).catch(e => setError(friendlyErrorMessage(e, 'Policies could not be loaded for report generation. Please refresh and try again.')))
+    listReportTemplates().then(d => setTemplates(d.templates)).catch(e => setError(friendlyErrorMessage(e, 'Report templates could not be loaded. Please refresh and try again.')))
+    getReportSections().then(d => setCatalog(d.sections)).catch(e => setError(friendlyErrorMessage(e, 'Report sections could not be loaded. Please refresh and try again.')))
+    getReportFindingCategories().then(d => setCategories(d.categories)).catch(e => setError(friendlyErrorMessage(e, 'Finding categories could not be loaded. Please refresh and try again.')))
   }, [])
 
   useEffect(() => {
@@ -111,9 +112,9 @@ export function ReportBuilder() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...body(), export_format: 'html' }),
       })
-      if (!res.ok) throw new Error(`Preview failed (${res.status})`)
+      if (!res.ok) throw new Error(await fetchFailureMessage(res, 'Report preview could not be generated. Please try again.'))
       setPreviewHtml(await res.text())
-    } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
+    } catch (e) { setError(e instanceof Error ? e.message : 'Report preview could not be generated. Please try again.') } finally { setBusy(false) }
   }
 
   const doExport = async (fmt: string) => {
@@ -121,11 +122,11 @@ export function ReportBuilder() {
     try {
       const r = await generateReport({ ...body(), export_format: fmt })
       const res = await fetch(reportDownloadUrl(r.id), { credentials: 'include' })
-      if (!res.ok) throw new Error(`Download failed (${res.status})`)
+      if (!res.ok) throw new Error(await fetchFailureMessage(res, 'Report export could not be downloaded. Please try again.'))
       const blob = await res.blob()
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
       a.download = safeDownloadName(r.file_name); a.click(); URL.revokeObjectURL(a.href)
-    } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
+    } catch (e) { setError(friendlyErrorMessage(e, 'Report export could not be generated. Please try again.')) } finally { setBusy(false) }
   }
 
   const canNext = (step === 0 && policyId) || (step === 1 && true) || step >= 2

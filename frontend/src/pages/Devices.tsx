@@ -17,8 +17,9 @@ import { useForm } from 'react-hook-form'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '../components/ui/dialog'
-import { EmptyState, LoadingState } from '../components/ui/page-state'
+import { EmptyState, ErrorState, LoadingState } from '../components/ui/page-state'
 import { VendorBadge, VendorMark } from '../components/ui/vendor-badge'
+import { friendlyErrorMessage } from '../utils/errors'
 
 const DEVICE_PAGE_SIZE = 24
 
@@ -157,8 +158,7 @@ function DeviceModal({
       }
       onSaved(); onClose()
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to save.'
-      setError(msg)
+      setError(friendlyErrorMessage(e, 'Device could not be saved. Please review the connection details and try again.'))
     } finally { setSaving(false) }
   }
 
@@ -179,7 +179,7 @@ function DeviceModal({
       }
     } catch (e) {
       setTestSuccess(false)
-      setTestError(String(e))
+      setTestError(friendlyErrorMessage(e, 'Connection test could not be completed. Please verify the device is reachable.'))
     } finally { setTesting(false) }
   }
 
@@ -1125,9 +1125,12 @@ export function Devices() {
   const [syncStatus, setSyncStatus] = useState('')
   const [sortBy, setSortBy] = useState('created_at')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [error, setError] = useState('')
+  const [actionError, setActionError] = useState('')
 
   const load = useCallback(() => {
     setLoading(true)
+    setError('')
     const p: Record<string, string | number> = {
       page,
       page_size: DEVICE_PAGE_SIZE,
@@ -1140,6 +1143,11 @@ export function Devices() {
     if (syncStatus) p.sync_status = syncStatus
     getDevicesPage(p)
       .then(r => { setDevices(r.devices); setTotal(r.total) })
+      .catch(e => {
+        setDevices([])
+        setTotal(0)
+        setError(friendlyErrorMessage(e, 'Devices could not be loaded. Please refresh and try again.'))
+      })
       .finally(() => setLoading(false))
   }, [customerId, page, search, vendorFilter, syncStatus, sortBy, sortDir])
 
@@ -1172,13 +1180,13 @@ export function Devices() {
 
   const handleSync = async (deviceId: string) => {
     setSyncingId(deviceId)
+    setActionError('')
     try {
       await syncDevice(deviceId)
       // optimistically update status
       setDevices(ds => ds.map(d => d.id === deviceId ? { ...d, sync_status: 'running' } : d))
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Sync failed'
-      alert(msg)
+      setActionError(friendlyErrorMessage(e, 'Device sync could not be started. Please test the connection and try again.'))
     } finally {
       setSyncingId(null)
     }
@@ -1186,15 +1194,21 @@ export function Devices() {
 
   const handleDelete = async (d: FirewallDeviceT) => {
     if (!confirm(`Delete "${d.name}"? This will permanently delete all associated policies, rules, findings, and objects.`)) return
-    await deleteDevice(d.id)
-    load()
+    try {
+      await deleteDevice(d.id)
+      load()
+    } catch (e) {
+      setActionError(friendlyErrorMessage(e, 'Device could not be deleted. Please try again.'))
+    }
   }
 
   const handleResetSync = async (deviceId: string) => {
     try {
       await resetDeviceSync(deviceId)
       load()
-    } catch { /* ignore */ }
+    } catch (e) {
+      setActionError(friendlyErrorMessage(e, 'Sync status could not be reset. Please try again.'))
+    }
   }
 
   const pageCount = Math.max(1, Math.ceil(total / DEVICE_PAGE_SIZE))
@@ -1261,15 +1275,21 @@ export function Devices() {
         <span className="ml-auto text-xs text-gray-400">{total.toLocaleString()} devices</span>
       </div>
 
-      {loading ? (
+      {actionError && <ErrorState title="Device action failed" message={actionError} className="mb-5" />}
+
+      {error ? (
+        <ErrorState title="Devices unavailable" message={error} />
+      ) : loading ? (
         <LoadingState label="Loading devices..." />
       ) : devices.length === 0 ? (
         <EmptyState
           icon={<WifiOff className="w-7 h-7" />}
-          title="No devices connected"
-          description={customerId
-            ? <>Add a firewall device to start live monitoring, or <Link to={`/upload?customer_id=${customerId}`} className="text-brand-600 hover:underline">upload a policy file</Link> for offline analysis.</>
-            : 'Select a customer to add devices and start live monitoring.'}
+          title={search || vendorFilter || syncStatus ? 'No devices match the current filters' : 'No devices connected'}
+          description={search || vendorFilter || syncStatus
+            ? 'Adjust the search, vendor, or sync status filter to find a device.'
+            : customerId
+              ? <>Add a firewall device to start live monitoring, or <Link to={`/upload?customer_id=${customerId}`} className="text-brand-600 hover:underline">upload a policy file</Link> for offline analysis.</>
+              : 'Select a customer to add devices and start live monitoring.'}
           action={customerId ? (
             <button onClick={() => { setEditing(undefined); setShowModal(true) }}
               className="btn-primary mx-auto flex items-center gap-2 w-fit">

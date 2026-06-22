@@ -7,9 +7,10 @@ import {
 } from 'lucide-react'
 import { getRules, getPolicy, getRulesExportUrl } from '../api/client'
 import { SeverityBadge } from '../components/ui/SeverityBadge'
-import { EmptyState, LoadingState } from '../components/ui/page-state'
+import { EmptyState, ErrorState, LoadingState } from '../components/ui/page-state'
 import type { Rule, Policy } from '../types'
 import { clsx } from 'clsx'
+import { fetchFailureMessage, friendlyErrorMessage } from '../utils/errors'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -271,6 +272,8 @@ export function Rulebase() {
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [actionError, setActionError] = useState('')
 
   // Filters
   const [search, setSearch] = useState('')
@@ -336,23 +339,32 @@ export function Rulebase() {
   const load = useCallback(() => {
     if (!policyId) return
     setLoading(true)
+    setError('')
     getRules(policyId, buildParams())
       .then(r => { setRules(r.rules); setTotal(r.total) })
+      .catch(e => {
+        setRules([])
+        setTotal(0)
+        setError(friendlyErrorMessage(e, 'Rules could not be loaded. Please refresh and try again.'))
+      })
       .finally(() => setLoading(false))
   }, [policyId, page, search, actionFilter, enabledFilter, zeroHitsOnly, hasFindings, hasAny, minRisk, sortBy, sortDir])
 
   useEffect(() => { load() }, [load])
-  useEffect(() => { if (policyId) getPolicy(policyId).then(setPolicy) }, [policyId])
+  useEffect(() => {
+    if (policyId) getPolicy(policyId).then(setPolicy).catch(() => setPolicy(null))
+  }, [policyId])
 
   const pageCount = Math.ceil(total / 100)
 
   const handleExportCsv = async () => {
     if (!policyId) return
     setExporting(true)
+    setActionError('')
     try {
       const url = getRulesExportUrl(policyId, { ...buildParams(), page: 1, page_size: 9999 })
       const res = await fetch(url, { credentials: 'include' })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      if (!res.ok) throw new Error(await fetchFailureMessage(res, 'Rulebase export could not be prepared. Please try again.'))
       const blob = await res.blob()
       const a = document.createElement('a')
       a.href = URL.createObjectURL(blob)
@@ -360,7 +372,7 @@ export function Rulebase() {
       a.click()
       URL.revokeObjectURL(a.href)
     } catch (e) {
-      console.error('CSV export failed', e)
+      setActionError(e instanceof Error ? e.message : 'Rulebase export could not be prepared. Please try again.')
     } finally {
       setExporting(false)
     }
@@ -400,6 +412,9 @@ export function Rulebase() {
         </div>
       </div>
     <div className="page-body">
+      {actionError && (
+        <ErrorState title="Export could not be completed" message={actionError} className="mb-4" />
+      )}
       {/* ── Filter Bar ── */}
       <div className="filter-bar mb-4">
         <div className="flex flex-wrap gap-2 items-center">
@@ -460,14 +475,18 @@ export function Rulebase() {
       </div>
 
       {/* ── Table ── */}
-      {loading ? (
+      {error ? (
+        <ErrorState title="Rulebase unavailable" message={error} />
+      ) : loading ? (
         <LoadingState label="Loading rulebase..." />
       ) : rules.length === 0 ? (
         <EmptyState
           icon={<Shield className="w-6 h-6" />}
-          title="No rules match the current filters"
-          description="Clear filters or search another rule name, object, service, or comment."
-          action={<button onClick={clearFilters} className="btn-secondary">Clear filters</button>}
+          title={activeFilters.length > 0 || search ? 'No rules match the current filters' : 'No rules imported yet'}
+          description={activeFilters.length > 0 || search
+            ? 'Clear filters or search another rule name, object, service, or comment.'
+            : 'Upload or sync a policy to populate the rulebase.'}
+          action={activeFilters.length > 0 || search ? <button onClick={clearFilters} className="btn-secondary">Clear filters</button> : null}
         />
       ) : (
         <div className="table-shell table-scroll">

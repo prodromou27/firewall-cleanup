@@ -166,8 +166,9 @@ def run_analysis(policy_id: str, db: Session) -> str:
         # Save findings
         finding_count = 0
         high_count = 0
+        finding_rows = []
         for f in findings:
-            finding_orm = Finding(
+            finding_rows.append(Finding(
                 id=str(uuid.uuid4()),
                 policy_id=policy_id,
                 analysis_run_id=run.id,
@@ -183,11 +184,12 @@ def run_analysis(policy_id: str, db: Session) -> str:
                 recommendation=f.get("recommendation", ""),
                 status="Review Required",
                 risk_score=f.get("risk_score", 0),
-            )
-            db.add(finding_orm)
+            ))
             finding_count += 1
             if f.get("severity") in ("High", "Critical"):
                 high_count += 1
+        if finding_rows:
+            db.add_all(finding_rows)
 
         policy.finding_count = finding_count
         policy.high_finding_count = high_count

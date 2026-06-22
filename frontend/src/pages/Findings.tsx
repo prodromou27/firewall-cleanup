@@ -12,9 +12,10 @@ import {
   addFindingComment, getFindingComments, getFindingsExportUrl,
 } from '../api/client'
 import { SeverityBadge, StatusBadge } from '../components/ui/SeverityBadge'
-import { EmptyState, LoadingState } from '../components/ui/page-state'
+import { EmptyState, ErrorState, LoadingState } from '../components/ui/page-state'
 import { useAuth } from '../contexts/AuthContext'
 import type { Finding, Policy, AffectedRuleData, FindingComment } from '../types'
+import { fetchFailureMessage, friendlyErrorMessage } from '../utils/errors'
 
 /** Backend stores array fields as JSON strings in SQLite — handle both formats. */
 function parseArr(v: unknown): string[] {
@@ -898,6 +899,8 @@ export function Findings() {
   const [bulkPriority, setBulkPriority] = useState('')
   const [bulkAssignee, setBulkAssignee] = useState('')
   const [bulkSaving, setBulkSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [actionError, setActionError] = useState('')
 
   const toggleSelect = (id: string, checked: boolean) => {
     setSelected(prev => { const s = new Set(prev); checked ? s.add(id) : s.delete(id); return s })
@@ -911,6 +914,7 @@ export function Findings() {
   const applyBulk = async () => {
     if (!hasBulkChange || selected.size === 0) return
     setBulkSaving(true)
+    setActionError('')
     try {
       const data: { status?: string; priority?: string; assigned_to?: string } = {}
       if (bulkStatus) data.status = bulkStatus
@@ -918,6 +922,8 @@ export function Findings() {
       if (bulkAssigneeTrim) data.assigned_to = bulkAssigneeTrim
       await bulkUpdateFindings(Array.from(selected), data)
       setSelected(new Set()); setBulkStatus(''); setBulkPriority(''); setBulkAssignee(''); load()
+    } catch (e) {
+      setActionError(friendlyErrorMessage(e, 'Selected findings could not be updated. Please try again.'))
     } finally { setBulkSaving(false) }
   }
 
@@ -931,6 +937,7 @@ export function Findings() {
 
   const load = useCallback(() => {
     setLoading(true)
+    setError('')
     const p: Record<string, string | number> = { page, page_size: 50 }
     if (customerId) p.customer_id = customerId
     if (policyId) p.policy_id = policyId
@@ -942,6 +949,12 @@ export function Findings() {
     if (search) p.search = search
     getFindings(p)
       .then(r => { setFindings(r.findings); setTotal(r.total); setSeverityCounts(r.severity_counts || {}) })
+      .catch(e => {
+        setFindings([])
+        setTotal(0)
+        setSeverityCounts({})
+        setError(friendlyErrorMessage(e, 'Findings could not be loaded. Please refresh and try again.'))
+      })
       .finally(() => setLoading(false))
   }, [page, customerId, policyId, severity, findingType, status, priority, assignedTo, search])
 
@@ -949,7 +962,7 @@ export function Findings() {
   useEffect(() => {
     const pp: Record<string, string> = {}
     if (customerId) pp.customer_id = customerId
-    getPolicies(pp).then(data => setPolicies(Array.isArray(data) ? data : []))
+    getPolicies(pp).then(data => setPolicies(Array.isArray(data) ? data : [])).catch(() => setPolicies([]))
   }, [customerId])
 
   const setFilter = (key: string, val: string) => {
@@ -981,6 +994,7 @@ export function Findings() {
   const [exporting, setExporting] = useState(false)
   const handleExportCsv = async () => {
     setExporting(true)
+    setActionError('')
     try {
       const params: Record<string, string> = {}
       if (customerId) params.customer_id = customerId
@@ -993,7 +1007,7 @@ export function Findings() {
       if (search) params.search = search
       const url = getFindingsExportUrl(params)
       const res = await fetch(url, { credentials: 'include' })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      if (!res.ok) throw new Error(await fetchFailureMessage(res, 'Findings export could not be prepared. Please try again.'))
       const blob = await res.blob()
       const a = document.createElement('a')
       a.href = URL.createObjectURL(blob)
@@ -1001,7 +1015,7 @@ export function Findings() {
       a.click()
       URL.revokeObjectURL(a.href)
     } catch (e) {
-      console.error('CSV export failed', e)
+      setActionError(e instanceof Error ? e.message : 'Findings export could not be prepared. Please try again.')
     } finally {
       setExporting(false)
     }
@@ -1029,6 +1043,9 @@ export function Findings() {
         </button>
       </div>
     <div className="page-body">
+      {actionError && (
+        <ErrorState title="Action could not be completed" message={actionError} className="mb-4" />
+      )}
       {/* Severity summary bar — click a card to filter by that severity */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-4">
         {(['Critical', 'High', 'Medium', 'Low', 'Informational'] as const).map(sev => {
@@ -1159,13 +1176,17 @@ export function Findings() {
         )}
       </div>
 
-      {loading ? (
+      {error ? (
+        <ErrorState title="Findings unavailable" message={error} />
+      ) : loading ? (
         <LoadingState label="Loading findings..." />
       ) : findings.length === 0 ? (
         <EmptyState
           icon={<AlertTriangle className="w-6 h-6" />}
-          title="No findings match the selected filters"
-          description="Adjust the filters or clear them to review the full findings list."
+          title={hasFilters ? 'No findings match the selected filters' : 'No findings available yet'}
+          description={hasFilters
+            ? 'Adjust the filters or clear them to review the full findings list.'
+            : 'Run analysis on an uploaded or synced policy to generate cleanup findings.'}
           action={hasFilters ? (
             <button onClick={clearFilters} className="btn-secondary">Clear filters</button>
           ) : null}

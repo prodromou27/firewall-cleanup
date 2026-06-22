@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, Boolean, DateTime, Text, Float, ForeignKey, JSON
+from sqlalchemy import Column, String, Integer, Boolean, DateTime, Text, Float, ForeignKey, JSON, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
@@ -11,6 +11,12 @@ def gen_uuid():
 
 class FirewallPolicy(Base):
     __tablename__ = "firewall_policies"
+    __table_args__ = (
+        Index("ix_firewall_policies_customer_upload_date", "customer_id", "upload_date"),
+        Index("ix_firewall_policies_customer_status", "customer_id", "analysis_status"),
+        Index("ix_firewall_policies_customer_vendor", "customer_id", "vendor"),
+        Index("ix_firewall_policies_device_upload_date", "device_id", "upload_date"),
+    )
 
     id = Column(String, primary_key=True, default=gen_uuid)
 
@@ -22,16 +28,16 @@ class FirewallPolicy(Base):
     firewall_name = Column(String, nullable=False)
     vendor = Column(String, nullable=False)          # FortiGate | CheckPoint
     policy_package = Column(String, nullable=True)
-    uploaded_by = Column(String, default="engineer")
+    uploaded_by = Column(String, nullable=False, default="engineer")
     upload_date = Column(DateTime, server_default=func.now())
     original_filename = Column(String, nullable=True)
     file_path = Column(String, nullable=True)
-    analysis_status = Column(String, default="pending")  # pending|running|completed|failed
+    analysis_status = Column(String, nullable=False, default="pending")  # pending|running|completed|failed
     analysis_error = Column(Text, nullable=True)
-    rule_count = Column(Integer, default=0)
-    object_count = Column(Integer, default=0)
-    finding_count = Column(Integer, default=0)
-    high_finding_count = Column(Integer, default=0)
+    rule_count = Column(Integer, nullable=False, default=0)
+    object_count = Column(Integer, nullable=False, default=0)
+    finding_count = Column(Integer, nullable=False, default=0)
+    high_finding_count = Column(Integer, nullable=False, default=0)
     notes = Column(Text, nullable=True)
     complexity_score = Column(Float, nullable=True)
     complexity_breakdown = Column(JSON, nullable=True)
@@ -42,14 +48,24 @@ class FirewallPolicy(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     customer = relationship("Customer", back_populates="policies")
+    device = relationship("FirewallDevice", back_populates="policies")
     rules = relationship("FirewallRule", back_populates="policy", cascade="all, delete-orphan")
     objects = relationship("FirewallObject", back_populates="policy", cascade="all, delete-orphan")
     findings = relationship("Finding", back_populates="policy", cascade="all, delete-orphan")
     analysis_runs = relationship("AnalysisRun", back_populates="policy", cascade="all, delete-orphan")
+    revisions = relationship("PolicyRevision", back_populates="policy", cascade="all, delete-orphan")
 
 
 class FirewallRule(Base):
     __tablename__ = "firewall_rules"
+    __table_args__ = (
+        Index("ix_firewall_rules_policy_rule_number", "policy_id", "rule_number"),
+        Index("ix_firewall_rules_policy_enabled", "policy_id", "enabled"),
+        Index("ix_firewall_rules_policy_action", "policy_id", "action"),
+        Index("ix_firewall_rules_policy_hit_count", "policy_id", "hit_count"),
+        Index("ix_firewall_rules_policy_risk_score", "policy_id", "risk_score"),
+        Index("ix_firewall_rules_policy_rule_uid", "policy_id", "rule_uid"),
+    )
 
     id = Column(String, primary_key=True, default=gen_uuid)
     policy_id = Column(String, ForeignKey("firewall_policies.id"), nullable=False)
@@ -71,15 +87,15 @@ class FirewallRule(Base):
     vpn = Column(JSON, default=list)
     action = Column(String, nullable=True)
     schedule = Column(String, nullable=True)
-    enabled = Column(Boolean, default=True)
-    logging_enabled = Column(Boolean, default=True)
-    nat_enabled = Column(Boolean, default=False)
+    enabled = Column(Boolean, nullable=False, default=True)
+    logging_enabled = Column(Boolean, nullable=False, default=True)
+    nat_enabled = Column(Boolean, nullable=False, default=False)
     comments = Column(Text, nullable=True)
     hit_count = Column(Integer, nullable=True)
     last_hit = Column(String, nullable=True)
     first_hit = Column(String, nullable=True)
     install_on = Column(JSON, default=list)
-    risk_score = Column(Float, default=0)
+    risk_score = Column(Float, nullable=False, default=0)
     risk_factors = Column(JSON, default=dict)
     raw_data = Column(JSON, default=dict)
     created_at = Column(DateTime, server_default=func.now())
@@ -89,6 +105,11 @@ class FirewallRule(Base):
 
 class FirewallObject(Base):
     __tablename__ = "firewall_objects"
+    __table_args__ = (
+        Index("ix_firewall_objects_policy_type", "policy_id", "object_type"),
+        Index("ix_firewall_objects_policy_name", "policy_id", "object_name"),
+        Index("ix_firewall_objects_policy_uid", "policy_id", "object_uid"),
+    )
 
     id = Column(String, primary_key=True, default=gen_uuid)
     policy_id = Column(String, ForeignKey("firewall_policies.id"), nullable=False)
@@ -108,33 +129,54 @@ class FirewallObject(Base):
 
     policy = relationship("FirewallPolicy", back_populates="objects")
     member_entries = relationship(
-        "ObjectMember", foreign_keys="ObjectMember.parent_id", cascade="all, delete-orphan"
+        "ObjectMember",
+        back_populates="parent",
+        foreign_keys="ObjectMember.parent_id",
+        cascade="all, delete-orphan",
+    )
+    member_of_entries = relationship(
+        "ObjectMember",
+        back_populates="member",
+        foreign_keys="ObjectMember.member_id",
+        passive_deletes=True,
     )
 
 
 class ObjectMember(Base):
     __tablename__ = "object_members"
+    __table_args__ = (
+        Index("ix_object_members_parent_name", "parent_id", "member_name"),
+        Index("ix_object_members_member_id", "member_id"),
+    )
 
     id = Column(String, primary_key=True, default=gen_uuid)
     parent_id = Column(String, ForeignKey("firewall_objects.id"), nullable=False)
     member_name = Column(String, nullable=False)
     member_id = Column(String, ForeignKey("firewall_objects.id"), nullable=True)
 
+    parent = relationship("FirewallObject", back_populates="member_entries", foreign_keys=[parent_id])
+    member = relationship("FirewallObject", back_populates="member_of_entries", foreign_keys=[member_id])
+
 
 class AnalysisRun(Base):
     __tablename__ = "analysis_runs"
+    __table_args__ = (
+        Index("ix_analysis_runs_policy_status_completed", "policy_id", "status", "completed_at"),
+        Index("ix_analysis_runs_policy_started", "policy_id", "started_at"),
+    )
 
     id = Column(String, primary_key=True, default=gen_uuid)
     policy_id = Column(String, ForeignKey("firewall_policies.id"), nullable=False)
     started_at = Column(DateTime, server_default=func.now())
     completed_at = Column(DateTime, nullable=True)
-    status = Column(String, default="running")
-    findings_created = Column(Integer, default=0)
+    status = Column(String, nullable=False, default="running")
+    findings_created = Column(Integer, nullable=False, default=0)
     # JSON-encoded {severity: count} snapshot at completion time, for trend charts.
     severity_snapshot = Column(Text, nullable=True)
     # JSON-encoded {finding_type: count} snapshot at completion time, for change watch.
     finding_type_snapshot = Column(Text, nullable=True)
     error = Column(Text, nullable=True)
-    run_by = Column(String, default="engineer")
+    run_by = Column(String, nullable=False, default="engineer")
 
     policy = relationship("FirewallPolicy", back_populates="analysis_runs")
+    findings = relationship("Finding", back_populates="analysis_run", passive_deletes=True)

@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { getSettings, updateSettings, changePassword, logoutAll } from '../api/client'
 import { ErrorState, LoadingState } from '../components/ui/page-state'
+import { VersionCatalogPanel } from '../components/VersionCatalogPanel'
 
 interface SettingsData {
   inactivity_threshold_low: number
@@ -27,7 +28,7 @@ interface SettingsData {
   app_version?: string
 }
 
-type Tab = 'overview' | 'thresholds' | 'services' | 'integrations' | 'security' | 'backup'
+type Tab = 'overview' | 'thresholds' | 'services' | 'integrations' | 'security' | 'versions' | 'backup'
 
 function SectionTitle({ icon: Icon, title, subtitle }: { icon: React.ElementType; title: string; subtitle?: string }) {
   return (
@@ -287,6 +288,7 @@ export function Settings() {
     { id: 'services',     label: 'Services',        icon: Network },
     { id: 'integrations', label: 'Integrations',    icon: Bell },
     { id: 'security',     label: 'Security',        icon: Lock },
+    { id: 'versions',     label: 'Version Catalog', icon: Database },
     { id: 'backup',       label: 'Backup',          icon: Database },
   ]
 
@@ -714,6 +716,9 @@ export function Settings() {
             </div>
           </div>
         )}
+
+        {/* ── Version Catalog ── */}
+        {activeTab === 'versions' && <VersionCatalogPanel />}
 
         {/* ── Backup ── */}
         {activeTab === 'backup' && (

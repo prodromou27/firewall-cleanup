@@ -365,6 +365,36 @@ export interface PublicExposure {
 export const getPublicExposure = (policyId: string) =>
   api.get(`/policies/${policyId}/public-exposure`).then(r => r.data as PublicExposure)
 
+// ── Version intelligence + catalog ──────────────────────────────────────────
+export interface VersionCatalogEntry {
+  id?: string
+  vendor: string
+  product?: string | null
+  release_train?: string | null
+  recommended_version?: string | null
+  minimum_supported_version?: string | null
+  eol_versions?: string[]
+  support_status?: string | null
+  advisory_url?: string | null
+  notes?: string | null
+}
+
+export const listVersionCatalog = () =>
+  api.get('/version-catalog').then(r => r.data.entries as VersionCatalogEntry[])
+export const createVersionCatalogEntry = (body: VersionCatalogEntry) =>
+  api.post('/version-catalog', body).then(r => r.data as VersionCatalogEntry)
+export const deleteVersionCatalogEntry = (id: string) =>
+  api.delete(`/version-catalog/${id}`).then(r => r.data)
+export const importVersionCatalog = (entries: VersionCatalogEntry[], replace = false) =>
+  api.post(`/version-catalog/import?replace=${replace}`, entries).then(r => r.data)
+
+export const getDeviceVersionIntelligence = (deviceId: string) =>
+  api.get(`/devices/${deviceId}/version-intelligence`).then(r => r.data as {
+    device_name: string; vendor: string; catalog_available: boolean
+    normalized: { os_version: string; release_train: string; parseable: boolean }
+    findings: Array<{ finding_type: string; severity: string; title: string; description: string }>
+  })
+
 export const getRulesExportUrl = (
   policyId: string,
   params: Record<string, string | number | boolean> = {}

@@ -398,7 +398,7 @@ app.add_middleware(
     allow_origins=_allowed_origins,
     allow_origin_regex=_origin_regex,   # whole-subnet origins, when configured
     allow_credentials=True,       # cookies ride along on cross-origin requests
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Accept", "Authorization"],
 )
 

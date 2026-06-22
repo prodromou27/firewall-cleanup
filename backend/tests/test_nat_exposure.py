@@ -133,3 +133,41 @@ def test_findings_are_readonly_recommendations():
     res = NE.analyze([_sec()], [_nat()], {})
     for f in res["findings"]:
         assert "change-management" in f["recommendation"].lower() or f["recommendation"]
+
+
+# ── Slice 2: depth (admin protocols, logging, confidence) ────────────────────
+def test_telnet_winrm_vnc_exposure_critical():
+    for port, ftype in [("tcp/23", "telnet_public_exposure"),
+                        ("tcp/5985", "winrm_public_exposure"),
+                        ("tcp/5900", "vnc_public_exposure")]:
+        res = NE.analyze([_sec(svc=[port])], None, {})
+        f = [x for x in res["findings"] if x["finding_type"] == ftype]
+        assert f and f[0]["severity"] == "Critical", port
+
+
+def test_public_exposure_missing_logging():
+    sec = [_sec(svc=["tcp/3389"])]
+    sec[0]["logging_enabled"] = False
+    res = NE.analyze(sec, None, {})
+    assert "public_exposure_no_logging" in _types(res)
+
+
+def test_logging_enabled_no_logging_finding():
+    sec = [_sec(svc=["tcp/3389"])]
+    sec[0]["logging_enabled"] = True
+    res = NE.analyze(sec, None, {})
+    assert "public_exposure_no_logging" not in _types(res)
+
+
+def test_nat_confidence_medium_without_policy_corroboration():
+    # DNAT publishing a host, but the security rule targets a different host
+    res = NE.analyze([_sec(dst=["10.0.0.99"], svc=["tcp/3389"])], [_nat(tdst=["10.0.0.5"])], {})
+    nat_exp = [e for e in res["exposure"]["exposures"] if e["source"] == "nat"]
+    assert nat_exp and nat_exp[0]["confidence"] == "Medium"
+
+
+def test_nat_confidence_high_when_policy_corroborates():
+    # DNAT to 10.0.0.5 and a security rule allows public->10.0.0.5
+    res = NE.analyze([_sec(dst=["10.0.0.5"], svc=["tcp/3389"])], [_nat(tdst=["10.0.0.5"])], {})
+    nat_exp = [e for e in res["exposure"]["exposures"] if e["source"] == "nat"]
+    assert nat_exp and nat_exp[0]["confidence"] == "High"

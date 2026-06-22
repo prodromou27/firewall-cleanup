@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from app.analysis.ip_utils import is_public_network, is_any, parse_ip_network
+from app.analysis.ip_utils import is_public_network, is_any, parse_ip_network, is_routable_public
 from app.analysis.normalizer import expand_service_object
 
 # Sensitive TCP ports → (label, exposure finding_type). Mirrors the security-rule
@@ -38,8 +38,13 @@ from app.analysis.normalizer import expand_service_object
 SENSITIVE_PORTS: Dict[int, tuple] = {
     3389: ("RDP", "rdp_public_exposure"),
     22:   ("SSH", "ssh_public_exposure"),
+    23:   ("Telnet", "telnet_public_exposure"),
     445:  ("SMB", "smb_public_exposure"),
     139:  ("SMB/NetBIOS", "smb_public_exposure"),
+    5985: ("WinRM", "winrm_public_exposure"),
+    5986: ("WinRM/HTTPS", "winrm_public_exposure"),
+    5900: ("VNC", "vnc_public_exposure"),
+    5901: ("VNC", "vnc_public_exposure"),
     1433: ("Microsoft SQL Server", "database_public_exposure"),
     1521: ("Oracle DB", "database_public_exposure"),
     3306: ("MySQL", "database_public_exposure"),
@@ -47,6 +52,9 @@ SENSITIVE_PORTS: Dict[int, tuple] = {
     27017: ("MongoDB", "database_public_exposure"),
     6379: ("Redis", "database_public_exposure"),
 }
+
+# Administrative / cleartext protocols where any internet exposure is Critical.
+_CRITICAL_EXPOSURE_PORTS = {3389, 22, 23, 445, 139, 5985, 5986, 5900, 5901}
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -314,25 +322,9 @@ def _build_exposure(security_rules: List[dict], nats: List[dict], available: boo
     """Build the public-exposure inventory: published services and exposed ports."""
     exposures: List[dict] = []
 
-    # NAT-published services (public original_dst → internal translated_dst).
-    if available:
-        for n in nats:
-            if not n["enabled"] or _classify(n) != "destination":
-                continue
-            ports = _ports_from_services(n["translated_service"] or n["original_service"], obj_map)
-            svc_any = _service_is_any(n["translated_service"] or n["original_service"])
-            for pub in n["original_dst"] or ["(public interface)"]:
-                exposures.append({
-                    "public_ip": pub,
-                    "internal_target": ", ".join(n["translated_dst"]) or "n/a",
-                    "ports": sorted(set(ports)),
-                    "service_any": svc_any,
-                    "source": "nat",
-                    "nat_rules": [n["rule_number"]],
-                    "security_rules": [],
-                })
-
     # Policy-derived exposure (public/any source → internal dst on sensitive ports).
+    # We see the actual allow rule, so confidence is High and logging is known.
+    policy_targets: Dict[str, list] = {}
     for r in security_rules:
         if not r.get("enabled", True):
             continue
@@ -346,15 +338,43 @@ def _build_exposure(security_rules: List[dict], nats: List[dict], available: boo
         svc_any = _service_is_any(_as_list(r.get("services")))
         if not _all_private(dsts):
             continue
+        rid = r.get("rule_id", r.get("rule_number", "?"))
+        for d in dsts:
+            policy_targets.setdefault(d.lower(), []).append(rid)
         exposures.append({
-            "public_ip": ", ".join(srcs) if not _any_public(["any"]) else "Any/Internet",
+            "public_ip": "Any/Internet" if any(is_any(s) for s in srcs) else ", ".join(srcs),
             "internal_target": ", ".join(dsts),
             "ports": sorted(set(ports)),
             "service_any": svc_any,
             "source": "policy",
+            "logging": bool(r.get("logging_enabled", True)),
+            "confidence": "High",
             "nat_rules": [],
-            "security_rules": [r.get("rule_id", r.get("rule_number", "?"))],
+            "security_rules": [rid],
         })
+
+    # NAT-published services (public original_dst → internal translated_dst).
+    # Inferred from NAT; confidence is High only when a security rule corroborates
+    # the same internal target, otherwise Medium (mapping not fully confirmed).
+    if available:
+        for n in nats:
+            if not n["enabled"] or _classify(n) != "destination":
+                continue
+            ports = _ports_from_services(n["translated_service"] or n["original_service"], obj_map)
+            svc_any = _service_is_any(n["translated_service"] or n["original_service"])
+            corroborating = sorted({rid for d in n["translated_dst"] for rid in policy_targets.get(d.lower(), [])})
+            for pub in n["original_dst"] or ["(public interface)"]:
+                exposures.append({
+                    "public_ip": pub,
+                    "internal_target": ", ".join(n["translated_dst"]) or "n/a",
+                    "ports": sorted(set(ports)),
+                    "service_any": svc_any,
+                    "source": "nat",
+                    "logging": None,  # NAT rule logging not correlated here
+                    "confidence": "High" if corroborating else "Medium",
+                    "nat_rules": [n["rule_number"]],
+                    "security_rules": corroborating,
+                })
 
     # Aggregate exposed ports + public IP inventory.
     exposed_ports = sorted({p for e in exposures for p in e["ports"]})
@@ -384,34 +404,46 @@ def _exposure_findings(exposure: dict) -> List[dict]:
     out = []
     for e in exposure["exposures"]:
         attribution = "NAT-published" if e["source"] == "nat" else "security policy"
+        conf = e.get("confidence", "Medium")
+        ev = {"public_ip": e["public_ip"], "internal_target": e["internal_target"],
+              "source": e["source"], "logging": e.get("logging")}
         # #13 Any service exposed
         if e["service_any"]:
             out.append(_finding(
-                "any_service_public_exposure", "High", "Medium",
+                "any_service_public_exposure", "High", conf,
                 f"Public exposure of Any service to {e['internal_target']}",
                 f"{e['internal_target']} is reachable from a public source with no service restriction "
                 f"({attribution}). Unrestricted public exposure is high risk.",
-                {"public_ip": e["public_ip"], "internal_target": e["internal_target"], "source": e["source"]},
+                ev,
             ))
-        # #9-#12 sensitive ports
+        # #9-#12 sensitive ports (RDP/SSH/Telnet/SMB/WinRM/VNC/database)
         sensitive_hit = [p for p in e["ports"] if p in SENSITIVE_PORTS]
         for p in sensitive_hit:
             label, ftype = SENSITIVE_PORTS[p]
             out.append(_finding(
-                ftype, "Critical" if p in (3389, 22, 445) else "High", "High",
+                ftype, "Critical" if p in _CRITICAL_EXPOSURE_PORTS else "High", conf,
                 f"Public exposure of {label} to {e['internal_target']}",
                 f"{label} (port {p}) on {e['internal_target']} is reachable from a public source "
                 f"({attribution}). Administrative and database services must not be exposed to the internet.",
-                {"public_ip": e["public_ip"], "port": p, "internal_target": e["internal_target"], "source": e["source"]},
+                {**ev, "port": p},
             ))
         # #14 sensitive destination (multiple sensitive admin/db ports on one host)
         if len(set(sensitive_hit)) >= 2:
             out.append(_finding(
-                "sensitive_destination_exposure", "Critical", "Medium",
+                "sensitive_destination_exposure", "Critical", conf,
                 f"Multiple sensitive services exposed on {e['internal_target']}",
                 f"{e['internal_target']} exposes multiple administrative/database services "
                 f"({', '.join(SENSITIVE_PORTS[p][0] for p in sorted(set(sensitive_hit)))}) to a public source. "
                 "This concentrates risk on a sensitive internal host.",
                 {"internal_target": e["internal_target"], "ports": sorted(set(sensitive_hit))},
+            ))
+        # Public exposure with logging disabled (only when we positively know logging is off)
+        if e.get("logging") is False and (e["service_any"] or sensitive_hit):
+            out.append(_finding(
+                "public_exposure_no_logging", "Medium", conf,
+                f"Public exposure of {e['internal_target']} without logging",
+                f"The rule exposing {e['internal_target']} to a public source has logging disabled, "
+                "reducing visibility of attacks against the exposed service.",
+                ev,
             ))
     return out

@@ -50,9 +50,9 @@ SECTION_CATALOG = [
     {"key": "risky_services",    "name": "Risky Services",        "type": T_FINDINGS, "group": "Findings",      "default": True, "finding_types": ["risky_service", "cleartext_service"]},
     {"key": "rules_without_logging","name": "Rules Without Logging","type": T_FINDINGS,"group": "Findings",     "default": False,"finding_types": ["no_logging"]},
     {"key": "temporary_rules",   "name": "Temporary Rules",       "type": T_FINDINGS, "group": "Findings",      "default": False,"finding_types": ["temporary_rule", "expired_rule"]},
-    {"key": "public_exposure",   "name": "Public Exposure Findings","type": T_FINDINGS,"group": "Findings",     "default": True, "finding_types": ["rdp_exposed", "ssh_exposed", "database_exposed", "inbound_from_internet", "rdp_public_exposure", "ssh_public_exposure", "smb_public_exposure", "database_public_exposure", "any_service_public_exposure", "sensitive_destination_exposure"]},
+    {"key": "public_exposure",   "name": "Public Exposure Findings","type": T_FINDINGS,"group": "Findings",     "default": True, "finding_types": ["rdp_exposed", "ssh_exposed", "database_exposed", "inbound_from_internet", "rdp_public_exposure", "ssh_public_exposure", "telnet_public_exposure", "smb_public_exposure", "winrm_public_exposure", "vnc_public_exposure", "database_public_exposure", "any_service_public_exposure", "sensitive_destination_exposure", "public_exposure_no_logging"]},
     {"key": "nat_findings",      "name": "NAT Findings",          "type": T_FINDINGS, "group": "Findings",      "default": False,"finding_types": ["nat_complexity", "nat_static", "nat_source", "nat_duplicate", "nat_overlap"]},
-    {"key": "nat_public_exposure","name": "NAT & Public Exposure Review","type": T_FINDINGS,"group": "Findings","default": False,"finding_types": ["nat_public_to_internal", "nat_without_policy", "policy_without_nat", "rdp_public_exposure", "ssh_public_exposure", "smb_public_exposure", "database_public_exposure", "any_service_public_exposure", "sensitive_destination_exposure"]},
+    {"key": "nat_public_exposure","name": "NAT & Public Exposure Review","type": T_FINDINGS,"group": "Findings","default": False,"finding_types": ["nat_public_to_internal", "nat_without_policy", "policy_without_nat", "rdp_public_exposure", "ssh_public_exposure", "telnet_public_exposure", "smb_public_exposure", "winrm_public_exposure", "vnc_public_exposure", "database_public_exposure", "any_service_public_exposure", "sensitive_destination_exposure", "public_exposure_no_logging"]},
     {"key": "version_intelligence","name": "Firewall Version Intelligence","type": T_FINDINGS,"group": "Findings","default": False,"finding_types": ["version_outdated", "version_end_of_support", "version_ha_mismatch", "version_unknown", "version_catalog_unavailable"]},
     {"key": "unused_objects",    "name": "Unused Objects",        "type": T_FINDINGS, "group": "Objects",       "default": False,"finding_types": ["unused_object"]},
     {"key": "duplicate_objects", "name": "Duplicate Objects",     "type": T_FINDINGS, "group": "Objects",       "default": False,"finding_types": ["duplicate_object"]},
@@ -117,9 +117,13 @@ FINDING_CATEGORIES = [
     ("any_service_public_exposure", "Public Exposure of Any Service"),
     ("rdp_public_exposure", "Public Exposure of RDP"),
     ("ssh_public_exposure", "Public Exposure of SSH"),
+    ("telnet_public_exposure", "Public Exposure of Telnet"),
     ("smb_public_exposure", "Public Exposure of SMB"),
+    ("winrm_public_exposure", "Public Exposure of WinRM"),
+    ("vnc_public_exposure", "Public Exposure of VNC"),
     ("database_public_exposure", "Public Exposure of Database Ports"),
     ("sensitive_destination_exposure", "Public Exposure to Sensitive Destinations"),
+    ("public_exposure_no_logging", "Public Exposure Without Logging"),
 ]
 FINDING_CATEGORY_KEYS = [k for k, _ in FINDING_CATEGORIES]
 

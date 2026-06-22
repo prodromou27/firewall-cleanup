@@ -16,6 +16,7 @@ from app.analysis.service_utils import identify_risky_service, normalize_service
 from app.analysis.ip_utils import is_public_network, is_broad_network
 from app.analysis import recommendation_library as _RL
 from app.config import settings
+from app.security.redaction import redact_secrets
 import uuid
 import json
 import logging
@@ -294,12 +295,13 @@ def run_analysis(policy_id: str, db: Session) -> str:
         return run.id
 
     except Exception as e:
-        logger.error(f"Analysis failed for policy {policy_id}: {e}", exc_info=True)
+        safe_error = redact_secrets(e)
+        logger.error("Analysis failed for policy %s: %s", policy_id, safe_error, exc_info=True)
         run.status = "failed"
-        run.error = str(e)
+        run.error = safe_error
         if 'policy' in dir():
             policy.analysis_status = "failed"
-            policy.analysis_error = str(e)
+            policy.analysis_error = safe_error
         db.commit()
         raise
 

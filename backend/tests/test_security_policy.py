@@ -6,9 +6,11 @@ from app.security.passwords import validate_password_policy, hash_password, veri
 from app.security.ratelimit import _RateLimiter
 from app.analysis.ip_utils import is_public_network
 from app.config import Settings
-from app.api.devices import DeviceCreate
+from app.api.devices import DeviceCreate, _device_dict, _diag
+from app.models.device import FirewallDevice
 from app.models.user import ROLE_SYSTEM_ADMIN, ROLE_TENANT_ADMIN
 from app.security.rbac import CAP_MANAGE_SETTINGS, has_capability
+from app.security.redaction import redact_secrets
 
 
 # ── Password policy ──────────────────────────────────────────────────────────
@@ -140,3 +142,44 @@ def test_device_host_allows_normal_internal_firewall_ip():
 def test_global_settings_are_system_admin_only():
     assert has_capability(ROLE_SYSTEM_ADMIN, CAP_MANAGE_SETTINGS)
     assert not has_capability(ROLE_TENANT_ADMIN, CAP_MANAGE_SETTINGS)
+
+
+def test_redacts_secrets_from_diagnostics():
+    raw = (
+        "GET /api/?type=keygen&user=admin&password=SuperSecret!&token=abc123 "
+        "api_key=live-key Authorization: Bearer bearer-token Basic abcdef"
+    )
+    redacted = redact_secrets(raw)
+
+    assert "SuperSecret" not in redacted
+    assert "abc123" not in redacted
+    assert "live-key" not in redacted
+    assert "bearer-token" not in redacted
+    assert "abcdef" not in redacted
+    assert "[REDACTED]" in redacted
+
+
+def test_device_response_redacts_persisted_last_error():
+    device = FirewallDevice(
+        id="dev-1",
+        customer_id="cust-1",
+        name="FW",
+        vendor="PaloAlto",
+        host="10.0.0.10",
+        last_error="keygen failed: password=SuperSecret token=abc123",
+    )
+
+    payload = _device_dict(device)
+
+    assert "SuperSecret" not in payload["last_error"]
+    assert "abc123" not in payload["last_error"]
+    assert "password=[REDACTED]" in payload["last_error"]
+
+
+def test_device_diagnostic_helper_limits_and_redacts_secrets():
+    err = RuntimeError("failure api_token=very-secret " + "x" * 700)
+    message = _diag(err)
+
+    assert len(message) <= 500
+    assert "very-secret" not in message
+    assert "api_token=[REDACTED]" in message

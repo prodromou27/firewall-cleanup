@@ -43,9 +43,14 @@ from app.security.identity import (
 from app.security.rbac import (
     CAP_MANAGE_DEVICES, CAP_STORE_CREDENTIALS, CAP_RUN_SYNC, CAP_DELETE_DATA,
 )
+from app.security.redaction import redact_secrets
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/devices", tags=["devices"])
+
+
+def _diag(value: object) -> str:
+    return redact_secrets(value)
 
 
 def _get_device_authz(device_id: str, db: Session, user: User) -> FirewallDevice:
@@ -261,7 +266,7 @@ def _device_dict(d: FirewallDevice) -> dict:
         "sync_interval_hours": d.sync_interval_hours,
         "sync_status": d.sync_status,
         "last_sync_at": d.last_sync_at.isoformat() if d.last_sync_at else None,
-        "last_error": d.last_error,
+        "last_error": _diag(d.last_error) if d.last_error else None,
         "last_policy_id": d.last_policy_id,
         # Inventory fields
         "fw_model": d.fw_model,
@@ -571,7 +576,7 @@ def _tcp_reachable(host: str, port: int, timeout: int = 5) -> tuple[bool, str]:
         ms = round((time.monotonic() - t0) * 1000)
         return True, f"{ms} ms"
     except OSError as e:
-        return False, str(e)
+        return False, _diag(e)
 
 
 def _tls_reachable(host: str, port: int, verify_ssl: bool, timeout: int = 8) -> tuple[bool, str]:
@@ -596,7 +601,7 @@ def _tls_reachable(host: str, port: int, verify_ssl: bool, timeout: int = 8) -> 
     except ssl.SSLError as e:
         return False, f"TLS error: {e}"
     except OSError as e:
-        return False, str(e)
+        return False, _diag(e)
 
 
 # ── Test connection ───────────────────────────────────────────────────────────
@@ -676,13 +681,14 @@ def test_device(
                 info = conn.connect()
                 phase("Authentication", True, f"Logged in — version {info.get('version', '?')}")
             except Exception as e:
-                phase("Authentication", False, str(e))
+                err = _diag(e)
+                phase("Authentication", False, err)
                 hint = (
                     "FortiGate authentication failed. Ensure the API token is correct and the trusted host list "
                     "includes this server's IP. Or provide a username/password if not using API tokens."
                 )
                 conn.disconnect()
-                return {"success": False, "phases": phases, "error": str(e), "hint": hint}
+                return {"success": False, "phases": phases, "error": err, "hint": hint}
 
             # Discovery
             try:
@@ -724,7 +730,8 @@ def test_device(
                 info = conn.connect()
                 phase("Authentication", True, f"Logged in — API {info.get('api_server_version', '?')}")
             except Exception as e:
-                phase("Authentication", False, str(e))
+                err = _diag(e)
+                phase("Authentication", False, err)
                 hint = (
                     "Check Point authentication failed. Ensure:\n"
                     "• The management server has API access enabled (SmartConsole → Management API)\n"
@@ -732,7 +739,7 @@ def test_device(
                     "• For MDS, specify the correct domain in device settings\n"
                     "• For Smart-1 Cloud, use the API key in the 'API Token' field"
                 )
-                return {"success": False, "phases": phases, "error": str(e), "hint": hint}
+                return {"success": False, "phases": phases, "error": err, "hint": hint}
 
             packages: list[dict] = []
             try:
@@ -749,7 +756,7 @@ def test_device(
                     for pkg in raw_pkgs
                 ]
             except Exception as e:
-                logger.warning("Could not list packages during test: %s", e)
+                logger.warning("Could not list packages during test: %s", _diag(e))
 
             gateways: list[dict] = []
             try:
@@ -804,7 +811,8 @@ def test_device(
                 model   = info.get("model", "")
                 phase("Authentication", True, f"Logged in — PAN-OS {version}{' ' + model if model else ''}")
             except Exception as e:
-                phase("Authentication", False, str(e))
+                err = _diag(e)
+                phase("Authentication", False, err)
                 hint = (
                     "Palo Alto authentication failed. Ensure:\n"
                     "• The API key is correct (generate with GET /api/?type=keygen)\n"
@@ -812,7 +820,7 @@ def test_device(
                     "• The management interface is accessible and the REST API is enabled\n"
                     "• The vsys name is correct (default: vsys1)"
                 )
-                return {"success": False, "phases": phases, "error": str(e), "hint": hint}
+                return {"success": False, "phases": phases, "error": err, "hint": hint}
 
             # Fetch security rules
             try:
@@ -831,7 +839,7 @@ def test_device(
                 if vsys_list:
                     info["vsys_list"] = vsys_list
             except Exception as e:
-                logger.warning("PaloAlto discovery partial failure: %s", e)
+                logger.warning("PaloAlto discovery partial failure: %s", _diag(e))
                 info.setdefault("rule_count", None)
 
             disc_parts = []
@@ -851,7 +859,8 @@ def test_device(
                 model   = info.get("model", "")
                 phase("Authentication", True, f"Logged in — ASA {version}{' ' + model if model else ''}")
             except Exception as e:
-                phase("Authentication", False, str(e))
+                err = _diag(e)
+                phase("Authentication", False, err)
                 hint = (
                     "Cisco ASA authentication failed. Ensure:\n"
                     "• Username and password are correct (privilege level 5+)\n"
@@ -859,7 +868,7 @@ def test_device(
                     "• The management interface allows HTTPS connections\n"
                     "• Port 443 is used for REST API (not 80 or ASDM)"
                 )
-                return {"success": False, "phases": phases, "error": str(e), "hint": hint}
+                return {"success": False, "phases": phases, "error": err, "hint": hint}
 
             # Fetch rules across all interfaces
             try:
@@ -874,7 +883,7 @@ def test_device(
                     for i in ifaces if i.get("name") or i.get("nameif")
                 ][:20]  # limit to 20 for display
             except Exception as e:
-                logger.warning("CiscoASA interface fetch failed: %s", e)
+                logger.warning("CiscoASA interface fetch failed: %s", _diag(e))
                 info["interface_count"] = None
 
             try:
@@ -886,7 +895,7 @@ def test_device(
                     len(raw.get("network_groups", []))
                 )
             except Exception as e:
-                logger.warning("CiscoASA discovery partial failure: %s", e)
+                logger.warning("CiscoASA discovery partial failure: %s", _diag(e))
                 info.setdefault("rule_count", None)
 
             conn.disconnect()
@@ -918,7 +927,8 @@ def test_device(
                     detail += f" sysname={sysname}"
                 phase("Authentication", True, detail)
             except Exception as e:
-                phase("Authentication", False, str(e))
+                err = _diag(e)
+                phase("Authentication", False, err)
                 if _hw_ssh:
                     hint = (
                         "Huawei USG SSH authentication failed. Ensure:\n"
@@ -937,7 +947,7 @@ def test_device(
                         "• HTTPS management is enabled on the management interface\n"
                         "• Default port is 443 (or 8443 on USG6000E/F — check your deployment)"
                     )
-                return {"success": False, "phases": phases, "error": str(e), "hint": hint}
+                return {"success": False, "phases": phases, "error": err, "hint": hint}
 
             try:
                 raw = conn.get_all()
@@ -951,7 +961,7 @@ def test_device(
                 if raw.get("warnings"):
                     info["warnings"] = raw["warnings"]
             except Exception as e:
-                logger.warning("HuaweiUSG discovery partial failure: %s", e)
+                logger.warning("HuaweiUSG discovery partial failure: %s", _diag(e))
                 info.setdefault("rule_count", None)
 
             conn.disconnect()
@@ -1017,10 +1027,11 @@ def test_device(
         return {"success": True, "phases": phases, "info": info}
 
     except Exception as e:
-        logger.warning("Device test failed for %s (%s): %s", device_id, d.vendor, e)
-        phase("API Discovery", False, str(e))
-        hint = _vendor_error_hint(d.vendor, str(e))
-        return {"success": False, "phases": phases, "error": str(e), "hint": hint}
+        err = _diag(e)
+        logger.warning("Device test failed for %s (%s): %s", device_id, d.vendor, err)
+        phase("API Discovery", False, err)
+        hint = _vendor_error_hint(d.vendor, err)
+        return {"success": False, "phases": phases, "error": err, "hint": hint}
 
 
 def _vendor_error_hint(vendor: str, error: str) -> str:
@@ -1075,7 +1086,7 @@ def _run_sync_bg(device_id: str):
         from app.connectors.live_sync import sync_device
         sync_device(device, db)
     except Exception as e:
-        logger.error("Background sync error for device %s: %s", device_id, e)
+        logger.error("Background sync error for device %s: %s", device_id, _diag(e))
     finally:
         db.close()
 
@@ -1126,7 +1137,7 @@ def get_sync_status(
     return {
         "sync_status": d.sync_status,
         "last_sync_at": d.last_sync_at.isoformat() if d.last_sync_at else None,
-        "last_error": d.last_error,
+        "last_error": _diag(d.last_error) if d.last_error else None,
         "last_policy_id": d.last_policy_id,
     }
 

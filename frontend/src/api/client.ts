@@ -261,8 +261,13 @@ export const getObjects = (params?: Record<string, string | number>) =>
   api.get('/objects', { params: params as Record<string, string> }).then(r => r.data as ObjectListResponse)
 
 // Upload
-export const uploadPolicy = (formData: FormData) =>
-  api.post('/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data)
+type UploadProgressEvent = { loaded: number; total?: number }
+
+export const uploadPolicy = (formData: FormData, onUploadProgress?: (event: UploadProgressEvent) => void) =>
+  api.post('/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress,
+  }).then(r => r.data)
 
 // Reports
 export const getReportUrl = (

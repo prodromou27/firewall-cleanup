@@ -18,11 +18,18 @@ function fmtDate(iso: string | null) {
   const d = new Date(iso); return isNaN(d.getTime()) ? iso : d.toLocaleString()
 }
 
+function safeDownloadName(name: string) {
+  return (name || 'policyinsight-report')
+    .replace(/[\\/:*?"<>|\x00-\x1f]/g, '-')
+    .replace(/^\.+/, '')
+    .slice(0, 180) || 'policyinsight-report'
+}
+
 async function download(id: string, name: string) {
   const res = await fetch(reportDownloadUrl(id), { credentials: 'include' })
   if (!res.ok) return
   const blob = await res.blob()
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click()
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = safeDownloadName(name); a.click()
   URL.revokeObjectURL(a.href)
 }
 

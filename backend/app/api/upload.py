@@ -15,6 +15,7 @@ from app.security.audit import audit_log
 from app.models.user import User
 from app.security.identity import require_capability, require_customer_access
 from app.security.rbac import CAP_UPLOAD
+from app.security.redaction import redact_secrets
 import logging
 
 router = APIRouter(prefix="/api/upload", tags=["upload"])
@@ -161,7 +162,16 @@ async def upload_policy(
             os.remove(file_path)
         except Exception:
             pass
-        raise HTTPException(status_code=422, detail=f"Failed to parse file: {str(e)}")
+        logger.warning(
+            "Policy upload parse failed for vendor=%s filename=%s: %s",
+            vendor,
+            safe_filename,
+            redact_secrets(e),
+        )
+        raise HTTPException(
+            status_code=422,
+            detail="Failed to parse uploaded policy. Verify the selected vendor and export format, then try again.",
+        )
 
     if not rules and not objects:
         try:
@@ -342,9 +352,14 @@ def _import_quality(rules: list, objects: list, warnings: list) -> dict:
     elif quality_score < 80:
         confidence_note = "Analysis confidence is MODERATE. Some detections may have lower accuracy due to missing data."
 
+    incomplete_import = bool(data_gaps or warnings)
+
     return {
+        "rule_count": total,
+        "object_count": len(objects),
         "quality_score": quality_score,
         "completeness_score": completeness_score,
+        "incomplete_import": incomplete_import,
         "has_hit_counts": has_hit_counts,
         "has_last_hit": has_last_hit,
         "has_comments": has_comments,
@@ -364,7 +379,7 @@ def _run_analysis_task(policy_id: str, customer_id: str):
         run_analysis(policy_id, db)
         _refresh_customer_counters(customer_id, db)
     except Exception as e:
-        logger.error(f"Background analysis failed: {e}", exc_info=True)
+        logger.error("Background analysis failed for policy %s: %s", policy_id, redact_secrets(e), exc_info=True)
     finally:
         db.close()
 

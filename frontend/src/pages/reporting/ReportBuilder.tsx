@@ -22,6 +22,13 @@ const FORMATS: Array<{ key: string; label: string; hint: string }> = [
 ]
 const STEPS = ['Source', 'Template', 'Sections', 'Categories', 'Filters', 'Preview & Export']
 
+function safeDownloadName(name: string) {
+  return (name || 'policyinsight-report')
+    .replace(/[\\/:*?"<>|\x00-\x1f]/g, '-')
+    .replace(/^\.+/, '')
+    .slice(0, 180) || 'policyinsight-report'
+}
+
 export function ReportBuilder() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -117,7 +124,7 @@ export function ReportBuilder() {
       if (!res.ok) throw new Error(`Download failed (${res.status})`)
       const blob = await res.blob()
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
-      a.download = r.file_name; a.click(); URL.revokeObjectURL(a.href)
+      a.download = safeDownloadName(r.file_name); a.click(); URL.revokeObjectURL(a.href)
     } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
   }
 
@@ -283,7 +290,7 @@ export function ReportBuilder() {
                 </button>
               </div>
               {previewHtml
-                ? <iframe title="preview" srcDoc={previewHtml} className="w-full h-[520px] border border-gray-200 rounded-lg bg-white" />
+                ? <iframe title="preview" srcDoc={previewHtml} sandbox="" className="w-full h-[520px] border border-gray-200 rounded-lg bg-white" />
                 : <div className="text-sm text-gray-400 py-10 text-center">Click “Refresh preview” to render the report.</div>}
             </div>
             <div className="card">

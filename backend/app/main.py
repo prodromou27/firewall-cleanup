@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import FastAPI, Request, status
+from fastapi import Depends, FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.config import settings
@@ -18,6 +18,8 @@ from app.api import audit as audit_api
 from app.api import cleanup as cleanup_api
 from app.api import changes as changes_api
 from app.api import reporting_v2
+from app.models.user import User
+from app.security.identity import get_current_user
 import app.models  # ensure models are registered
 
 # ── Logging configuration ─────────────────────────────────────────────────────
@@ -626,7 +628,7 @@ def health():
 
 
 @app.get("/api/recommendations")
-def list_recommendations():
+def list_recommendations(user: User = Depends(get_current_user)):
     """Return the full centralised recommendation library.
     Used by reports and the frontend to render consistent guidance per finding type.
     """
@@ -635,14 +637,14 @@ def list_recommendations():
 
 
 @app.get("/api/recommendations/{finding_type}")
-def get_recommendation(finding_type: str):
+def get_recommendation(finding_type: str, user: User = Depends(get_current_user)):
     """Return the standard recommendation for a specific finding type."""
     from app.analysis.recommendation_library import get as _get
     return {"finding_type": finding_type, "recommendation": _get(finding_type)}
 
 
 @app.get("/api/remediation")
-def get_remediation(finding_type: str, vendor: str = None):
+def get_remediation(finding_type: str, vendor: str = None, user: User = Depends(get_current_user)):
     """Per-vendor review/remediation guidance for a finding type (read-only)."""
     from app.analysis.remediation_templates import get as _get_rem
     return _get_rem(vendor, finding_type)

@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 from app.models.device import FirewallDevice
 from app.models.policy import FirewallPolicy, FirewallRule, FirewallObject, ObjectMember
 from app.analysis.engine import run_analysis
+from app.security.redaction import redact_secrets
 
 logger = logging.getLogger(__name__)
 
@@ -1332,9 +1333,10 @@ def sync_device(device: FirewallDevice, db: Session) -> dict:
         }
 
     except Exception as e:
-        logger.exception("Live sync failed for device %s (%s): %s", device.id, device.name, e)
+        safe_error = redact_secrets(e)
+        logger.exception("Live sync failed for device %s (%s): %s", device.id, device.name, safe_error)
         device.sync_status = "error"
-        device.last_error  = str(e)
+        device.last_error  = safe_error
         db.commit()
 
         # Notify on sync error
@@ -1348,7 +1350,7 @@ def sync_device(device: FirewallDevice, db: Session) -> dict:
                 device_name=device.name,
                 vendor=device.vendor,
                 customer_name=customer.name if customer else device.customer_id,
-                error_message=str(e),
+                error_message=safe_error,
             )
         except Exception:
             pass

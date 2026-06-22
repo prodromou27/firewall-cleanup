@@ -101,6 +101,36 @@ def is_public_network(value: str) -> bool:
     return not net.is_private
 
 
+def classify_ip(value: str) -> str:
+    """Classify an address/network: any | loopback | link_local | reserved |
+    private | public | unknown. Used to avoid false public-exposure findings on
+    non-routable space and to attribute exposure precisely.
+    """
+    if not value:
+        return "unknown"
+    if is_any(value):
+        return "any"
+    net = parse_ip_network(value)
+    if net is None:
+        return "unknown"
+    if net.is_loopback:
+        return "loopback"
+    if net.is_link_local:
+        return "link_local"
+    if net.is_private:
+        return "private"
+    # is_reserved / multicast / unspecified are non-routable for our purposes.
+    if net.is_reserved or net.is_multicast or net.is_unspecified:
+        return "reserved"
+    return "public"
+
+
+def is_routable_public(value: str) -> bool:
+    """True only for genuinely internet-routable public space (excludes any,
+    loopback, link-local, reserved, multicast)."""
+    return classify_ip(value) == "public"
+
+
 def parse_ip_range(start: str, end: str):
     """Return list of networks covering an IP range."""
     try:

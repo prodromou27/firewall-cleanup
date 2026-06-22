@@ -68,7 +68,9 @@ def test_overly_permissive_rule_reports_evidence_and_recommendation():
     findings = _analyze_permissive([_rule(1)], {})
 
     assert len(findings) == 1
-    assert findings[0]["finding_type"] == "overly_permissive"
+    # A fully any/any/any allow is now reported as the dedicated Critical
+    # any-to-any finding rather than the graded overly_permissive one.
+    assert findings[0]["finding_type"] == "any_to_any_allow"
     assert findings[0]["severity"] == "Critical"
     assert findings[0]["evidence"]["any_source"] is True
     assert findings[0]["evidence"]["any_destination"] is True

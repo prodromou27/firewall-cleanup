@@ -491,9 +491,33 @@ def _analyze_permissive(rules: List[dict], obj_map: dict) -> List[dict]:
         if any_svc:
             issues.append("any service")
 
+        # True any-to-any allow (source AND destination AND service all Any) on an
+        # enabled allow rule is the unambiguous Critical case — emit a dedicated,
+        # evidence-rich finding rather than the graded "overly permissive" one.
+        if any_src and any_dst and any_svc:
+            findings.append({
+                "finding_type": "any_to_any_allow",
+                "severity": "Critical",
+                "confidence": "High",
+                "title": "Critical Any-to-Any Allow Rule Detected",
+                "description": (
+                    f"{rule_name} is an enabled allow rule whose source, destination and "
+                    "service all resolve to Any. It permits all traffic between all hosts on "
+                    "all ports — the broadest possible access and a critical security risk."
+                ),
+                "affected_rules": [rule.get("id")],
+                "evidence": {
+                    "rule_id": rule_id, "action": rule.get("action"), "enabled": True,
+                    "source": rule.get("sources"), "destination": rule.get("destinations"),
+                    "service": rule.get("services"), "applications": rule.get("applications") or [],
+                    "any_source": True, "any_destination": True, "any_service": True,
+                },
+                "recommendation": _RL.get("overly_permissive"),
+            })
+            continue
+
         if issues:
             # Severity reflects how much access the rule actually grants:
-            #  - Any source AND Any destination AND Any service = allow-everything → Critical
             #  - Any source AND Any destination (any-to-any) → Critical
             #  - Any source/dest combined with Any service → High
             #  - Any source OR Any destination alone → High

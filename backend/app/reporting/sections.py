@@ -40,6 +40,7 @@ SECTION_CATALOG = [
     {"key": "findings_by_severity","name": "Findings by Severity","type": T_METRICS, "group": "Summary",       "default": True},
     {"key": "findings_by_category","name": "Findings by Category","type": T_METRICS, "group": "Summary",       "default": True},
     {"key": "top_high_risk",     "name": "Top High-Risk Findings","type": T_FINDINGS, "group": "Findings",      "default": True, "severities": ["Critical", "High"]},
+    {"key": "any_to_any_rules",  "name": "Any-to-Any Allow Rules","type": T_FINDINGS, "group": "Findings",      "default": True, "finding_types": ["any_to_any_allow"]},
     {"key": "overly_permissive_rules","name": "Overly Permissive Rules","type": T_FINDINGS,"group": "Findings","default": True, "finding_types": ["overly_permissive"]},
     {"key": "disabled_rules",    "name": "Disabled Rules",        "type": T_FINDINGS, "group": "Findings",      "default": False,"finding_types": ["disabled_rule"]},
     {"key": "zero_hit_rules",    "name": "Zero-Hit Rules",        "type": T_FINDINGS, "group": "Findings",      "default": False,"finding_types": ["zero_hit_rule"]},
@@ -97,6 +98,7 @@ FINDING_CATEGORIES = [
     ("large_group", "Large Groups"),
     ("broad_network", "Broad Network Objects"),
     ("service_range", "Wide Service Objects"),
+    ("any_to_any_allow", "Any-to-Any Allow Rules"),
     # NAT & Public Exposure
     ("nat_public_to_internal", "Public IP Mapped to Internal System"),
     ("nat_static", "Static NAT Mappings"),

@@ -121,6 +121,27 @@ def build_cpe_string(vendor: str, os_version: str) -> Optional[str]:
     return None
 
 
+def candidate_cpes(vendor: str, os_version: str) -> List[str]:
+    """Return all CPE strings worth querying for a vendor+version.
+
+    Some vendors register CVEs under more than one CPE — notably Check Point,
+    whose advisories appear under both the Gaia OS and the Quantum Security
+    Gateway product CPEs. Querying only one misses real CVEs. Returns an empty
+    list if the version cannot be mapped.
+    """
+    base = build_cpe_string(vendor, os_version)
+    if not base:
+        return []
+    cpes = [base]
+    if vendor.lower() == "checkpoint":
+        ver = _normalise_checkpoint_version(os_version)
+        if ver:
+            # Quantum Security Gateway is the product CPE many CP CVEs use.
+            cpes.append(f"cpe:2.3:o:checkpoint:quantum_security_gateway:{ver}:*:*:*:*:*:*:*")
+            cpes.append(f"cpe:2.3:a:checkpoint:quantum_security_gateway:{ver}:*:*:*:*:*:*:*")
+    return cpes
+
+
 # ── NVD query ─────────────────────────────────────────────────────────────────
 
 def _query_nvd(cpe_string: str, nvd_api_key: Optional[str] = None):
@@ -245,6 +266,7 @@ def get_device_cves(
         model_available = False
 
     cpe = build_cpe_string(vendor, os_version or "")
+    cpes = candidate_cpes(vendor, os_version or "")
 
     # Check cache
     if model_available and not force_refresh:
@@ -279,8 +301,22 @@ def get_device_cves(
             ),
         }
 
-    raw   = _query_nvd(cpe, nvd_api_key)
-    error = None if raw is not None else (_query_nvd_error or "NVD API unavailable.")
+    # Query every candidate CPE (e.g. Check Point gaia_os + quantum gateway) and
+    # merge, de-duplicating by CVE id. A lookup counts as failed only if *every*
+    # candidate query failed (so one bad CPE doesn't hide results from another).
+    merged: dict = {}
+    any_ok = False
+    last_err = None
+    for c in cpes:
+        part = _query_nvd(c, nvd_api_key)
+        if part is None:
+            last_err = _query_nvd_error
+            continue
+        any_ok = True
+        for item in part:
+            merged.setdefault(item.get("cve_id"), item)
+    raw   = list(merged.values()) if any_ok else None
+    error = None if raw is not None else (last_err or "NVD API unavailable.")
     cves  = raw or []
 
     # Save to cache only on a successful lookup — never cache a failure, so a

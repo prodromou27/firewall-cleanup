@@ -399,7 +399,10 @@ class CheckPointConnector:
         try:
             data = self._post_raw(
                 "show-gateways-and-servers",
-                {"details-level": "standard", "limit": 200},
+                # "full" returns per-gateway topology: interfaces (with IPs/masks),
+                # hardware, version, and cluster membership — needed to populate the
+                # device inventory (Network Interfaces panel) and OS version for CVEs.
+                {"details-level": "full", "limit": 200},
             )
             return data.get("objects", [])
         except Exception as e:

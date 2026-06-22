@@ -18,6 +18,7 @@ Security:
   - The API response NEVER returns raw credential values — only has_token / has_credentials flags.
   - All state-changing operations are written to the audit log.
 """
+import json
 import logging
 import ipaddress
 import re
@@ -237,6 +238,39 @@ def _mask_username(username: Optional[str]) -> Optional[str]:
     if len(username) <= 2:
         return "*" * len(username)
     return username[:2] + "***"
+
+
+def _cp_interfaces(raw: list) -> list:
+    """Normalize Check Point gateway 'interfaces' (full topology) to the common
+    {name, ip, mask, type, status} shape the device detail panel renders.
+
+    Check Point full-detail interfaces look like:
+      {"name": "eth0", "ipv4-address": "10.0.0.1", "ipv4-mask-length": 24,
+       "topology": "external", ...}
+    Missing/odd shapes are tolerated — only interfaces with a name are kept.
+    """
+    out = []
+    for itf in raw or []:
+        if not isinstance(itf, dict):
+            continue
+        name = itf.get("name") or itf.get("interface-name")
+        if not name:
+            continue
+        ip = itf.get("ipv4-address") or itf.get("ipv4_address") or itf.get("ip-address") or ""
+        mask_len = itf.get("ipv4-mask-length")
+        mask = (
+            f"/{mask_len}" if isinstance(mask_len, int) or (isinstance(mask_len, str) and mask_len.isdigit())
+            else (itf.get("ipv4-network-mask") or itf.get("subnet-mask") or "")
+        )
+        out.append({
+            "name": name,
+            "ip": ip,
+            "mask": mask,
+            "type": itf.get("topology") or "",
+            # Topology lists configured interfaces; treat as up so they render active.
+            "status": "up",
+        })
+    return out
 
 
 def _device_dict(d: FirewallDevice) -> dict:
@@ -762,7 +796,12 @@ def test_device(
             try:
                 raw_gws = conn.get_gateways()
                 gateways = [
-                    {"name": gw.get("name"), "type": gw.get("type"), "version": gw.get("version")}
+                    {
+                        "name": gw.get("name"), "type": gw.get("type"), "version": gw.get("version"),
+                        "hardware": gw.get("hardware"),
+                        "ipv4-address": gw.get("ipv4-address") or gw.get("ip-address"),
+                        "interfaces": gw.get("interfaces") or [],
+                    }
                     for gw in raw_gws
                 ]
             except Exception:
@@ -1003,6 +1042,20 @@ def test_device(
                 # No gateway versions available — store API version as fallback
                 # (CVE checker will skip "API x.y" strings gracefully)
                 d.os_version = f"API {api_ver}"
+            # Populate the inventory (interfaces, HA, hardware) from the primary
+            # gateway's full topology so the device detail panel is meaningful.
+            try:
+                primary = next((g for g in gws if g.get("interfaces")), gws[0] if gws else None)
+                if primary:
+                    ifaces = _cp_interfaces(primary.get("interfaces") or [])
+                    if ifaces:
+                        d.device_interfaces = json.dumps(ifaces)
+                    if primary.get("hardware"):
+                        d.fw_model = f"{primary['hardware']} ({d.fw_model})" if d.fw_model else primary["hardware"]
+                    if "cluster" in (primary.get("type") or "").lower():
+                        d.ha_mode = d.ha_mode or "cluster"
+            except Exception as _cp_inv_exc:
+                logger.warning("Could not populate Check Point inventory: %s", _cp_inv_exc)
         elif d.vendor == "PaloAlto":
             if info.get("version") or info.get("sw-version"):
                 d.os_version = info.get("version") or info.get("sw-version")

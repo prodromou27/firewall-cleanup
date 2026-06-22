@@ -341,6 +341,7 @@ export function PolicyDetail() {
         </div>
         <div className="flex gap-2">
           <Link to={`/policies/${id}/rules`} className="btn-secondary">View Rulebase</Link>
+          <Link to={`/policies/${id}/public-exposure`} className="btn-secondary">Public Exposure</Link>
           <Link to={policy.customer_id ? `/customers/${policy.customer_id}/findings?policy_id=${id}` : `/findings?policy_id=${id}`} className="btn-secondary">
             <BarChart2 className="w-4 h-4" /> Findings
           </Link>

@@ -49,8 +49,9 @@ SECTION_CATALOG = [
     {"key": "risky_services",    "name": "Risky Services",        "type": T_FINDINGS, "group": "Findings",      "default": True, "finding_types": ["risky_service", "cleartext_service"]},
     {"key": "rules_without_logging","name": "Rules Without Logging","type": T_FINDINGS,"group": "Findings",     "default": False,"finding_types": ["no_logging"]},
     {"key": "temporary_rules",   "name": "Temporary Rules",       "type": T_FINDINGS, "group": "Findings",      "default": False,"finding_types": ["temporary_rule", "expired_rule"]},
-    {"key": "public_exposure",   "name": "Public Exposure Findings","type": T_FINDINGS,"group": "Findings",     "default": True, "finding_types": ["rdp_exposed", "ssh_exposed", "database_exposed", "inbound_from_internet"]},
-    {"key": "nat_findings",      "name": "NAT Findings",          "type": T_FINDINGS, "group": "Findings",      "default": False,"finding_types": ["nat_complexity"]},
+    {"key": "public_exposure",   "name": "Public Exposure Findings","type": T_FINDINGS,"group": "Findings",     "default": True, "finding_types": ["rdp_exposed", "ssh_exposed", "database_exposed", "inbound_from_internet", "rdp_public_exposure", "ssh_public_exposure", "smb_public_exposure", "database_public_exposure", "any_service_public_exposure", "sensitive_destination_exposure"]},
+    {"key": "nat_findings",      "name": "NAT Findings",          "type": T_FINDINGS, "group": "Findings",      "default": False,"finding_types": ["nat_complexity", "nat_static", "nat_source", "nat_duplicate", "nat_overlap"]},
+    {"key": "nat_public_exposure","name": "NAT & Public Exposure Review","type": T_FINDINGS,"group": "Findings","default": False,"finding_types": ["nat_public_to_internal", "nat_without_policy", "policy_without_nat", "rdp_public_exposure", "ssh_public_exposure", "smb_public_exposure", "database_public_exposure", "any_service_public_exposure", "sensitive_destination_exposure"]},
     {"key": "unused_objects",    "name": "Unused Objects",        "type": T_FINDINGS, "group": "Objects",       "default": False,"finding_types": ["unused_object"]},
     {"key": "duplicate_objects", "name": "Duplicate Objects",     "type": T_FINDINGS, "group": "Objects",       "default": False,"finding_types": ["duplicate_object"]},
     {"key": "overlapping_objects","name": "Overlapping Objects",  "type": T_FINDINGS, "group": "Objects",       "default": False,"finding_types": ["broad_network", "large_group", "empty_group", "service_range"]},
@@ -96,6 +97,20 @@ FINDING_CATEGORIES = [
     ("large_group", "Large Groups"),
     ("broad_network", "Broad Network Objects"),
     ("service_range", "Wide Service Objects"),
+    # NAT & Public Exposure
+    ("nat_public_to_internal", "Public IP Mapped to Internal System"),
+    ("nat_static", "Static NAT Mappings"),
+    ("nat_source", "Source / Hide NAT"),
+    ("nat_duplicate", "Duplicate NAT Rules"),
+    ("nat_overlap", "Overlapping NAT Rules"),
+    ("nat_without_policy", "NAT Without Security Policy"),
+    ("policy_without_nat", "Security Rule Without NAT Relationship"),
+    ("any_service_public_exposure", "Public Exposure of Any Service"),
+    ("rdp_public_exposure", "Public Exposure of RDP"),
+    ("ssh_public_exposure", "Public Exposure of SSH"),
+    ("smb_public_exposure", "Public Exposure of SMB"),
+    ("database_public_exposure", "Public Exposure of Database Ports"),
+    ("sensitive_destination_exposure", "Public Exposure to Sensitive Destinations"),
 ]
 FINDING_CATEGORY_KEYS = [k for k, _ in FINDING_CATEGORIES]
 

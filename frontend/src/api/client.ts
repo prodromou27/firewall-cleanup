@@ -338,6 +338,30 @@ export const getPolicyRiskScore = (policyId: string) =>
 export const getPermissiveAnalysis = (policyId: string) =>
   api.get(`/policies/${policyId}/permissive-analysis`).then(r => r.data)
 
+export interface PublicExposure {
+  policy_id: string
+  firewall_name: string
+  vendor: string
+  nat_available: boolean
+  nat_rule_count: number
+  public_ips: string[]
+  exposed_ports: number[]
+  exposures: Array<{
+    public_ip: string
+    internal_target: string
+    ports: number[]
+    service_any: boolean
+    source: 'nat' | 'policy'
+    nat_rules: (string | number)[]
+    security_rules: (string | number)[]
+  }>
+  risk_score: number
+  findings: Array<{ id: string; finding_type: string; severity: string; title: string; status: string }>
+}
+
+export const getPublicExposure = (policyId: string) =>
+  api.get(`/policies/${policyId}/public-exposure`).then(r => r.data as PublicExposure)
+
 export const getRulesExportUrl = (
   policyId: string,
   params: Record<string, string | number | boolean> = {}

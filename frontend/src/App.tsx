@@ -9,6 +9,7 @@ import { Upload } from './pages/Upload'
 import { Policies, PolicyDetail } from './pages/Policies'
 import { Findings } from './pages/Findings'
 import { Rulebase } from './pages/Rulebase'
+import { PublicExposure } from './pages/PublicExposure'
 import { Objects } from './pages/Objects'
 import { ReportsDashboard } from './pages/reporting/ReportsDashboard'
 import { ReportBuilder } from './pages/reporting/ReportBuilder'
@@ -44,6 +45,7 @@ function AuthenticatedApp() {
             <Route path="/policies" element={<Policies />} />
             <Route path="/policies/:id" element={<PolicyDetail />} />
             <Route path="/policies/:policyId/rules" element={<Rulebase />} />
+            <Route path="/policies/:policyId/public-exposure" element={<PublicExposure />} />
             <Route path="/policies/:policyId/compare" element={<PolicyComparison />} />
             <Route path="/findings" element={<Findings />} />
             <Route path="/objects" element={<Objects />} />

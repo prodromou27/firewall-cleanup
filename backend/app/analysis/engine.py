@@ -448,6 +448,19 @@ def _analyze_usage(rules: List[dict], obj_map: dict) -> List[dict]:
     return findings
 
 
+def _has_l7_app_constraint(rule: dict) -> bool:
+    """True if the rule is constrained by Application Control / URL filtering.
+
+    A Check Point Application Control rule commonly uses service "Any" but limits
+    traffic to specific applications or URL categories (the 'content' column). In
+    that case the rule is NOT "any service" in the permissive sense — Layer-7
+    matching constrains it — so service breadth must not be reported as overly
+    permissive. "Any"/empty application lists impose no constraint.
+    """
+    apps = rule.get("applications") or []
+    return any(str(a).strip().lower() not in ("", "any") for a in apps)
+
+
 def _analyze_permissive(rules: List[dict], obj_map: dict) -> List[dict]:
     findings = []
     for rule in rules:
@@ -462,7 +475,9 @@ def _analyze_permissive(rules: List[dict], obj_map: dict) -> List[dict]:
 
         any_src = has_any_source(rule, obj_map)
         any_dst = has_any_destination(rule, obj_map)
-        any_svc = has_any_service(rule, obj_map)
+        # An Application Control rule (service Any + specific applications) is
+        # constrained at Layer 7, so its service breadth is not "overly permissive".
+        any_svc = has_any_service(rule, obj_map) and not _has_l7_app_constraint(rule)
 
         issues = []
         if any_src:

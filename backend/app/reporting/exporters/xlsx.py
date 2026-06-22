@@ -95,12 +95,12 @@ def render(data: ReportData) -> bytes:
     # Appendices
     if data.rules and any(s["key"] == "full_rulebase" for s in data.sections):
         ws = wb.create_sheet("Full Rulebase")
-        cols = ["#", "Name", "Source", "Destination", "Service", "Action", "Logging", "Hit count", "Last hit", "Risk"]
+        cols = ["#", "Name", "Source", "Destination", "Service", "Application", "Action", "Logging", "Hit count", "Last hit", "Risk"]
         ws.append(cols)
         for r in data.rules:
             ws.append([spreadsheet_cell(v) for v in [
                 r["rule_number"], r["rule_name"], r["sources"], r["destinations"], r["services"],
-                r["action"], r["logging"], r["hit_count"], r["last_hit"], r["risk_score"],
+                r.get("applications", ""), r["action"], r["logging"], r["hit_count"], r["last_hit"], r["risk_score"],
             ]])
         _style_header(ws, len(cols))
     if data.objects and any(s["key"] == "full_object_inventory" for s in data.sections):

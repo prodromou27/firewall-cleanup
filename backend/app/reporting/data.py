@@ -70,6 +70,7 @@ def _rule_dict(r: FirewallRule) -> Dict[str, Any]:
         "sources": _join(r.sources),
         "destinations": _join(r.destinations),
         "services": _join(r.services),
+        "applications": _join(r.applications),
         "action": r.action or "",
         "logging": "Yes" if r.logging_enabled else "No",
         "hit_count": r.hit_count if r.hit_count is not None else "",

@@ -668,15 +668,26 @@ def _cp_translate(raw: dict) -> dict:
     return {"rules": rules, "objects": obj_map, "warnings": vpn_warnings}
 
 
-def _cp_hit_value(hits: dict) -> int:
-    """Extract hit count from CP hits dict — handles both int and nested dict forms."""
-    v = hits.get("value", hits.get("hits", 0))
+def _cp_hit_value(hits: dict):
+    """Extract hit count from a CP hits dict.
+
+    Returns None when the management server provided NO hit data (hits not
+    requested, unsupported, or absent) so downstream analysis can tell "unknown"
+    apart from a genuine zero. Returns an int (including 0) only when a real hit
+    value is present — this prevents false zero-hit findings on rules (including
+    Application Control rules) whose hit counts simply weren't collected.
+    """
+    if not hits:
+        return None
+    v = hits.get("value", hits.get("hits"))
     if isinstance(v, dict):
-        v = v.get("value", 0)
+        v = v.get("value")
+    if v is None:
+        return None
     try:
-        return int(v) if v else 0
+        return int(v)
     except (ValueError, TypeError):
-        return 0
+        return None
 
 
 def _cp_date(date_val) -> Optional[str]:

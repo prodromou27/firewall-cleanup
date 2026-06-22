@@ -31,6 +31,9 @@ NVD_API_BASE  = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 CACHE_TTL_HRS = 24   # re-query NVD after 24 hours
 MAX_RESULTS   = 20   # cap CVEs returned per device
 
+# Human-readable reason for the most recent _query_nvd failure (None on success).
+_query_nvd_error: Optional[str] = None
+
 
 # ── CPE helpers ──────────────────────────────────────────────────────────────
 
@@ -120,16 +123,24 @@ def build_cpe_string(vendor: str, os_version: str) -> Optional[str]:
 
 # ── NVD query ─────────────────────────────────────────────────────────────────
 
-def _query_nvd(cpe_string: str, nvd_api_key: Optional[str] = None) -> List[dict]:
+def _query_nvd(cpe_string: str, nvd_api_key: Optional[str] = None):
     """
     Query NVD API for CVEs matching a CPE string.
-    Returns list of CVE dicts: {cve_id, description, cvss_score, severity, published, url}
+
+    Returns a list of CVE dicts on success (possibly empty if NVD knows of no
+    CVEs for the CPE). Returns None on failure (httpx missing, network error,
+    rate-limit, or non-200) so callers can distinguish "no CVEs" from "lookup
+    failed" instead of both looking like an empty list. ``_query_nvd_error``
+    holds a human-readable reason for the last failure.
     """
+    global _query_nvd_error
+    _query_nvd_error = None
     try:
         import httpx
     except ImportError:
         logger.warning("httpx not installed — CVE lookup unavailable. Run: pip install httpx")
-        return []
+        _query_nvd_error = "CVE lookup dependency (httpx) is not installed on the server."
+        return None
 
     headers: dict = {}
     if nvd_api_key:
@@ -147,14 +158,23 @@ def _query_nvd(cpe_string: str, nvd_api_key: Optional[str] = None) -> List[dict]
             resp = client.get(NVD_API_BASE, params=params, headers=headers)
             if resp.status_code == 403:
                 logger.warning("NVD API rate-limited (403). CVE lookup skipped.")
-                return []
+                _query_nvd_error = (
+                    "NVD rate-limited the request (HTTP 403). Configure an NVD API "
+                    "key or retry shortly."
+                )
+                return None
             if resp.status_code != 200:
                 logger.warning("NVD API returned %d for CPE %s", resp.status_code, cpe_string)
-                return []
+                _query_nvd_error = f"NVD API returned HTTP {resp.status_code}."
+                return None
             data = resp.json()
     except Exception as exc:
         logger.warning("NVD API query failed: %s", exc)
-        return []
+        _query_nvd_error = (
+            f"Could not reach the NVD API ({exc.__class__.__name__}). The server may "
+            "have no outbound internet access to services.nvd.nist.gov."
+        )
+        return None
 
     results = []
     for vuln in data.get("vulnerabilities", []):
@@ -259,11 +279,13 @@ def get_device_cves(
             ),
         }
 
-    cves  = _query_nvd(cpe, nvd_api_key)
-    error = None if cves is not None else "NVD API unavailable"
+    raw   = _query_nvd(cpe, nvd_api_key)
+    error = None if raw is not None else (_query_nvd_error or "NVD API unavailable.")
+    cves  = raw or []
 
-    # Save to cache
-    if model_available:
+    # Save to cache only on a successful lookup — never cache a failure, so a
+    # transient outage doesn't poison the 24h cache with an empty result.
+    if model_available and raw is not None:
         import json
         cached_row = db.query(DeviceCVECache).filter(DeviceCVECache.device_id == device_id).first()
         if cached_row:

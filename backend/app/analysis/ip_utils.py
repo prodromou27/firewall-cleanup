@@ -52,11 +52,19 @@ def networks_equal(a: str, b: str) -> bool:
 
 
 def is_any(value: str) -> bool:
-    """True if value represents 'any' traffic."""
+    """True if value represents 'any' traffic.
+
+    Covers vendor spellings: Cisco ASA any4/any6, IPv6 ::/0 (and ::), and the
+    0/0 shorthand — all of which mean "all addresses".
+    """
     if not value:
         return False
     v = value.strip().lower()
-    return v in ("any", "all", "0.0.0.0/0", "0.0.0.0")
+    return v in (
+        "any", "all", "any4", "any6",
+        "0.0.0.0/0", "0.0.0.0", "0/0",
+        "::/0", "::", "0.0.0.0/0.0.0.0",
+    )
 
 
 def network_prefix_length(value: str) -> Optional[int]:

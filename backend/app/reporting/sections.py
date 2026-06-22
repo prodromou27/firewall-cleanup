@@ -53,6 +53,7 @@ SECTION_CATALOG = [
     {"key": "public_exposure",   "name": "Public Exposure Findings","type": T_FINDINGS,"group": "Findings",     "default": True, "finding_types": ["rdp_exposed", "ssh_exposed", "database_exposed", "inbound_from_internet", "rdp_public_exposure", "ssh_public_exposure", "smb_public_exposure", "database_public_exposure", "any_service_public_exposure", "sensitive_destination_exposure"]},
     {"key": "nat_findings",      "name": "NAT Findings",          "type": T_FINDINGS, "group": "Findings",      "default": False,"finding_types": ["nat_complexity", "nat_static", "nat_source", "nat_duplicate", "nat_overlap"]},
     {"key": "nat_public_exposure","name": "NAT & Public Exposure Review","type": T_FINDINGS,"group": "Findings","default": False,"finding_types": ["nat_public_to_internal", "nat_without_policy", "policy_without_nat", "rdp_public_exposure", "ssh_public_exposure", "smb_public_exposure", "database_public_exposure", "any_service_public_exposure", "sensitive_destination_exposure"]},
+    {"key": "version_intelligence","name": "Firewall Version Intelligence","type": T_FINDINGS,"group": "Findings","default": False,"finding_types": ["version_outdated", "version_end_of_support", "version_ha_mismatch", "version_unknown", "version_catalog_unavailable"]},
     {"key": "unused_objects",    "name": "Unused Objects",        "type": T_FINDINGS, "group": "Objects",       "default": False,"finding_types": ["unused_object"]},
     {"key": "duplicate_objects", "name": "Duplicate Objects",     "type": T_FINDINGS, "group": "Objects",       "default": False,"finding_types": ["duplicate_object"]},
     {"key": "overlapping_objects","name": "Overlapping Objects",  "type": T_FINDINGS, "group": "Objects",       "default": False,"finding_types": ["broad_network", "large_group", "empty_group", "service_range"]},
@@ -99,6 +100,12 @@ FINDING_CATEGORIES = [
     ("broad_network", "Broad Network Objects"),
     ("service_range", "Wide Service Objects"),
     ("any_to_any_allow", "Any-to-Any Allow Rules"),
+    # Version intelligence
+    ("version_outdated", "Outdated Firewall Versions"),
+    ("version_end_of_support", "End-of-Support Versions"),
+    ("version_ha_mismatch", "HA Version Mismatch"),
+    ("version_unknown", "Unknown Firewall Versions"),
+    ("version_catalog_unavailable", "Version Catalog Unavailable"),
     # NAT & Public Exposure
     ("nat_public_to_internal", "Public IP Mapped to Internal System"),
     ("nat_static", "Static NAT Mappings"),

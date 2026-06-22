@@ -1414,6 +1414,35 @@ def get_device_trends(
     }
 
 
+# ── Version Intelligence ──────────────────────────────────────────────────────
+
+@router.get("/{device_id}/version-intelligence")
+def get_device_version_intelligence(
+    device_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Advisory version assessment against the manually-managed Version Catalog.
+
+    Read-only: never changes firmware. When the catalog has no matching entry,
+    only an Informational finding is returned.
+    """
+    from app.analysis import version_intel
+    from app.models.version_catalog import VersionCatalogEntry
+
+    d = _get_device_authz(device_id, db, user)
+    catalog = [
+        {"vendor": e.vendor, "release_train": e.release_train,
+         "recommended_version": e.recommended_version, "support_status": e.support_status,
+         "eol_versions": e.eol_versions or [], "advisory_url": e.advisory_url}
+        for e in db.query(VersionCatalogEntry).all()
+    ]
+    result = version_intel.analyze_device(d, catalog)
+    result["device_name"] = d.name
+    result["vendor"] = d.vendor
+    return result
+
+
 # ── CVE Vulnerability Check ───────────────────────────────────────────────────
 
 @router.get("/{device_id}/vulnerabilities")

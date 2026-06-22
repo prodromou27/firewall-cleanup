@@ -8,3 +8,4 @@ from app.models.revision import PolicyRevision
 from app.models.user import User, UserCustomerAccess, UserSession
 from app.models.audit import AuditEvent
 from app.models.report import ReportTemplate, ReportTemplateSection, GeneratedReport
+from app.models.version_catalog import VersionCatalogEntry

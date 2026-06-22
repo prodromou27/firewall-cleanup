@@ -18,6 +18,7 @@ from app.api import audit as audit_api
 from app.api import cleanup as cleanup_api
 from app.api import changes as changes_api
 from app.api import reporting_v2
+from app.api import version_catalog as version_catalog_api
 from app.models.user import User
 from app.security.identity import get_current_user
 import app.models  # ensure models are registered
@@ -620,6 +621,7 @@ app.include_router(changes_api.router)
 app.include_router(reporting_v2.templates_router)
 app.include_router(reporting_v2.reports_router)
 app.include_router(reporting_v2.meta_router)
+app.include_router(version_catalog_api.router)
 
 
 @app.get("/api/health")

@@ -142,6 +142,10 @@ def run_analysis(policy_id: str, db: Session) -> str:
         # 14. NAT rule complexity
         findings.extend(_analyze_nat_rules(rules))
 
+        # 14b. NAT & Public Exposure review (gated on NAT data availability).
+        from app.analysis import nat_exposure
+        findings.extend(nat_exposure.analyze(rules, policy.nat_rules, obj_map)["findings"])
+
         # 15. Broad VPN access
         findings.extend(_analyze_vpn_rules(rules, obj_map))
 

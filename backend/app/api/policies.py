@@ -758,6 +758,66 @@ def get_policy_scorecard(
     }
 
 
+_NAT_EXPOSURE_FINDING_TYPES = {
+    "nat_public_to_internal", "nat_static", "nat_source", "nat_duplicate",
+    "nat_overlap", "nat_without_policy", "policy_without_nat",
+    "any_service_public_exposure", "rdp_public_exposure", "ssh_public_exposure",
+    "smb_public_exposure", "database_public_exposure", "sensitive_destination_exposure",
+}
+
+
+@router.get("/{policy_id}/public-exposure")
+def get_public_exposure(
+    policy_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """NAT & Public Exposure review for a policy (read-only).
+
+    Returns the public-exposure inventory (public IPs, published internal
+    services, exposed ports, related NAT/security rules, risk score) plus the
+    related persisted findings. When no NAT data exists, ``nat_available`` is
+    False so the UI can show "NAT Analysis Not Available" instead of fabricating
+    findings. PolicyInsight never writes to the firewall.
+    """
+    from app.analysis import nat_exposure
+    from app.analysis.normalizer import build_object_map
+    from app.analysis.engine import _rule_to_dict, _obj_to_dict
+
+    p = _authz_policy(policy_id, db, user)
+
+    rules_orm = db.query(FirewallRule).filter(FirewallRule.policy_id == policy_id).all()
+    objects_orm = db.query(FirewallObject).filter(FirewallObject.policy_id == policy_id).all()
+    rules = [_rule_to_dict(r) for r in rules_orm]
+    obj_map = build_object_map([_obj_to_dict(o) for o in objects_orm])
+
+    result = nat_exposure.analyze(rules, p.nat_rules, obj_map)
+
+    findings = [
+        {"id": f.id, "finding_type": f.finding_type, "severity": f.severity,
+         "confidence": f.confidence, "title": f.title, "status": f.status,
+         "evidence": f.evidence}
+        for f in db.query(Finding).filter(
+            Finding.policy_id == policy_id,
+            Finding.finding_type.in_(_NAT_EXPOSURE_FINDING_TYPES),
+        ).all()
+    ]
+
+    exp = result["exposure"]
+    return {
+        "policy_id": policy_id,
+        "firewall_name": p.firewall_name,
+        "vendor": p.vendor,
+        "nat_available": result["nat_available"],
+        "nat_rule_count": len(p.nat_rules or []),
+        "public_ips": exp["public_ips"],
+        "exposed_ports": exp["exposed_ports"],
+        "exposures": exp["exposures"],
+        "risk_score": exp["risk_score"],
+        "findings": findings,
+    }
+
+
 @router.get("/{policy_id}/permissive-analysis")
 def get_permissive_analysis(
     policy_id: str,

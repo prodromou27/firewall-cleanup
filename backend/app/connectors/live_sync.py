@@ -604,12 +604,31 @@ def _cp_translate(raw: dict) -> dict:
                     "type": "vpn-community", "value": None, "members": gws, "comment": comment,
                 })
 
-    # ── NAT rules → warnings ────────────────────────────────────────────────
-    # NAT rules are not added to the access rules list but recorded as warnings
-    # so engineers know to review them alongside access policy findings.
-    nat_count = len([r for r in nat_rules_raw if isinstance(r, dict) and r.get("type") != "nat-section"])
-    if nat_count:
-        vpn_warnings.append(f"{nat_count} NAT rules found in package '{raw.get('policy_package', '')}' — review alongside access policy.")
+    # ── NAT rules → normalized list (for NAT & Public Exposure analysis) ─────
+    nat_rules_norm: list[dict] = []
+    for nr in nat_rules_raw:
+        if not isinstance(nr, dict) or nr.get("type") == "nat-section":
+            continue
+        method = (nr.get("method") or "").lower()
+        nat_type = {"static": "static", "hide": "hide"}.get(method, "")
+        nat_rules_norm.append({
+            "rule_number":        nr.get("rule-number", nr.get("position", len(nat_rules_norm) + 1)),
+            "name":               nr.get("name", ""),
+            "nat_type":           nat_type or "unknown",
+            "original_src":       resolve_list(nr.get("original-source", [])),
+            "original_dst":       resolve_list(nr.get("original-destination", [])),
+            "original_service":   resolve_list(nr.get("original-service", [])),
+            "translated_src":     resolve_list(nr.get("translated-source", [])),
+            "translated_dst":     resolve_list(nr.get("translated-destination", [])),
+            "translated_service": resolve_list(nr.get("translated-service", [])),
+            "enabled":            nr.get("enabled", True),
+            "auto":               bool(nr.get("auto-generated", False)),
+        })
+    if nat_rules_norm:
+        vpn_warnings.append(
+            f"{len(nat_rules_norm)} NAT rules found in package "
+            f"'{raw.get('policy_package', '')}' — review alongside access policy."
+        )
 
     # ── Build rules list ────────────────────────────────────────────────────
     rules: list[dict] = []
@@ -665,7 +684,7 @@ def _cp_translate(raw: dict) -> dict:
         }
         rules.append(rule)
 
-    return {"rules": rules, "objects": obj_map, "warnings": vpn_warnings}
+    return {"rules": rules, "objects": obj_map, "warnings": vpn_warnings, "nat_rules": nat_rules_norm}
 
 
 def _cp_hit_value(hits: dict):
@@ -767,6 +786,11 @@ def _write_to_db(parsed: dict, policy: FirewallPolicy, db: Session):
     db.query(FirewallObject).filter(FirewallObject.policy_id == policy.id).delete(synchronize_session=False)
     db.query(FirewallRule).filter(FirewallRule.policy_id == policy.id).delete(synchronize_session=False)
     db.commit()
+
+    # Persist normalized NAT rules (None when the vendor/connector has none, so
+    # the NAT & Public Exposure analysis can show "not available" rather than
+    # inventing findings).
+    policy.nat_rules = parsed.get("nat_rules") or None
 
     # Write objects
     for name, obj in parsed["objects"].items():

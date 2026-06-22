@@ -38,6 +38,9 @@ class FirewallPolicy(Base):
     object_count = Column(Integer, nullable=False, default=0)
     finding_count = Column(Integer, nullable=False, default=0)
     high_finding_count = Column(Integer, nullable=False, default=0)
+    # Normalized NAT rules (vendor-agnostic shape) captured at import/sync, used
+    # by the NAT & Public Exposure analysis. None/empty => NAT data unavailable.
+    nat_rules = Column(JSON, nullable=True)
     notes = Column(Text, nullable=True)
     complexity_score = Column(Float, nullable=True)
     complexity_breakdown = Column(JSON, nullable=True)

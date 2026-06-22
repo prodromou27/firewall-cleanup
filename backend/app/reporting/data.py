@@ -89,6 +89,18 @@ def _object_dict(o: FirewallObject) -> Dict[str, Any]:
     }
 
 
+def _list_filter(filters: Dict[str, Any], *keys: str) -> List[str]:
+    for key in keys:
+        raw = filters.get(key)
+        if raw is None or raw == "":
+            continue
+        if isinstance(raw, str):
+            return [v.strip() for v in raw.split(",") if v.strip()]
+        if isinstance(raw, (list, tuple, set)):
+            return [str(v).strip() for v in raw if str(v).strip()]
+    return []
+
+
 def build_report_data(
     db: Session,
     policy: FirewallPolicy,
@@ -126,13 +138,30 @@ def build_report_data(
     fq = db.query(Finding).filter(Finding.policy_id == policy.id)
     if analysis_run_id:
         fq = fq.filter(Finding.analysis_run_id == analysis_run_id)
-    sev_filter = filters.get("severities")
+    applied_filters: Dict[str, Any] = {}
+    sev_filter = _list_filter(filters, "severities", "severity")
     if sev_filter:
         fq = fq.filter(Finding.severity.in_(sev_filter))
-    if filters.get("confidence"):
-        fq = fq.filter(Finding.confidence.in_(filters["confidence"]))
+        applied_filters["severities"] = sev_filter
+    confidence_filter = _list_filter(filters, "confidence", "confidences")
+    if confidence_filter:
+        fq = fq.filter(Finding.confidence.in_(confidence_filter))
+        applied_filters["confidence"] = confidence_filter
+    status_filter = _list_filter(filters, "statuses", "status")
+    if status_filter:
+        fq = fq.filter(Finding.status.in_(status_filter))
+        applied_filters["statuses"] = status_filter
+    priority_filter = _list_filter(filters, "priorities", "priority")
+    if priority_filter:
+        fq = fq.filter(Finding.priority.in_(priority_filter))
+        applied_filters["priorities"] = priority_filter
+    finding_ids = _list_filter(filters, "finding_ids", "ids")
+    if finding_ids:
+        fq = fq.filter(Finding.id.in_(finding_ids))
+        applied_filters["finding_ids_count"] = len(finding_ids)
     if finding_categories:
         fq = fq.filter(Finding.finding_type.in_(finding_categories))
+        applied_filters["finding_categories"] = finding_categories
     all_findings = fq.all()
     findings = [_finding_dict(f, firewall_name) for f in all_findings]
 
@@ -141,6 +170,9 @@ def build_report_data(
     for f in all_findings:
         severity_counts[f.severity] = severity_counts.get(f.severity, 0) + 1
         category_counts[f.finding_type] = category_counts.get(f.finding_type, 0) + 1
+    if finding_categories:
+        for category in finding_categories:
+            category_counts.setdefault(category, 0)
 
     meta = {
         "customer_name": customer_name,
@@ -163,6 +195,9 @@ def build_report_data(
         "health_score": policy.health_score,
         "complexity_score": policy.complexity_score,
         "cleanup_readiness": policy.cleanup_readiness_score,
+        "selected_sections": section_keys,
+        "selected_finding_categories": finding_categories or [],
+        "filters_applied": applied_filters,
     }
 
     ph = placeholders.build_map(meta)

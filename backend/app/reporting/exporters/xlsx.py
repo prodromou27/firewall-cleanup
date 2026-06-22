@@ -3,6 +3,7 @@ optional full rulebase / object inventory. Filterable headers, freeze panes,
 colour-coded severity. Shares ReportData.
 """
 import io
+import re
 
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
@@ -20,6 +21,19 @@ _SEV_FILL = {
     "Low": PatternFill("solid", fgColor="2563EB"),
     "Informational": PatternFill("solid", fgColor="6B7280"),
 }
+_SHEET_RE = re.compile(r"[\[\]:*?/\\]")
+
+
+def _sheet_title(name: str, seen: set[str]) -> str:
+    base = _SHEET_RE.sub("-", str(name or "Sheet")).strip()[:31] or "Sheet"
+    title = base
+    idx = 2
+    while title in seen:
+        suffix = f" {idx}"
+        title = (base[:31 - len(suffix)] + suffix).strip()
+        idx += 1
+    seen.add(title)
+    return title
 
 
 def _style_header(ws, ncols):
@@ -54,7 +68,7 @@ def render(data: ReportData) -> bytes:
 
     # Summary
     ws = wb.active; ws.title = "Summary"
-    ws.append([data.branding.get("report_title") or "Firewall Policy Review", ""])
+    ws.append([spreadsheet_cell(data.branding.get("report_title") or "Firewall Policy Review"), ""])
     ws["A1"].font = Font(size=14, bold=True, color="1E3A5F")
     for k, v in [("Customer", m["customer_name"]), ("Firewall", m["firewall_name"]), ("Vendor", m["vendor"]),
                  ("Analysis date", m["analysis_date"]), ("Generated", m["generated_date"]),
@@ -68,18 +82,14 @@ def render(data: ReportData) -> bytes:
         ws.cell(row=r, column=1).font = Font(bold=True)
 
     # All findings
-    if data.findings:
-        _findings_sheet(wb.create_sheet("Findings"), data.findings)
+    _findings_sheet(wb.create_sheet("Findings"), data.findings)
 
     # Per-category finding sheets (from selected findings-type sections)
     seen = set()
     for s in data.sections:
         if s["type"] != S.T_FINDINGS or not s.get("findings"):
             continue
-        title = s["name"][:31]
-        if title in seen:
-            continue
-        seen.add(title)
+        title = _sheet_title(s["name"], seen)
         _findings_sheet(wb.create_sheet(title), s["findings"])
 
     # Appendices

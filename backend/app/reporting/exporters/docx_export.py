@@ -1,4 +1,4 @@
-"""DOCX renderer — editable Word document via python-docx, sharing ReportData.
+"""DOCX renderer ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â editable Word document via python-docx, sharing ReportData.
 
 Produces a professional title page, headings per ordered section, editable
 paragraphs and tables, finding tables, appendices, page breaks, and a
@@ -39,6 +39,7 @@ def render(data: ReportData) -> bytes:
     b, m = data.branding, data.meta
     accent = _hex_rgb(b.get("accent_color"))
     doc = Document()
+    include_cover = any(s.get("key") == "cover_page" for s in data.sections)
 
     # Base style
     normal = doc.styles["Normal"]
@@ -47,39 +48,40 @@ def render(data: ReportData) -> bytes:
     # Footer with confidentiality + page number
     footer = doc.sections[0].footer
     fp = footer.paragraphs[0]; fp.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    fp.add_run(f"{b.get('confidentiality','Confidential')} — page ").font.size = Pt(8)
+    fp.add_run(f"{b.get('confidentiality','Confidential')} - page ").font.size = Pt(8)
     _add_page_number_field(fp)
 
-    # ── Title page ────────────────────────────────────────────────────────────
-    for logo_key in ("company_logo_path", "customer_logo_path"):
-        lp = b.get(logo_key)
-        if lp:
-            try:
-                pic = doc.add_paragraph(); pic.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                pic.add_run().add_picture(lp, width=Inches(2.2))
-            except Exception:
-                pass  # unsupported/corrupt image — skip rather than fail the report
-    for _ in range(2):
+    # Title page
+    if include_cover:
+        for logo_key in ("company_logo_path", "customer_logo_path"):
+            lp = b.get(logo_key)
+            if lp:
+                try:
+                    pic = doc.add_paragraph(); pic.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    pic.add_run().add_picture(lp, width=Inches(2.2))
+                except Exception:
+                    pass  # unsupported/corrupt image - skip rather than fail the report
+        for _ in range(2):
+            doc.add_paragraph()
+        t = doc.add_paragraph(); t.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        tr = t.add_run(b.get("report_title", "Firewall Policy Review")); tr.bold = True
+        tr.font.size = Pt(26); tr.font.color.rgb = accent
+        if b.get("cover_subtitle"):
+            sp = doc.add_paragraph(); sp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            sr = sp.add_run(b["cover_subtitle"]); sr.font.size = Pt(13); sr.font.color.rgb = RGBColor(0x6b, 0x72, 0x80)
         doc.add_paragraph()
-    t = doc.add_paragraph(); t.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    tr = t.add_run(b.get("report_title", "Firewall Policy Review")); tr.bold = True
-    tr.font.size = Pt(26); tr.font.color.rgb = accent
-    if b.get("cover_subtitle"):
-        sp = doc.add_paragraph(); sp.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        sr = sp.add_run(b["cover_subtitle"]); sr.font.size = Pt(13); sr.font.color.rgb = RGBColor(0x6b, 0x72, 0x80)
-    doc.add_paragraph()
-    for label, val in [("Customer", m.get("customer_name")), ("Firewall", m.get("firewall_name")),
-                       ("Vendor", m.get("vendor")), ("Analysis date", m.get("analysis_date")),
-                       ("Generated", m.get("generated_date")), ("Prepared by", b.get("prepared_by"))]:
-        if not val:
-            continue
-        p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        p.add_run(f"{label}: ").bold = True; p.add_run(str(val))
-    cp = doc.add_paragraph(); cp.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    cr = cp.add_run(b.get("confidentiality", "Confidential")); cr.bold = True; cr.font.color.rgb = accent
-    if b.get("cover_custom_text"):
-        ct = doc.add_paragraph(b["cover_custom_text"]); ct.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    doc.add_page_break()
+        for label, val in [("Customer", m.get("customer_name")), ("Firewall", m.get("firewall_name")),
+                           ("Vendor", m.get("vendor")), ("Analysis date", m.get("analysis_date")),
+                           ("Generated", m.get("generated_date")), ("Prepared by", b.get("prepared_by"))]:
+            if not val:
+                continue
+            p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p.add_run(f"{label}: ").bold = True; p.add_run(str(val))
+        cp = doc.add_paragraph(); cp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        cr = cp.add_run(b.get("confidentiality", "Confidential")); cr.bold = True; cr.font.color.rgb = accent
+        if b.get("cover_custom_text"):
+            ct = doc.add_paragraph(b["cover_custom_text"]); ct.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        doc.add_page_break()
 
     def heading(text):
         h = doc.add_heading(text, level=1)
@@ -101,7 +103,7 @@ def render(data: ReportData) -> bytes:
             c[1].text = f["finding_type_label"]; c[2].text = f["title"]
             c[3].text = f["recommendation"]; c[4].text = f["confidence"]
 
-    # ── Sections (ordered) ────────────────────────────────────────────────────
+    # ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Sections (ordered) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
     for s in data.sections:
         if s["key"] == "cover_page":
             continue

@@ -6,6 +6,7 @@ import pytest
 from app.reporting import placeholders, sections as S
 from app.reporting.data import ReportData
 from app.reporting.exporters import export, filename_for, SUPPORTED_FORMATS
+from app.reporting.export_safety import attachment_headers, safe_filename, spreadsheet_cell
 
 
 # ── Placeholders ──────────────────────────────────────────────────────────────
@@ -94,6 +95,13 @@ def test_html_includes_disclaimer():
     assert "read-only firewall policy data" in content.decode()
 
 
+def test_html_respects_selected_sections_without_cover_page():
+    data = _sample()
+    data.sections = [s for s in data.sections if s["key"] != "cover_page"]
+    content, _, _ = export(data, "html")
+    assert 'class="cover"' not in content.decode()
+
+
 def test_filename_format():
     fn = filename_for(_sample(), "docx", "Technical-Findings")
     assert fn.startswith("Firewall-Report_ACME_FW1_Technical-Findings_") and fn.endswith(".docx")
@@ -115,6 +123,19 @@ def test_csv_export_guards_against_formula_injection():
     assert "'=HYPERLINK" in content.decode()
 
 
+@pytest.mark.parametrize("prefix", ["=", "+", "-", "@", "\t", "\r", "\n"])
+def test_spreadsheet_cell_guards_all_formula_prefixes(prefix):
+    assert spreadsheet_cell(prefix + "payload").startswith("'")
+
+
+def test_safe_filename_and_attachment_header_strip_unsafe_content():
+    filename = safe_filename('../ACME "Q2"/report?.csv')
+    assert "/" not in filename and "\\" not in filename and '"' not in filename
+    header = attachment_headers(filename)["Content-Disposition"]
+    assert "attachment;" in header
+    assert "filename*=" in header
+
+
 def test_json_export_does_not_include_local_logo_paths_or_workflow_status():
     data = _sample()
     data.branding["company_logo_path"] = "C:/secret/internal/path/logo.png"
@@ -122,6 +143,18 @@ def test_json_export_does_not_include_local_logo_paths_or_workflow_status():
     payload = json.loads(content)
     assert "company_logo_path" not in payload["branding"]
     assert "status" not in payload["findings"][0]
+
+
+def test_json_export_records_selected_sections_categories_and_filters():
+    data = _sample()
+    data.meta["selected_sections"] = ["cover_page", "overly_permissive_rules"]
+    data.meta["selected_finding_categories"] = ["overly_permissive", "zero_hit_rule"]
+    data.meta["filters_applied"] = {"severities": ["High"], "statuses": ["Review Required"]}
+    content, _, _ = export(data, "json")
+    payload = json.loads(content)
+    assert payload["meta"]["selected_sections"] == ["cover_page", "overly_permissive_rules"]
+    assert payload["meta"]["selected_finding_categories"] == ["overly_permissive", "zero_hit_rule"]
+    assert payload["meta"]["filters_applied"]["severities"] == ["High"]
 
 
 def test_pdf_when_available():

@@ -17,6 +17,7 @@ from app.models.finding import Finding
 from app.models.policy import FirewallPolicy
 from app.models.user import User
 from app.security.identity import get_current_user, accessible_customer_ids, require_customer_access
+from app.reporting.export_safety import attachment_headers, spreadsheet_row
 
 router = APIRouter(prefix="/api/cleanup-plan", tags=["cleanup"])
 
@@ -265,18 +266,18 @@ def export_cleanup_tickets(
         validation, objective, rollback = _default_action(f.finding_type, w)
         evidence = f.evidence if isinstance(f.evidence, dict) else {}
         evidence_summary = "; ".join(f"{k}={v}" for k, v in list(evidence.items())[:6])
-        writer.writerow([
+        writer.writerow(spreadsheet_row([
             wid, w["name"], f.id, f.severity, f.confidence, f.finding_type,
             policy_map.get(f.policy_id, ""), f.title, f.status,
             validation, objective, "Implement outside PolicyInsight using the customer's approved firewall change process.",
             rollback or w["rollback"], f.recommendation or "",
             len(f.affected_rules or []), len(f.affected_objects or []), evidence_summary,
-        ])
+        ]))
 
     output.seek(0)
     fname = "cleanup_tickets" + (f"_wave{wave}" if wave else "") + ".csv"
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        headers=attachment_headers(fname),
     )

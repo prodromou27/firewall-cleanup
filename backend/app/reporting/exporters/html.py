@@ -27,9 +27,9 @@ _TEMPLATE = """<!DOCTYPE html>
   .conf { display: inline-block; margin-top: 14px; padding: 4px 12px; border: 1px solid {{ b.accent_color }};
     color: {{ b.accent_color }}; border-radius: 4px; font-weight: 700; letter-spacing: .05em; font-size: 9pt; }
   .logo { max-height: 60px; max-width: 240px; margin: 6px auto; display: block; }
-  table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 9.5pt; }
+  table { width: 100%; max-width: 100%; table-layout: fixed; border-collapse: collapse; margin: 10px 0; font-size: 9.5pt; }
   th { background: {{ b.accent_color }}; color: #fff; text-align: left; padding: 6px 8px; }
-  td { border-bottom: 1px solid #e5e7eb; padding: 5px 8px; vertical-align: top; }
+  td { border-bottom: 1px solid #e5e7eb; padding: 5px 8px; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; }
   tr:nth-child(even) td { background: #f9fafb; }
   .text { white-space: pre-wrap; }
   .kpis { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
@@ -41,9 +41,12 @@ _TEMPLATE = """<!DOCTYPE html>
   .sev-Medium { background:#d97706; } .sev-Low { background:#2563eb; } .sev-Informational { background:#6b7280; }
   .disclaimer { background:#f3f4f6; border-left:4px solid {{ b.accent_color }}; padding:12px 16px; font-size:9.5pt; }
   .section { page-break-inside: avoid; }
+  .wide-section { page-break-inside: auto; }
+  .muted { color:#6b7280; font-style: italic; }
   footer.brandfoot { margin-top: 26px; border-top:1px solid #e5e7eb; padding-top:8px; font-size:8.5pt; color:#9ca3af; }
 </style></head><body>
 
+{% if include_cover %}
 <div class="cover">
   {% if b.company_logo %}<img class="logo" src="{{ b.company_logo }}">{% endif %}
   <div class="title">{{ b.report_title }}</div>
@@ -59,6 +62,7 @@ _TEMPLATE = """<!DOCTYPE html>
     {% if b.cover_custom_text %}<div class="text" style="margin-top:14px">{{ b.cover_custom_text }}</div>{% endif %}
   </div>
 </div>
+{% endif %}
 
 {% for s in sections %}
   {% if s.key == 'cover_page' %}{# rendered above #}
@@ -93,6 +97,7 @@ _TEMPLATE = """<!DOCTYPE html>
       {% elif s.key == 'findings_by_category' %}
         <table><tr><th>Category</th><th>Count</th></tr>
         {% for cat, n in category_counts.items() %}<tr><td>{{ cat }}</td><td>{{ n }}</td></tr>{% endfor %}</table>
+        {% if not category_counts %}<p class="muted">No finding categories match the selected filters.</p>{% endif %}
       {% endif %}
     </div>
   {% elif s.type == 'findings' %}
@@ -104,19 +109,21 @@ _TEMPLATE = """<!DOCTYPE html>
           <td>{{ f.finding_type_label }}</td><td>{{ f.title }}</td>
           <td>{{ f.recommendation }}</td><td>{{ f.confidence }}</td></tr>
         {% endfor %}</table>
-      {% else %}<p style="color:#6b7280">No findings in this category.</p>{% endif %}
+      {% else %}<p class="muted">No findings in this category for the selected filters.</p>{% endif %}
     </div>
   {% elif s.type == 'appendix' and s.key == 'full_rulebase' %}
-    <div class="section"><h2>{{ s.name }}</h2>
+    <div class="section wide-section"><h2>{{ s.name }}</h2>
+      {% if rules %}
       <table><tr><th>#</th><th>Name</th><th>Source</th><th>Dest</th><th>Service</th><th>Action</th><th>Log</th><th>Hits</th></tr>
       {% for r in rules %}<tr><td>{{ r.rule_number }}</td><td>{{ r.rule_name }}</td><td>{{ r.sources }}</td>
         <td>{{ r.destinations }}</td><td>{{ r.services }}</td><td>{{ r.action }}</td><td>{{ r.logging }}</td><td>{{ r.hit_count }}</td></tr>{% endfor %}
-      </table></div>
+      </table>{% else %}<p class="muted">No rules available for this policy.</p>{% endif %}</div>
   {% elif s.type == 'appendix' and s.key == 'full_object_inventory' %}
-    <div class="section"><h2>{{ s.name }}</h2>
+    <div class="section wide-section"><h2>{{ s.name }}</h2>
+      {% if objects %}
       <table><tr><th>Name</th><th>Type</th><th>Value</th><th>Members</th></tr>
       {% for o in objects %}<tr><td>{{ o.object_name }}</td><td>{{ o.object_type }}</td><td>{{ o.value }}</td><td>{{ o.members }}</td></tr>{% endfor %}
-      </table></div>
+      </table>{% else %}<p class="muted">No objects available for this policy.</p>{% endif %}</div>
   {% endif %}
 {% endfor %}
 
@@ -128,6 +135,7 @@ def render(data: ReportData) -> str:
     tmpl = _env.from_string(_TEMPLATE)
     return tmpl.render(
         b=data.branding, m=data.meta, sections=data.sections,
+        include_cover=any(s.get("key") == "cover_page" for s in data.sections),
         severity_counts=data.severity_counts, category_counts=data.category_counts,
         rules=data.rules, objects=data.objects,
     )

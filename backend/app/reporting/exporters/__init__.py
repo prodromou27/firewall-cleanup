@@ -1,9 +1,9 @@
 """Export dispatch — one entry point that renders ReportData to any format."""
-import re
 from datetime import datetime
 from typing import Tuple
 
 from app.reporting.data import ReportData
+from app.reporting.export_safety import safe_filename
 
 _MEDIA = {
     "html": ("text/html", "html"),
@@ -19,8 +19,7 @@ SUPPORTED_FORMATS = list(_MEDIA.keys())
 
 
 def _slug(s: str) -> str:
-    s = re.sub(r"[^A-Za-z0-9._-]+", "-", (s or "").strip()) or "report"
-    return s.strip("-")[:60]
+    return safe_filename(s, fallback="report", max_len=60)
 
 
 def filename_for(data: ReportData, fmt: str, report_type: str = "Report") -> str:

@@ -22,6 +22,7 @@ from app.api.tenant import assert_policy_customer
 from app.models.user import User
 from app.security.identity import get_current_user, require_capability, require_customer_access
 from app.security.rbac import CAP_DOWNLOAD_REPORT, CAP_GENERATE_REPORT
+from app.reporting.export_safety import attachment_headers, safe_filename, spreadsheet_row
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
@@ -126,11 +127,11 @@ def generate_excel_report(
     wb.save(buf)
     buf.seek(0)
 
-    filename = f"firewall_report_{policy.firewall_name}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+    filename = safe_filename(f"firewall_report_{policy.firewall_name}_{datetime.now().strftime('%Y%m%d')}.xlsx")
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers=attachment_headers(filename),
     )
 
 
@@ -157,20 +158,20 @@ def generate_csv_report(
         "Affected Rules", "Risk Score", "Created At"
     ])
     for f in findings:
-        writer.writerow([
+        writer.writerow(spreadsheet_row([
             f.severity, f.confidence, f.finding_type, f.title,
             f.description, f.recommendation, f.status, f.engineer_comment or "",
             ", ".join(str(r) for r in (f.affected_rules or [])),
             f"{f.risk_score or 0:.0f}",
             f.created_at.isoformat() if f.created_at else "",
-        ])
+        ]))
 
     output.seek(0)
-    filename = f"findings_{policy.firewall_name}_{datetime.now().strftime('%Y%m%d')}.csv"
+    filename = safe_filename(f"findings_{policy.firewall_name}_{datetime.now().strftime('%Y%m%d')}.csv")
     return StreamingResponse(
         io.BytesIO(output.getvalue().encode()),
         media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers=attachment_headers(filename),
     )
 
 
@@ -253,11 +254,11 @@ def generate_json_report(
         ]
 
     buf = io.BytesIO(json.dumps(data, indent=2, default=str).encode())
-    filename = f"report_{policy.firewall_name}_{datetime.now().strftime('%Y%m%d')}.json"
+    filename = safe_filename(f"report_{policy.firewall_name}_{datetime.now().strftime('%Y%m%d')}.json")
     return StreamingResponse(
         buf,
         media_type="application/json",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers=attachment_headers(filename),
     )
 
 
@@ -384,7 +385,7 @@ def generate_customer_summary_report(
             agg_types[k] = agg_types.get(k, 0) + v
 
     now_str = datetime.now().strftime('%Y%m%d_%H%M%S')
-    safe_name = customer.name.replace(" ", "_").replace("/", "-")
+    safe_name = safe_filename(customer.name, fallback="customer", max_len=60)
 
     data = {
         "report_generated": datetime.now().isoformat(),
@@ -414,9 +415,9 @@ def generate_customer_summary_report(
 
     if format == "json":
         buf = io.BytesIO(json.dumps(data, indent=2, default=str).encode())
-        filename = f"customer_summary_{safe_name}_{now_str}.json"
+        filename = safe_filename(f"customer_summary_{safe_name}_{now_str}.json")
         return StreamingResponse(buf, media_type="application/json",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+            headers=attachment_headers(filename))
 
     # Excel format
     try:
@@ -435,7 +436,7 @@ def generate_customer_summary_report(
 
     ws.append(["Customer Summary Report"])
     ws["A1"].font = Font(bold=True, size=14)
-    ws.append([f"Customer: {customer.name}"])
+    ws.append(spreadsheet_row([f"Customer: {customer.name}"]))
     ws.append([f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"])
     ws.append([])
     ws.append(["Total Policies", "Total Findings", "Critical", "High", "Medium", "Low", "Informational"])
@@ -454,20 +455,20 @@ def generate_customer_summary_report(
         cell.fill = hdr_fill
         cell.font = hdr_font
     for s in policy_summaries:
-        wp.append([
+        wp.append(spreadsheet_row([
             s["firewall_name"], s["vendor"], s["policy_package"] or "", s["rule_count"], s["object_count"],
             s["analysis_status"], s["total_findings"],
             s["severity_counts"]["Critical"], s["severity_counts"]["High"], s["severity_counts"]["Medium"], s["severity_counts"]["Low"],
             s["upload_date"] or "",
-        ])
+        ]))
 
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
-    filename = f"customer_summary_{safe_name}_{now_str}.xlsx"
+    filename = safe_filename(f"customer_summary_{safe_name}_{now_str}.xlsx")
     return StreamingResponse(buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+        headers=attachment_headers(filename))
 
 
 # ── HTML builder ───────────────────────────────────────────────────────────────
@@ -747,8 +748,8 @@ def _write_summary_sheet(ws, policy, findings):
     from openpyxl.styles import Font, PatternFill, Alignment
     ws["A1"] = "Firewall Audit Report"
     ws["A1"].font = Font(bold=True, size=16, color="111827")
-    ws["A2"] = f"Customer: {(policy.customer.name if policy.customer else policy.customer_id)}"
-    ws["A3"] = f"Firewall: {policy.firewall_name} ({policy.vendor})"
+    ws["A2"] = spreadsheet_row([f"Customer: {(policy.customer.name if policy.customer else policy.customer_id)}"])[0]
+    ws["A3"] = spreadsheet_row([f"Firewall: {policy.firewall_name} ({policy.vendor})"])[0]
     ws["A4"] = f"Report Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
     ws["A6"] = "Summary"; ws["A6"].font = Font(bold=True)
     ws["A7"] = "Total Findings"; ws["B7"] = len(findings)
@@ -758,7 +759,7 @@ def _write_summary_sheet(ws, policy, findings):
     ws["A11"] = "Low";          ws["B11"] = sum(1 for f in findings if f.severity == "Low")
     ws["A12"] = "Informational";ws["B12"] = sum(1 for f in findings if f.severity == "Informational")
     ws["A13"] = "Disclaimer"; ws["A13"].font = Font(bold=True)
-    ws["A14"] = DISCLAIMER; ws["A14"].alignment = Alignment(wrap_text=True)
+    ws["A14"] = spreadsheet_row([DISCLAIMER])[0]; ws["A14"].alignment = Alignment(wrap_text=True)
     ws.column_dimensions["A"].width = 30
     ws.column_dimensions["B"].width = 15
 
@@ -777,12 +778,12 @@ def _write_findings_sheet(ws, findings):
     FILL_MAP = {"High": "fee2e2", "Medium": "fef3c7", "Low": "dbeafe", "Informational": "f3f4f6"}
 
     for f in findings:
-        ws.append([
+        ws.append(spreadsheet_row([
             f.severity, f.confidence, f.finding_type.replace("_", " ").title(),
             f.title, f.description, f.recommendation or "",
             f.status, f.engineer_comment or "", f.risk_score or 0,
             f.created_at.strftime("%Y-%m-%d") if f.created_at else "",
-        ])
+        ]))
         fill_color = FILL_MAP.get(f.severity, "ffffff")
         row_num = ws.max_row
         for col in range(1, len(headers) + 1):
@@ -804,7 +805,7 @@ def _write_rules_sheet(ws, rules):
         cell.fill = PatternFill(fill_type="solid", fgColor="111827")
 
     for r in rules:
-        ws.append([
+        ws.append(spreadsheet_row([
             r.rule_number, r.rule_id, r.rule_name or "",
             ", ".join(r.sources or []), ", ".join(r.destinations or []),
             ", ".join(r.services or []), r.action or "",
@@ -812,7 +813,7 @@ def _write_rules_sheet(ws, rules):
             r.hit_count if r.hit_count is not None else "N/A",
             r.last_hit or "", "Yes" if r.logging_enabled else "No",
             f"{r.risk_score or 0:.0f}", r.comments or "",
-        ])
+        ]))
 
     for col_letter, width in zip("ABCDEFGHIJKLM", [5, 10, 25, 30, 30, 25, 10, 8, 10, 12, 8, 8, 30]):
         ws.column_dimensions[col_letter].width = width
@@ -939,7 +940,7 @@ def build_report_v2(
     branding = config.branding
     customer_name = branding.customer_name or (policy.customer.name if policy.customer else "") or ""
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe_fw = "".join(c if c.isalnum() or c in "-_" else "_" for c in policy.firewall_name)
+    safe_fw = safe_filename(policy.firewall_name, fallback="firewall", max_len=60)
 
     if format == "html":
         html = _build_html_full(policy, rules, findings, config, customer_name)
@@ -954,11 +955,11 @@ def build_report_v2(
         buf = io.BytesIO()
         wb.save(buf)
         buf.seek(0)
-        filename = f"report_{safe_fw}_{now_str}.xlsx"
+        filename = safe_filename(f"report_{safe_fw}_{now_str}.xlsx")
         return StreamingResponse(
             buf,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers=attachment_headers(filename),
         )
 
     if format == "csv":
@@ -967,15 +968,17 @@ def build_report_v2(
         writer.writerow(["Severity", "Confidence", "Finding Type", "Title",
                          "Description", "Recommendation", "Status"])
         for f in findings:
-            writer.writerow([f.severity, f.confidence,
-                             CATEGORY_META.get(f.finding_type, f.finding_type),
-                             f.title, f.description, f.recommendation or "", f.status])
+            writer.writerow(spreadsheet_row([
+                f.severity, f.confidence,
+                CATEGORY_META.get(f.finding_type, f.finding_type),
+                f.title, f.description, f.recommendation or "", f.status,
+            ]))
         output.seek(0)
-        filename = f"findings_{safe_fw}_{now_str}.csv"
+        filename = safe_filename(f"findings_{safe_fw}_{now_str}.csv")
         return StreamingResponse(
             io.BytesIO(output.getvalue().encode()),
             media_type="text/csv",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers=attachment_headers(filename),
         )
 
     # JSON
@@ -1028,11 +1031,11 @@ def build_report_v2(
             "hit_count":   r.hit_count,
             "risk_score":  r.risk_score,
         } for r in rules]
-    filename = f"report_{safe_fw}_{now_str}.json"
+    filename = safe_filename(f"report_{safe_fw}_{now_str}.json")
     return StreamingResponse(
         io.BytesIO(json.dumps(data, indent=2, default=str).encode()),
         media_type="application/json",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers=attachment_headers(filename),
     )
 
 
@@ -1492,18 +1495,18 @@ def _build_excel_full(policy, rules, findings, config: ReportBuildConfig, custom
     ws = wb.active
     ws.title = "Summary"
     b = config.branding
-    ws["A1"] = b.report_title or REPORT_TYPE_TITLES.get(config.report_type, "Firewall Policy Report")
+    ws["A1"] = spreadsheet_row([b.report_title or REPORT_TYPE_TITLES.get(config.report_type, "Firewall Policy Report")])[0]
     ws["A1"].font = Font(bold=True, size=14, color="111827")
     ws.append([])
-    ws.append(["Customer", customer_name])
-    ws.append(["Firewall", policy.firewall_name])
-    ws.append(["Vendor", policy.vendor])
-    ws.append(["Policy Package", policy.policy_package or "Default"])
+    ws.append(spreadsheet_row(["Customer", customer_name]))
+    ws.append(spreadsheet_row(["Firewall", policy.firewall_name]))
+    ws.append(spreadsheet_row(["Vendor", policy.vendor]))
+    ws.append(spreadsheet_row(["Policy Package", policy.policy_package or "Default"]))
     ws.append(["Rules Analysed", policy.rule_count])
     ws.append(["Objects", policy.object_count or 0])
     ws.append(["Generated", datetime.now().strftime("%Y-%m-%d %H:%M")])
-    ws.append(["Prepared by", b.prepared_by])
-    ws.append(["Confidentiality", b.confidentiality])
+    ws.append(spreadsheet_row(["Prepared by", b.prepared_by]))
+    ws.append(spreadsheet_row(["Confidentiality", b.confidentiality]))
     ws.append([])
     ws.append(["FINDINGS SUMMARY"])
     ws[f"A{ws.max_row}"].font = Font(bold=True)
@@ -1518,12 +1521,12 @@ def _build_excel_full(policy, rules, findings, config: ReportBuildConfig, custom
     for f in findings:
         by_type.setdefault(f.finding_type, []).append(f)
     for ftype, fl in sorted(by_type.items(), key=lambda x: -len(x[1])):
-        ws.append([CATEGORY_META.get(ftype, ftype), len(fl)])
+        ws.append(spreadsheet_row([CATEGORY_META.get(ftype, ftype), len(fl)]))
     ws.append([])
     ws.append(["DISCLAIMER"])
     ws[f"A{ws.max_row}"].font = Font(bold=True)
     disc_row = ws.max_row + 1
-    ws.append([FULL_DISCLAIMER])
+    ws.append(spreadsheet_row([FULL_DISCLAIMER]))
     ws.cell(row=disc_row, column=1).alignment = Alignment(wrap_text=True)
     ws.row_dimensions[disc_row].height = 90
     ws.column_dimensions["A"].width = 28
@@ -1533,10 +1536,12 @@ def _build_excel_full(policy, rules, findings, config: ReportBuildConfig, custom
     wa = wb.create_sheet("All Findings")
     hdr(wa, ["Severity", "Confidence", "Category", "Title", "Description", "Recommendation", "Status", "Risk Score"])
     for f in findings:
-        wa.append([f.severity, f.confidence,
-                   CATEGORY_META.get(f.finding_type, f.finding_type),
-                   f.title, f.description or "", f.recommendation or "",
-                   f.status, f.risk_score or 0])
+        wa.append(spreadsheet_row([
+            f.severity, f.confidence,
+            CATEGORY_META.get(f.finding_type, f.finding_type),
+            f.title, f.description or "", f.recommendation or "",
+            f.status, f.risk_score or 0,
+        ]))
         style_sev_row(wa, wa.max_row, f.severity)
     for cl, w in zip("ABCDEFGH", [10, 10, 26, 48, 70, 60, 24, 8]):
         wa.column_dimensions[cl].width = w
@@ -1549,7 +1554,7 @@ def _build_excel_full(policy, rules, findings, config: ReportBuildConfig, custom
         wc = wb.create_sheet(sheet_name)
         hdr(wc, ["Severity", "Title", "Description", "Recommendation", "Status", "Risk Score"])
         for f in flist:
-            wc.append([f.severity, f.title, f.description or "", f.recommendation or "", f.status, f.risk_score or 0])
+            wc.append(spreadsheet_row([f.severity, f.title, f.description or "", f.recommendation or "", f.status, f.risk_score or 0]))
             style_sev_row(wc, wc.max_row, f.severity)
         for cl, w in zip("ABCDEF", [10, 48, 70, 60, 24, 8]):
             wc.column_dimensions[cl].width = w
@@ -1561,8 +1566,10 @@ def _build_excel_full(policy, rules, findings, config: ReportBuildConfig, custom
         wk = wb.create_sheet("Cleanup Candidates")
         hdr(wk, ["Severity", "Category", "Title", "Description", "Recommendation", "Status"])
         for f in cleanup:
-            wk.append([f.severity, CATEGORY_META.get(f.finding_type, f.finding_type),
-                       f.title, f.description or "", f.recommendation or "", f.status])
+            wk.append(spreadsheet_row([
+                f.severity, CATEGORY_META.get(f.finding_type, f.finding_type),
+                f.title, f.description or "", f.recommendation or "", f.status,
+            ]))
             style_sev_row(wk, wk.max_row, f.severity)
         for cl, w in zip("ABCDEF", [10, 26, 48, 70, 60, 24]):
             wk.column_dimensions[cl].width = w

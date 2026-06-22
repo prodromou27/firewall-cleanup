@@ -25,6 +25,7 @@ from app.security.audit import audit_log
 from app.reporting import sections as S
 from app.reporting.data import build_report_data
 from app.reporting.exporters import export, filename_for, SUPPORTED_FORMATS, normalize_format
+from app.reporting.export_safety import attachment_headers, safe_filename
 
 templates_router = APIRouter(prefix="/api/report-templates", tags=["reporting"])
 reports_router = APIRouter(prefix="/api/reports", tags=["reporting"])
@@ -70,6 +71,14 @@ class TemplateIn(BaseModel):
             raise ValueError(f"default_export_format must be one of: {', '.join(SUPPORTED_FORMATS)}")
         return fmt
 
+    @field_validator("default_finding_categories")
+    @classmethod
+    def validate_default_finding_categories(cls, v: List[str]) -> List[str]:
+        invalid = [c for c in v if c not in S.FINDING_CATEGORY_KEYS]
+        if invalid:
+            raise ValueError(f"Unknown finding categories: {', '.join(invalid)}")
+        return v
+
 
 class GenerateIn(BaseModel):
     policy_id: str
@@ -91,6 +100,26 @@ class GenerateIn(BaseModel):
         if fmt not in SUPPORTED_FORMATS:
             raise ValueError(f"export_format must be one of: {', '.join(SUPPORTED_FORMATS)}")
         return fmt
+
+    @field_validator("sections")
+    @classmethod
+    def validate_sections(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        if not v:
+            return v
+        invalid = [s for s in v if s not in S.SECTION_BY_KEY and not s.startswith("custom")]
+        if invalid:
+            raise ValueError(f"Unknown report sections: {', '.join(invalid)}")
+        return v
+
+    @field_validator("finding_categories")
+    @classmethod
+    def validate_finding_categories(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        if not v:
+            return v
+        invalid = [c for c in v if c not in S.FINDING_CATEGORY_KEYS]
+        if invalid:
+            raise ValueError(f"Unknown finding categories: {', '.join(invalid)}")
+        return v
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -393,7 +422,7 @@ def generate_report(body: GenerateIn, db: Session = Depends(get_db),
         return JSONResponse(status_code=500, content={"detail": f"Report generation failed: {e}"})
 
     os.makedirs(_REPORTS_DIR, exist_ok=True)
-    fname = filename_for(data, fmt, report_type)
+    fname = safe_filename(filename_for(data, fmt, report_type))
     rec = GeneratedReport(
         template_id=template.id if template else None, customer_id=policy.customer_id,
         policy_id=policy.id, analysis_run_id=body.analysis_run_id, firewall_name=policy.firewall_name,
@@ -519,8 +548,9 @@ def download_report(report_id: str, db: Session = Depends(get_db),
         raise HTTPException(status_code=410, detail="Report file no longer available; regenerate it.")
     from app.reporting.exporters import _MEDIA
     media = _MEDIA.get(r.export_format, ("application/octet-stream", ""))[0]
-    return FileResponse(r.file_path, media_type=media, filename=r.file_name,
-                        headers={"Content-Disposition": f'attachment; filename="{r.file_name}"'})
+    fname = safe_filename(r.file_name)
+    return FileResponse(r.file_path, media_type=media, filename=fname,
+                        headers=attachment_headers(fname))
 
 
 @reports_router.get("/{report_id}")

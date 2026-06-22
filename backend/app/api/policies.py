@@ -24,6 +24,7 @@ from app.security.identity import (
 from app.security.rbac import CAP_VIEW_GLOBAL, CAP_DELETE_DATA, CAP_UPLOAD
 from app.security.audit import audit_log
 from app.api.common import validate_choice, validate_csv_choices, validate_sort
+from app.reporting.export_safety import attachment_headers, spreadsheet_row
 
 
 def _authz_policy(policy_id: str, db: Session, user: User) -> FirewallPolicy:
@@ -981,7 +982,7 @@ def _rules_csv(rules, finding_counts, finding_types) -> StreamingResponse:
         "Risk Score", "Findings", "Finding Types", "Comments",
     ])
     for r in rules:
-        writer.writerow([
+        writer.writerow(spreadsheet_row([
             r.rule_number, r.rule_id, r.rule_name, r.section,
             "; ".join(r.sources or []),
             "; ".join(r.destinations or []),
@@ -995,12 +996,12 @@ def _rules_csv(rules, finding_counts, finding_types) -> StreamingResponse:
             finding_counts.get(r.id, 0),
             "; ".join(finding_types.get(r.id, [])),
             r.comments or "",
-        ])
+        ]))
     output.seek(0)
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=rulebase.csv"},
+        headers=attachment_headers("rulebase.csv"),
     )
 
 

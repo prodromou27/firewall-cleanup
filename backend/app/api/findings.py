@@ -17,6 +17,7 @@ from app.security.identity import (
 from app.security.rbac import CAP_COMMENT
 from pydantic import BaseModel
 from app.api.common import validate_choice
+from app.reporting.export_safety import attachment_headers, spreadsheet_row
 
 router = APIRouter(prefix="/api/findings", tags=["findings"])
 
@@ -227,7 +228,7 @@ def _findings_csv(findings, policy_map) -> StreamingResponse:
     ])
     for f in findings:
         p = policy_map.get(f.policy_id)
-        writer.writerow([
+        writer.writerow(spreadsheet_row([
             f.id,
             p.firewall_name if p else f.policy_id,
             f.vendor or (p.vendor if p else ""),
@@ -244,12 +245,12 @@ def _findings_csv(findings, policy_map) -> StreamingResponse:
             f.engineer_comment or "",
             f.recommendation or "",
             f.created_at.isoformat() if f.created_at else "",
-        ])
+        ]))
     output.seek(0)
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=findings.csv"},
+        headers=attachment_headers("findings.csv"),
     )
 
 

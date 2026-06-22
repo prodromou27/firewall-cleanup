@@ -397,14 +397,42 @@ class CheckPointConnector:
         Returns full topology info — interfaces, cluster members, version, etc.
         """
         try:
+            # "standard" is fast and reliable on the connect/discovery path.
             data = self._post_raw(
                 "show-gateways-and-servers",
                 {"details-level": "standard", "limit": 200},
             )
-            return data.get("objects", [])
+            gws = data.get("objects", [])
         except Exception as e:
             logger.warning("Could not list gateways: %s", e)
             return []
+
+        # Best-effort enrichment: pull per-gateway topology (interfaces with
+        # IPs/masks, hardware) at "full" detail so the device inventory panel can
+        # be populated. This is fully isolated — any error/timeout here must NEVER
+        # break gateway discovery, so we keep the "standard" results regardless.
+        saved_timeout = self.timeout
+        try:
+            # Cap this enrichment so a slow/large "full" response can never stall
+            # the connection/discovery path the way the default 60s timeout could.
+            self.timeout = min(saved_timeout, 20)
+            full = self._post_raw(
+                "show-gateways-and-servers",
+                {"details-level": "full", "limit": 200},
+            )
+            by_uid = {g.get("uid"): g for g in full.get("objects", []) if g.get("uid")}
+            for g in gws:
+                fg = by_uid.get(g.get("uid"))
+                if fg:
+                    if fg.get("interfaces"):
+                        g["interfaces"] = fg["interfaces"]
+                    if fg.get("hardware"):
+                        g.setdefault("hardware", fg["hardware"])
+        except Exception as e:
+            logger.warning("Full gateway topology unavailable (interfaces skipped): %s", e)
+        finally:
+            self.timeout = saved_timeout
+        return gws
 
     def pick_gateway_target(self, gateways: list[dict]) -> Optional[str]:
         """Select the best gateway name to use as hit-count target."""

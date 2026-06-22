@@ -23,6 +23,7 @@ export function TemplateEditor() {
   const [categories, setCategories] = useState<Array<{ key: string; label: string }>>([])
   const [placeholders, setPlaceholders] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState('')
 
@@ -70,11 +71,18 @@ export function TemplateEditor() {
   }
 
   const save = async () => {
-    setSaving(true); setError('')
+    setSaving(true); setError(''); setSaved(false)
     try {
       const body = { ...t, sections: sections.map((s, i) => ({ ...s, display_order: i })) }
-      if (isNew) { const created = await createReportTemplate(body); navigate(`/reports/templates/${created.id}`) }
-      else { await updateReportTemplate(id!, body) }
+      if (isNew) {
+        const created = await createReportTemplate(body)
+        navigate(`/reports/templates/${created.id}`)
+      } else {
+        const updated = await updateReportTemplate(id!, body)
+        setT(updated)            // reflect server-canonical state (ids, defaults)
+        setSaved(true)           // show confirmation — the update has no navigation
+        setTimeout(() => setSaved(false), 2500)
+      }
     } catch (e: unknown) {
       setError((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Save failed')
     } finally { setSaving(false) }
@@ -106,7 +114,10 @@ export function TemplateEditor() {
             <p className="page-subtitle">Sections, branding, and editable narrative text with placeholders.</p>
           </div>
         </div>
-        <button onClick={save} disabled={saving} className="btn-primary">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save</button>
+        <div className="flex items-center gap-3">
+          {saved && <span className="text-sm text-green-600 font-medium">Saved ✓</span>}
+          <button onClick={save} disabled={saving} className="btn-primary">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save</button>
+        </div>
       </div>
 
       <div className="page-body space-y-4">

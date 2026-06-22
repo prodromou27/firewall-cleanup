@@ -23,8 +23,8 @@ def expand_address_object(
     if visited is None:
         visited = set()
 
-    name_lower = name.lower()
-    if name_lower in ("any", "all"):
+    name_lower = name.strip().lower()
+    if name_lower in ("any", "all", "any4", "any6"):
         return [{"type": "any", "value": "0.0.0.0/0", "name": name}]
 
     if name in visited:

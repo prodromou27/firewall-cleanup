@@ -124,6 +124,7 @@ FINDING_CATEGORIES = [
     ("database_public_exposure", "Public Exposure of Database Ports"),
     ("sensitive_destination_exposure", "Public Exposure to Sensitive Destinations"),
     ("public_exposure_no_logging", "Public Exposure Without Logging"),
+    ("mgmt_on_public_interface", "Management on Public Interface"),
 ]
 FINDING_CATEGORY_KEYS = [k for k, _ in FINDING_CATEGORIES]
 

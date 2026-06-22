@@ -764,7 +764,7 @@ _NAT_EXPOSURE_FINDING_TYPES = {
     "any_service_public_exposure", "rdp_public_exposure", "ssh_public_exposure",
     "telnet_public_exposure", "smb_public_exposure", "winrm_public_exposure",
     "vnc_public_exposure", "database_public_exposure", "sensitive_destination_exposure",
-    "public_exposure_no_logging",
+    "public_exposure_no_logging", "mgmt_on_public_interface",
 }
 
 
@@ -782,9 +782,11 @@ def get_public_exposure(
     False so the UI can show "NAT Analysis Not Available" instead of fabricating
     findings. PolicyInsight never writes to the firewall.
     """
-    from app.analysis import nat_exposure
+    import json as _json
+    from app.analysis import nat_exposure, interfaces as iface_mod
     from app.analysis.normalizer import build_object_map
     from app.analysis.engine import _rule_to_dict, _obj_to_dict
+    from app.models.device import FirewallDevice
 
     p = _authz_policy(policy_id, db, user)
 
@@ -794,6 +796,18 @@ def get_public_exposure(
     obj_map = build_object_map([_obj_to_dict(o) for o in objects_orm])
 
     result = nat_exposure.analyze(rules, p.nat_rules, obj_map)
+
+    # Interface / public-IP inventory from the linked device (where interface
+    # data was captured during sync). Degrades gracefully when absent.
+    device_ifaces: list = []
+    if p.device_id:
+        dev = db.query(FirewallDevice).filter(FirewallDevice.id == p.device_id).first()
+        if dev and dev.device_interfaces:
+            try:
+                device_ifaces = _json.loads(dev.device_interfaces) or []
+            except (ValueError, TypeError):
+                device_ifaces = []
+    iface_result = iface_mod.analyze(device_ifaces, p.nat_rules, obj_map, p.firewall_name or "")
 
     findings = [
         {"id": f.id, "finding_type": f.finding_type, "severity": f.severity,
@@ -816,6 +830,9 @@ def get_public_exposure(
         "exposed_ports": exp["exposed_ports"],
         "exposures": exp["exposures"],
         "risk_score": exp["risk_score"],
+        "interfaces_available": iface_result["interfaces_available"],
+        "public_interfaces": iface_result["public_interfaces"],
+        "public_ip_inventory": iface_result["public_ip_inventory"],
         "findings": findings,
     }
 

@@ -356,6 +356,9 @@ export interface PublicExposure {
     security_rules: (string | number)[]
   }>
   risk_score: number
+  interfaces_available: boolean
+  public_interfaces: Array<{ name: string; ip: string | null; zone: string | null; wan_facing: boolean; mgmt_access: boolean; has_public_ip: boolean }>
+  public_ip_inventory: Array<{ public_ip: string; source_type: string; reference: string; mapped_internal: string | null; exposed_service: string | null; confidence: string; notes: string }>
   findings: Array<{ id: string; finding_type: string; severity: string; title: string; status: string }>
 }
 

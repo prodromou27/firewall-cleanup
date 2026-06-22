@@ -146,6 +146,20 @@ def run_analysis(policy_id: str, db: Session) -> str:
         from app.analysis import nat_exposure
         findings.extend(nat_exposure.analyze(rules, policy.nat_rules, obj_map)["findings"])
 
+        # 14c. Interface / public-IP review (gated on interface data from device sync).
+        from app.analysis import interfaces as _iface
+        _dev_ifaces = []
+        if policy.device_id:
+            from app.models.device import FirewallDevice
+            _dev = db.query(FirewallDevice).filter(FirewallDevice.id == policy.device_id).first()
+            if _dev and _dev.device_interfaces:
+                import json as _json
+                try:
+                    _dev_ifaces = _json.loads(_dev.device_interfaces) or []
+                except (ValueError, TypeError):
+                    _dev_ifaces = []
+        findings.extend(_iface.analyze(_dev_ifaces, policy.nat_rules, obj_map, policy.firewall_name or "")["findings"])
+
         # 15. Broad VPN access
         findings.extend(_analyze_vpn_rules(rules, obj_map))
 

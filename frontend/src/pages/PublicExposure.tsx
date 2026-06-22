@@ -84,6 +84,54 @@ export function PublicExposure() {
           </div>
         )}
 
+        {/* Public interfaces */}
+        <div className="card">
+          <h3 className="font-semibold mb-2 flex items-center gap-1.5"><Network className="w-4 h-4 text-gray-400" /> Public Interfaces</h3>
+          {!data.interfaces_available ? (
+            <p className="text-sm text-gray-400">No interface data captured. Sync the device to discover interfaces.</p>
+          ) : data.public_interfaces.length === 0 ? (
+            <p className="text-sm text-gray-400">No public-facing interfaces detected.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {data.public_interfaces.map((i, n) => (
+                <div key={n} className="border border-gray-100 rounded-lg px-3 py-1.5 text-sm">
+                  <span className="font-semibold">{i.name}</span>
+                  {i.ip && <span className="font-mono text-xs text-gray-500 ml-2">{i.ip}</span>}
+                  {i.wan_facing && <span className="text-[10px] ml-2 px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">WAN</span>}
+                  {i.mgmt_access && <span className="text-[10px] ml-1 px-1.5 py-0.5 rounded bg-red-50 text-red-600">mgmt</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Public IP inventory */}
+        {data.public_ip_inventory.length > 0 && (
+          <div className="card">
+            <h3 className="font-semibold mb-2 flex items-center gap-1.5"><Globe className="w-4 h-4 text-gray-400" /> Public IP Inventory</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead><tr className="text-left text-xs text-gray-500 border-b">
+                  <th className="py-1.5 pr-3">Public IP</th><th className="py-1.5 pr-3">Source</th>
+                  <th className="py-1.5 pr-3">Reference</th><th className="py-1.5 pr-3">Mapped internal</th>
+                  <th className="py-1.5 pr-3">Confidence</th>
+                </tr></thead>
+                <tbody>
+                  {data.public_ip_inventory.map((r, n) => (
+                    <tr key={n} className="border-b border-gray-50">
+                      <td className="py-1.5 pr-3 font-mono text-xs">{r.public_ip}</td>
+                      <td className="py-1.5 pr-3"><span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 capitalize">{r.source_type}</span></td>
+                      <td className="py-1.5 pr-3 text-xs text-gray-500">{r.reference}</td>
+                      <td className="py-1.5 pr-3 font-mono text-xs">{r.mapped_internal || '—'}</td>
+                      <td className="py-1.5 pr-3 text-xs">{r.confidence}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         {/* Published / exposed services */}
         <div className="card">
           <h3 className="font-semibold mb-2 flex items-center gap-1.5"><Shield className="w-4 h-4 text-gray-400" /> Published &amp; Exposed Services</h3>

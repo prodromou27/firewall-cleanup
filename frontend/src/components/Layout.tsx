@@ -45,18 +45,18 @@ function NavItem({ to, label, icon: Icon, active, muted }: NavItemProps) {
     <Link
       to={to}
       className={clsx(
-        'group flex items-center gap-2.5 py-1.5 pr-3 rounded-lg text-[13px]',
-        'font-medium transition-all duration-100 relative',
+        'group flex items-center gap-2.5 py-1.5 pr-3 rounded-md text-[13px]',
+        'font-medium transition-all duration-150 relative',
         'pl-2.5 mx-1',
         active
-          ? 'bg-white/10 text-white'
+          ? 'bg-brand-400/15 text-white shadow-[inset_0_0_0_1px_rgba(34,211,238,0.16)]'
           : muted
           ? 'text-sidebar-faint hover:text-sidebar-muted hover:bg-sidebar-hover'
           : 'text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover'
       )}
     >
       {active && (
-        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-brand-400 rounded-r" />
+        <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r bg-brand-gradient" />
       )}
       <span className={clsx(
         'flex-shrink-0 w-5 h-5 flex items-center justify-center rounded transition-colors',
@@ -182,7 +182,7 @@ function CustomerSelector() {
                     key={c.id}
                     onClick={() => select(c)}
                     className={clsx(
-                      'w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-white/5 transition-colors text-[12px]',
+                      'w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-sidebar-hover transition-colors text-[12px]',
                       activeCustomer?.id === c.id ? 'text-brand-300 bg-brand-500/10' : 'text-sidebar-muted hover:text-sidebar-foreground'
                     )}
                   >
@@ -223,9 +223,9 @@ function UserFooter() {
   const name = user.full_name || user.email
   const initials = (user.full_name || user.email).slice(0, 2).toUpperCase()
   return (
-    <div className="px-2.5 py-2.5 border-t border-white/5">
+    <div className="px-2.5 py-2.5 sidebar-divider">
       <div className="flex items-center gap-2">
-        <div className="w-7 h-7 rounded-md bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center flex-shrink-0">
+        <div className="w-7 h-7 rounded-md bg-brand-gradient flex items-center justify-center flex-shrink-0 shadow-soft">
           <span className="text-white font-bold text-[10px]">{initials}</span>
         </div>
         <div className="flex-1 min-w-0">
@@ -261,7 +261,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <aside className="sidebar-shell">
         {/* Brand */}
         <div className="px-3 pt-4 pb-3 mb-1">
-          <div className="bg-white rounded-lg px-2.5 py-1.5 inline-flex items-center">
+          <div className="brand-lockup">
             <img src={logoImg} alt="PolicyInsight" className="h-7 w-auto object-contain" />
           </div>
         </div>
@@ -300,7 +300,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <div className="px-4 py-3 sidebar-divider">
           <div className="flex items-center gap-2 mb-1">
             <Eye className="w-3 h-3 text-emerald-400" />
-            <span className="text-[11px] text-sidebar-subtle font-medium">Read-Only Mode</span>
+            <span className="security-mode-pill">Read-only</span>
           </div>
           <p className="text-sidebar-faint text-[10px] font-mono">v2.1.0</p>
         </div>

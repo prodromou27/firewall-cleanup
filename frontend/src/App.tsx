@@ -91,8 +91,8 @@ function Gate() {
   const { user, loading } = useAuth()
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: '#0f172a' }}>
-        <Loader2 className="w-6 h-6 text-slate-400 animate-spin" />
+      <div className="auth-shell flex items-center justify-center">
+        <Loader2 className="w-6 h-6 text-brand-300 animate-spin" />
       </div>
     )
   }

@@ -29,7 +29,8 @@
     --radius: 0.5rem;
   }
   body {
-    @apply bg-canvas text-ink-900 antialiased font-sans;
+    @apply bg-canvas bg-console-grid text-ink-900 antialiased font-sans;
+    background-size: 28px 28px;
     font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1, "cv05" 1;
   }
   :where(a, button, input, select, textarea, [role="button"], [tabindex]):focus-visible {
@@ -82,23 +83,27 @@
 
   /* ── Cards ─────────────────────────────────────────────────── */
   .card {
-    @apply bg-white rounded-xl border border-ink-200/70 shadow-card p-5;
+    @apply bg-white/95 rounded-lg border border-ink-200/80 shadow-card p-5 backdrop-blur-sm;
   }
   .card-sm {
-    @apply bg-white rounded-lg border border-ink-200/70 shadow-card p-4;
+    @apply bg-white/95 rounded-lg border border-ink-200/80 shadow-card p-4 backdrop-blur-sm;
   }
   .card-inset {
     @apply bg-ink-50 rounded-lg border border-ink-200/70 p-4;
   }
   .card-hover {
-    @apply card cursor-pointer hover:border-brand-300 hover:shadow-card-hover
-      hover:-translate-y-0.5 transition-all duration-200;
+    @apply card cursor-pointer hover:border-brand-400/60 hover:shadow-card-hover
+      transition-all duration-200;
   }
 
   /* ── Page structure ─────────────────────────────────────────── */
   .page-header {
     @apply bg-header-fade border-b border-ink-200/70 px-7 py-4 flex items-center
       justify-between sticky top-0 z-10 backdrop-blur-sm;
+  }
+  .page-header::before {
+    content: "";
+    @apply absolute inset-x-0 top-0 h-px bg-brand-gradient opacity-70;
   }
   .page-title {
     @apply font-display text-[19px] font-bold text-ink-900 tracking-tight;
@@ -116,17 +121,17 @@
     @apply space-y-5;
   }
   .filter-bar {
-    @apply flex flex-wrap items-center gap-2 rounded-lg border border-ink-200/80 bg-white p-3 shadow-card;
+    @apply flex flex-wrap items-center gap-2 rounded-lg border border-ink-200/80 bg-white/95 p-3 shadow-card backdrop-blur-sm;
   }
   .table-shell {
-    @apply overflow-hidden rounded-lg border border-ink-200/80 bg-white shadow-card;
+    @apply overflow-hidden rounded-lg border border-ink-200/80 bg-white/95 shadow-card backdrop-blur-sm;
   }
   .table-scroll {
     @apply w-full overflow-x-auto;
   }
   .state-panel {
     @apply flex min-h-[220px] flex-col items-center justify-center gap-3 rounded-lg
-      border border-dashed border-ink-200 bg-white px-6 py-12 text-center shadow-card;
+      border border-dashed border-ink-200 bg-white/95 px-6 py-12 text-center shadow-card backdrop-blur-sm;
   }
   .state-icon {
     @apply flex h-12 w-12 items-center justify-center rounded-lg bg-ink-50 text-ink-300 ring-1 ring-ink-100;
@@ -134,16 +139,19 @@
 
   /* ── Stat cards ─────────────────────────────────────────────── */
   .stat-card {
-    @apply relative bg-white rounded-xl border border-ink-200/70 shadow-card
-      p-5 flex flex-col gap-1.5 overflow-hidden
-      hover:shadow-card-hover transition-shadow duration-200;
+    @apply relative bg-white/95 rounded-lg border border-ink-200/80 shadow-card
+      p-5 flex flex-col gap-1.5 overflow-hidden backdrop-blur-sm
+      hover:border-brand-400/50 hover:shadow-card-hover transition-all duration-200;
+    clip-path: polygon(0 0, calc(100% - 13px) 0, 100% 13px, 100% 100%, 0 100%);
   }
   .stat-card::before {
     content: "";
-    @apply absolute left-0 top-0 h-full w-[3px] bg-brand-gradient opacity-0
-      transition-opacity duration-200;
+    @apply absolute left-0 top-0 h-full w-[3px] bg-brand-gradient opacity-100;
   }
-  .stat-card:hover::before { @apply opacity-100; }
+  .stat-card::after {
+    content: "";
+    @apply absolute right-0 top-0 h-4 w-4 border-r border-t border-brand-300/60;
+  }
   .stat-value {
     @apply font-display text-[26px] font-bold tracking-tight text-ink-900 tabular-nums;
   }
@@ -156,14 +164,14 @@
     @apply w-full text-sm;
   }
   .data-table thead {
-    @apply bg-ink-50/80 border-b border-ink-200/70;
+    @apply bg-ink-50/90 border-b border-ink-200/70;
   }
   .data-table thead th {
     @apply px-4 py-2.5 text-left text-[11px] font-semibold text-ink-400
       uppercase tracking-wider;
   }
   .data-table tbody tr {
-    @apply border-b border-ink-100 hover:bg-brand-50/40 transition-colors duration-75;
+    @apply border-b border-ink-100 hover:bg-brand-50/60 transition-colors duration-75;
   }
   .data-table tbody td {
     @apply px-4 py-3 text-sm text-ink-700;
@@ -283,12 +291,42 @@
 
   /* Dark sidebar primitives */
   .sidebar-shell {
-    @apply w-[210px] flex-shrink-0 flex flex-col bg-sidebar shadow-[1px_0_0_var(--tw-shadow-color)] shadow-sidebar-border;
+    @apply relative w-[210px] flex-shrink-0 flex flex-col overflow-hidden bg-sidebar-field shadow-console;
+  }
+  .sidebar-shell::before {
+    content: "";
+    @apply pointer-events-none absolute inset-y-0 right-0 w-px bg-brand-gradient opacity-60;
+  }
+  .sidebar-shell::after {
+    content: "";
+    @apply pointer-events-none absolute left-0 top-0 h-32 w-full opacity-30;
+    background-image: repeating-linear-gradient(135deg, rgba(255,255,255,0.10) 0 1px, transparent 1px 8px);
   }
   .sidebar-divider {
     @apply border-t border-sidebar-border;
   }
   .sidebar-elevated {
-    @apply bg-sidebar-elevated border border-sidebar-border;
+    @apply bg-sidebar-elevated/95 border border-sidebar-border backdrop-blur-sm;
+  }
+  .brand-lockup {
+    @apply relative inline-flex items-center rounded-md bg-white px-2.5 py-1.5 shadow-soft;
+  }
+  .brand-lockup::after {
+    content: "";
+    @apply absolute -bottom-1 left-2 h-0.5 w-10 rounded-full bg-brand-gradient;
+  }
+  .security-mode-pill {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-brand-400/20 bg-brand-400/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-brand-200;
+  }
+  .auth-shell {
+    @apply min-h-screen bg-sidebar-field bg-console-grid px-4 text-sidebar-foreground;
+    background-size: 28px 28px;
+  }
+  .auth-card {
+    @apply rounded-lg border border-sidebar-border bg-sidebar-elevated/90 p-6 shadow-2xl backdrop-blur-sm;
+    clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 0 100%);
+  }
+  .auth-brand {
+    @apply brand-lockup mb-4;
   }
 }

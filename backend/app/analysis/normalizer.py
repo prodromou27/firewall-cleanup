@@ -6,9 +6,38 @@ from app.analysis.ip_utils import is_any
 from app.analysis.service_utils import service_is_any
 
 
+def _ref_name(ref) -> str:
+    """Return the best object identifier from vendor reference shapes."""
+    if isinstance(ref, dict):
+        return str(ref.get("name") or ref.get("object_name") or ref.get("uid") or "").strip()
+    return str(ref or "").strip()
+
+
+def _object_aliases(obj: dict) -> List[str]:
+    raw = obj.get("raw_data") or {}
+    aliases = [
+        obj.get("object_name"),
+        obj.get("object_uid"),
+        obj.get("uid"),
+        raw.get("uid") if isinstance(raw, dict) else None,
+        raw.get("name") if isinstance(raw, dict) else None,
+    ]
+    return [str(a).strip() for a in aliases if str(a or "").strip()]
+
+
 def build_object_map(objects: List[dict]) -> Dict[str, dict]:
-    """Build name -> object dict from list of firewall objects."""
-    return {obj["object_name"]: obj for obj in objects}
+    """Build object alias -> object dict from firewall objects.
+
+    Check Point APIs frequently return group members as UID references while
+    rules use names. Mapping both names and UIDs prevents false "unused object"
+    and "empty group" findings when membership is present but represented
+    differently by the vendor API.
+    """
+    obj_map: Dict[str, dict] = {}
+    for obj in objects:
+        for alias in _object_aliases(obj):
+            obj_map[alias] = obj
+    return obj_map
 
 
 def expand_address_object(
@@ -39,7 +68,7 @@ def expand_address_object(
     if "group" in obj_type:
         results = []
         for member in obj.get("members", []):
-            results.extend(expand_address_object(member, obj_map, visited))
+            results.extend(expand_address_object(_ref_name(member), obj_map, visited))
         return results or [{"type": "empty_group", "value": "", "name": name}]
 
     return [{"type": obj_type, "value": obj.get("value", ""), "name": name}]
@@ -187,7 +216,7 @@ def expand_service_object(
     if "group" in obj_type:
         results = []
         for member in obj.get("members", []):
-            results.extend(expand_service_object(member, obj_map, visited))
+            results.extend(expand_service_object(_ref_name(member), obj_map, visited))
         return results
 
     return [{

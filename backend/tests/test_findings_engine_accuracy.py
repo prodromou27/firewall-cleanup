@@ -159,6 +159,38 @@ def test_empty_groups_include_customer_groups_and_suppress_vendor_builtins():
     _assert_quality(findings)
 
 
+def test_checkpoint_group_uid_members_prevent_unused_member_false_positive():
+    objects = [
+        _object("CP-Group", "address_group", "", [{"uid": "uid-host"}], object_uid="uid-group"),
+        _object("CP-Host", "host", "10.10.10.10/32", [], object_uid="uid-host"),
+        _object("Orphan", "host", "10.10.10.99/32", [], object_uid="uid-orphan"),
+    ]
+    obj_map = build_object_map(objects)
+
+    findings = _analyze_unused_objects([_rule(1, sources=["CP-Group"])], objects, obj_map)
+
+    names = {f["evidence"]["object_name"] for f in findings}
+    assert names == {"Orphan"}
+
+
+def test_checkpoint_raw_group_members_prevent_empty_group_false_positive():
+    objects = [
+        _object(
+            "CP-Group",
+            "address_group",
+            "",
+            [],
+            raw_data={"uid": "uid-group", "members": [{"uid": "uid-host", "name": "CP-Host"}]},
+        ),
+        _object("TrulyEmpty", "address_group", "", []),
+    ]
+
+    findings = _analyze_empty_groups(objects)
+
+    names = {f["evidence"]["object_name"] for f in findings}
+    assert names == {"TrulyEmpty"}
+
+
 def test_consolidation_suppresses_generic_risky_service_when_specific_exposure_exists():
     rule = _rule(1, sources=["any"], destinations=["10.0.0.10/32"], services=["tcp/3389"])
     findings = _analyze_risky_services([rule], {}) + _analyze_exposed_services([rule], {})

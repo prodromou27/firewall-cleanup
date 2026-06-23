@@ -477,22 +477,44 @@ class CheckPointConnector:
         today     = datetime.utcnow().date().isoformat()
         from_date = (datetime.utcnow() - timedelta(days=HITS_DAYS_BACK)).date().isoformat()
 
-        payload_extra: dict = {}
+        # Payload variants from richest to most compatible. Some management
+        # versions — or heavy hit-count queries — return HTTP 500 on the rich
+        # payload (show-hits + full detail). Degrade gracefully so a 500 on the
+        # rich request does not lose the entire rulebase.
+        payload_variants: list[dict] = []
         if include_hits:
-            payload_extra["show-hits"] = True
             hits_settings: dict = {"from-date": from_date, "to-date": today}
             if gateway_target:
                 hits_settings["target"] = gateway_target
-            payload_extra["hits-settings"] = hits_settings
+            payload_variants.append({"show-hits": True, "hits-settings": hits_settings})
+        payload_variants.append({})                              # full detail, no hits
+        payload_variants.append({"details-level": "standard"})   # standard detail, no hits
 
-        # Collect inline object dictionary from the first page
         inline_objects: list[dict] = []
         all_rules: list[dict] = []
         inline_layer_names: set[str] = set()
 
+        # Choose the first variant whose first page succeeds; reuse that page.
+        payload_extra: dict = {}
+        first_data: Optional[dict] = None
+        for variant in payload_variants:
+            try:
+                first_data = self._get_rulebase_page(layer_name, 0, variant)
+                payload_extra = variant
+                if not variant.get("show-hits"):
+                    logger.warning("CP rulebase '%s': rich payload rejected; using degraded payload "
+                                   "(%s) — hit counts unavailable for this layer",
+                                   layer_name, ",".join(variant) or "no-hits/full")
+                break
+            except Exception as e:
+                logger.warning("CP rulebase '%s' fetch failed (payload=%s): %s",
+                               layer_name, ",".join(variant) or "rich", e)
+        if first_data is None:
+            raise RuntimeError(f"show-access-rulebase failed for layer '{layer_name}' (all payload variants returned errors)")
+
         offset = 0
         while True:
-            data = self._get_rulebase_page(layer_name, offset, payload_extra)
+            data = first_data if offset == 0 else self._get_rulebase_page(layer_name, offset, payload_extra)
 
             # Collect inline object dictionary (present on every page — just use first)
             if not inline_objects:
@@ -589,7 +611,9 @@ class CheckPointConnector:
         objects += self._fetch_typed("show-networks")
         objects += self._fetch_typed("show-address-ranges")
         objects += self._fetch_typed("show-wildcards")
-        objects += self._fetch_typed("show-groups")
+        groups = self._fetch_typed("show-groups")
+        self._enrich_group_members(groups)
+        objects += groups
         # Service objects
         objects += self._fetch_typed("show-services-tcp")
         objects += self._fetch_typed("show-services-udp")
@@ -597,6 +621,50 @@ class CheckPointConnector:
         objects += self._fetch_typed("show-services-other")
         objects += self._fetch_typed("show-service-groups")
         return objects
+
+    def get_group(self, identifier: str, by_uid: bool = True) -> dict:
+        """Fetch a single address group's full membership via show-group.
+
+        show-groups occasionally returns groups without an expanded members list
+        (varies by version / MDS domain). show-group on a single object reliably
+        returns the members array.
+        """
+        key = "uid" if by_uid else "name"
+        try:
+            return self._post_raw("show-group", {key: identifier, "details-level": "full"})
+        except Exception as e:
+            logger.debug("show-group failed for %s=%s: %s", key, identifier, e)
+            return {}
+
+    def _enrich_group_members(self, groups: list[dict], max_calls: int = 300) -> None:
+        """In place: fetch membership for groups whose members came back empty.
+
+        Bounded + isolated so it can NEVER stall or fail the overall sync:
+        - capped at max_calls per-group lookups (large MDS can have many groups);
+        - each call uses a short timeout;
+        - all errors are swallowed (best-effort enrichment).
+        """
+        empty = [o for o in groups if isinstance(o, dict) and not o.get("members")]
+        if not empty:
+            return
+        if len(empty) > max_calls:
+            logger.warning("%d Check Point groups lack members; enriching first %d (cap)", len(empty), max_calls)
+        saved_timeout = self.timeout
+        enriched = 0
+        try:
+            self.timeout = min(saved_timeout, 15)
+            for o in empty[:max_calls]:
+                uid, name = o.get("uid"), o.get("name")
+                try:
+                    full = self.get_group(uid, by_uid=True) if uid else (self.get_group(name, by_uid=False) if name else {})
+                except Exception:
+                    continue
+                if full.get("members"):
+                    o["members"] = full["members"]
+                    enriched += 1
+        finally:
+            self.timeout = saved_timeout
+        logger.info("Check Point group enrichment: %d/%d empty groups populated via show-group", enriched, len(empty))
 
     # ── Time objects ─────────────────────────────────────────────────────────
 

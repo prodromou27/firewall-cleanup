@@ -7,21 +7,28 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Signature brand — blue, used for primary actions & accents
         brand: {
-          50: '#ecfeff',
-          100: '#cffafe',
-          200: '#a5f3fc',
-          300: '#67e8f9',
-          400: '#22d3ee',
-          500: '#06b6d4',
-          600: '#0891b2',
-          700: '#0e7490',
-          800: '#155e75',
-          900: '#164e63',
-          950: '#083344',
+          50: '#ecfdf5',
+          100: '#d1fae5',
+          200: '#a7f3d0',
+          300: '#6ee7b7',
+          400: '#34d399',
+          500: '#10b981',
+          600: '#059669',
+          700: '#047857',
+          800: '#065f46',
+          900: '#064e3b',
+          950: '#022c22',
         },
-        // Ink — slate scale for text & dark surfaces (sidebar)
+        info: {
+          50: '#eff6ff',
+          100: '#dbeafe',
+          300: '#93c5fd',
+          400: '#60a5fa',
+          500: '#3b82f6',
+          600: '#2563eb',
+          700: '#1d4ed8',
+        },
         ink: {
           50: '#f8fafc',
           100: '#f1f5f9',
@@ -35,7 +42,6 @@ export default {
           900: '#0f172a',
           950: '#020617',
         },
-        // Success — green, for healthy / pass / positive states & data viz
         success: {
           400: '#34d399',
           500: '#10b981',
@@ -88,8 +94,6 @@ export default {
           border: 'rgba(255, 255, 255, 0.08)',
         },
         canvas: '#f5f7f6',
-
-        // ── shadcn/ui semantic tokens (mapped to CSS vars in index.css) ──
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',
         ring: 'hsl(var(--ring))',
@@ -155,10 +159,10 @@ export default {
         console: 'inset -1px 0 0 rgba(255,255,255,0.06), 1px 0 0 rgba(8,145,178,0.28)',
       },
       backgroundImage: {
-        'brand-gradient': 'linear-gradient(135deg, #0e7490 0%, #06b6d4 52%, #14b8a6 100%)',
+        'brand-gradient': 'linear-gradient(135deg, #047857 0%, #10b981 54%, #34d399 100%)',
         'header-fade': 'linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(248,250,250,0.92) 100%)',
-        'console-grid': 'linear-gradient(rgba(8,145,178,0.055) 1px, transparent 1px), linear-gradient(90deg, rgba(8,145,178,0.055) 1px, transparent 1px)',
-        'sidebar-field': 'radial-gradient(circle at 35% 0%, rgba(6,182,212,0.20), transparent 32%), linear-gradient(180deg, #101719 0%, #0b1012 100%)',
+        'console-grid': 'linear-gradient(rgba(5,150,105,0.055) 1px, transparent 1px), linear-gradient(90deg, rgba(5,150,105,0.055) 1px, transparent 1px)',
+        'sidebar-field': 'radial-gradient(circle at 35% 0%, rgba(16,185,129,0.20), transparent 32%), linear-gradient(180deg, #101719 0%, #0b1012 100%)',
       },
     },
   },

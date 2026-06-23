@@ -2,14 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { Shield, Globe, AlertTriangle, ArrowLeft, Download, Network } from 'lucide-react'
 import { getPublicExposure, type PublicExposure } from '../api/client'
-
-const SEV_COLOR: Record<string, string> = {
-  Critical: 'bg-red-100 text-red-700',
-  High: 'bg-orange-100 text-orange-700',
-  Medium: 'bg-amber-100 text-amber-700',
-  Low: 'bg-blue-100 text-blue-700',
-  Informational: 'bg-gray-100 text-gray-600',
-}
+import { SeverityBadge } from '../components/ui/SeverityBadge'
 
 export function PublicExposure() {
   const { policyId } = useParams<{ policyId: string }>()
@@ -36,7 +29,7 @@ export function PublicExposure() {
     URL.revokeObjectURL(a.href)
   }
 
-  if (loading) return <div className="page-body"><div className="animate-spin w-7 h-7 border-b-2 border-blue-600 rounded-full mx-auto mt-16" /></div>
+  if (loading) return <div className="page-body"><div className="animate-spin w-7 h-7 border-b-2 border-brand-600 rounded-full mx-auto mt-16" /></div>
   if (error || !data) return <div className="page-body"><div className="rounded-lg bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-700">{error || 'No data'}</div></div>
 
   return (
@@ -45,7 +38,7 @@ export function PublicExposure() {
         <div className="flex items-center gap-2">
           <Link to={`/policies/${policyId}`} className="text-gray-400 hover:text-gray-700"><ArrowLeft className="w-5 h-5" /></Link>
           <div>
-            <h1 className="page-title flex items-center gap-2"><Globe className="w-5 h-5 text-blue-600" /> Public Exposure</h1>
+            <h1 className="page-title flex items-center gap-2"><Globe className="w-5 h-5 text-brand-600" /> Public Exposure</h1>
             <p className="page-subtitle">{data.firewall_name} · {data.vendor} · read-only review</p>
           </div>
         </div>
@@ -97,7 +90,7 @@ export function PublicExposure() {
                 <div key={n} className="border border-gray-100 rounded-lg px-3 py-1.5 text-sm">
                   <span className="font-semibold">{i.name}</span>
                   {i.ip && <span className="font-mono text-xs text-gray-500 ml-2">{i.ip}</span>}
-                  {i.wan_facing && <span className="text-[10px] ml-2 px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">WAN</span>}
+                  {i.wan_facing && <span className="text-[10px] ml-2 px-1.5 py-0.5 rounded bg-info-50 text-info-600">WAN</span>}
                   {i.mgmt_access && <span className="text-[10px] ml-1 px-1.5 py-0.5 rounded bg-red-50 text-red-600">mgmt</span>}
                 </div>
               ))}
@@ -174,7 +167,7 @@ export function PublicExposure() {
             <div className="space-y-1.5">
               {data.findings.map(f => (
                 <div key={f.id} className="flex items-center gap-2 text-sm border-b border-gray-50 py-1">
-                  <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded ${SEV_COLOR[f.severity] || SEV_COLOR.Informational}`}>{f.severity}</span>
+                  <SeverityBadge severity={f.severity} size="sm" />
                   <span className="flex-1">{f.title}</span>
                   <span className="text-xs text-gray-400">{f.status}</span>
                 </div>

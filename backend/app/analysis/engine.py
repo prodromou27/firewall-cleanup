@@ -7,7 +7,8 @@ from app.models.policy import FirewallPolicy, FirewallRule, FirewallObject, Anal
 from app.models.finding import Finding, FindingComment
 from app.analysis.normalizer import (
     build_object_map, expand_rule_sources, expand_rule_destinations,
-    expand_rule_services, has_any_source, has_any_destination, has_any_service
+    expand_rule_services, has_any_source, has_any_destination, has_any_service,
+    _ref_name,
 )
 from app.analysis.duplicate_detector import detect_duplicates
 from app.analysis.shadow_detector import detect_shadows
@@ -358,6 +359,7 @@ def _obj_to_dict(o: FirewallObject) -> dict:
     return {
         "id": o.id,
         "vendor": o.vendor,
+        "object_uid": o.object_uid,
         "object_name": o.object_name,
         "object_type": o.object_type,
         "value": o.value,
@@ -1314,18 +1316,34 @@ def _analyze_unused_objects(
     for rule in rules:
         for field in reference_fields:
             for ref in rule.get(field, []) or []:
-                if isinstance(ref, str):
-                    used_names.add(ref)
+                name = _ref_name(ref)
+                if not name:
+                    continue
+                used_names.add(name)
+                obj = obj_map.get(name)
+                if obj:
+                    used_names.update(_object_aliases(obj))
 
     # Also include members of used groups
-    def collect_members(name: str, visited: set):
+    def collect_members(ref, visited: set):
+        name = _ref_name(ref)
+        if not name:
+            return
         if name in visited:
             return
         visited.add(name)
         obj = obj_map.get(name)
+        if obj:
+            used_names.update(_object_aliases(obj))
         if obj and _is_group_object(obj):
-            for m in obj.get("members", []):
-                used_names.add(m)
+            for m in _member_refs(obj):
+                member_name = _ref_name(m)
+                if not member_name:
+                    continue
+                used_names.add(member_name)
+                member_obj = obj_map.get(member_name)
+                if member_obj:
+                    used_names.update(_object_aliases(member_obj))
                 collect_members(m, visited)
 
     for name in list(used_names):
@@ -1341,7 +1359,7 @@ def _analyze_unused_objects(
         # Skip vendor built-in / predefined objects; customers cannot remove them.
         if _is_vendor_builtin_object(obj):
             continue
-        if name not in used_names:
+        if not (_object_aliases(obj) & used_names):
             findings.append({
                 "finding_type": "unused_object",
                 "severity": "Informational",
@@ -1747,6 +1765,33 @@ def _is_service_object(obj: dict) -> bool:
     return "service" in _object_type(obj)
 
 
+def _object_aliases(obj: dict) -> set[str]:
+    raw = obj.get("raw_data") or {}
+    aliases = {
+        obj.get("object_name"),
+        obj.get("object_uid"),
+        obj.get("uid"),
+    }
+    if isinstance(raw, dict):
+        aliases.add(raw.get("uid"))
+        aliases.add(raw.get("name"))
+    return {str(a).strip() for a in aliases if str(a or "").strip()}
+
+
+def _member_refs(obj: dict) -> list:
+    """Return normalized and raw group members without losing vendor shapes."""
+    members = obj.get("members") or []
+    if members:
+        return members
+    raw = obj.get("raw_data") or {}
+    if isinstance(raw, dict):
+        for key in ("members", "member", "groups"):
+            raw_members = raw.get(key)
+            if raw_members:
+                return raw_members if isinstance(raw_members, list) else [raw_members]
+    return []
+
+
 def _truthy_metadata(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -1796,7 +1841,7 @@ def _analyze_empty_groups(objects: List[dict]) -> List[dict]:
     for obj in objects:
         if not _is_group_object(obj):
             continue
-        members = obj.get("members") or []
+        members = _member_refs(obj)
         if len(members) == 0:
             # Suppress known vendor predefined empty groups.
             if _is_vendor_builtin_object(obj):

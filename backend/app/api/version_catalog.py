@@ -16,6 +16,9 @@ router = APIRouter(prefix="/api/version-catalog", tags=["version-catalog"])
 
 
 class CatalogIn(BaseModel):
+    # 'model_family' starts with the Pydantic-protected 'model_' prefix; opt out.
+    model_config = {"protected_namespaces": ()}
+
     vendor: str
     product: Optional[str] = None
     model_family: Optional[str] = None

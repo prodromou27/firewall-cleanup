@@ -47,10 +47,18 @@ def _get_fernet() -> Fernet:
     else:
         if settings.is_production:
             raise RuntimeError("SECRET_KEY must be set in production to encrypt/decrypt device credentials.")
-        # Dev fallback: derive from a stable machine secret stored on disk
-        key_file = os.path.join(os.path.dirname(settings.database_url.replace("sqlite:///", "")), ".dev_key")
-        if not os.path.isabs(key_file):
-            key_file = os.path.join(os.getcwd(), key_file.lstrip("./"))
+        # Dev fallback: persist a stable key on disk so credentials survive
+        # restarts even without SECRET_KEY. Use the uploads directory — it is a
+        # mounted/persistent volume in the Docker stack — rather than deriving a
+        # path from DATABASE_URL (which is wrong for non-SQLite URLs like
+        # postgresql://… and left the key non-persistent, regenerating it every
+        # restart and losing stored device passwords).
+        key_dir = (getattr(settings, "upload_dir", "") or "").strip() or os.getcwd()
+        try:
+            os.makedirs(key_dir, exist_ok=True)
+        except Exception:
+            key_dir = os.getcwd()
+        key_file = os.path.join(key_dir, ".dev_key")
         if os.path.exists(key_file):
             with open(key_file, "rb") as f:
                 key = f.read().strip()

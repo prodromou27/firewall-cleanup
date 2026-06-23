@@ -516,53 +516,70 @@ def _cp_translate(raw: dict) -> dict:
 
         if t == "host":
             ip = obj.get("ipv4-address", obj.get("ip-address", ""))
-            obj_map[name] = {"type": "host", "value": ip, "members": [], "comment": comment}
+            obj_map[name] = {"type": "host", "value": ip, "members": [], "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
 
         elif t == "network":
             subnet  = obj.get("subnet4", obj.get("subnet", ""))
             masklen = obj.get("mask-length4", obj.get("mask-length", "32"))
             value   = f"{subnet}/{masklen}" if subnet else ""
-            obj_map[name] = {"type": "network", "value": value, "members": [], "comment": comment}
+            obj_map[name] = {"type": "network", "value": value, "members": [], "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
 
         elif t == "address-range":
             value = f"{obj.get('ipv4-address-first', '')}-{obj.get('ipv4-address-last', '')}"
-            obj_map[name] = {"type": "range", "value": value, "members": [], "comment": comment}
+            obj_map[name] = {"type": "range", "value": value, "members": [], "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
 
         elif t == "multicast-address-range":
             value = f"{obj.get('ipv4-address-first', '')}-{obj.get('ipv4-address-last', '')}"
-            obj_map[name] = {"type": "range", "value": value, "members": [], "comment": comment}
+            obj_map[name] = {"type": "range", "value": value, "members": [], "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
 
         elif t in ("group", "address-range-group"):
-            members = [resolve(m) for m in obj.get("members", [])]
-            obj_map[name] = {"type": "group", "value": None, "members": members, "comment": comment}
+            # Member lists vary by CP version/detail-level: list of full objects,
+            # of {name,uid} refs, or of bare uid strings. Resolve all shapes and
+            # fall back to uid/name so members are never silently dropped.
+            raw_members = obj.get("members") or obj.get("member") or []
+            members = []
+            for m in raw_members:
+                rname = resolve(m)
+                if not rname and isinstance(m, dict):
+                    rname = m.get("name") or m.get("uid") or ""
+                if not rname and isinstance(m, str):
+                    rname = m
+                if rname:
+                    members.append(rname)
+            if raw_members and not members:
+                logger.warning("CP group '%s': %d raw members but none resolved (shape=%s)",
+                               name, len(raw_members), type(raw_members[0]).__name__)
+            elif not raw_members:
+                logger.info("CP group '%s' returned no members from the API (details-level/membership)", name)
+            obj_map[name] = {"type": "group", "value": None, "members": members, "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
 
         elif t == "wildcard":
-            obj_map[name] = {"type": "wildcard", "value": obj.get("ipv4-address", ""), "members": [], "comment": comment}
+            obj_map[name] = {"type": "wildcard", "value": obj.get("ipv4-address", ""), "members": [], "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
 
         elif t in ("dns-domain",):
-            obj_map[name] = {"type": "fqdn", "value": obj.get("domains-attribute", ""), "members": [], "comment": comment}
+            obj_map[name] = {"type": "fqdn", "value": obj.get("domains-attribute", ""), "members": [], "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
 
         elif t == "service-tcp":
             lo, hi = _parse_port_range(str(obj.get("port", "0")))
-            obj_map[name] = {"type": "service", "protocol": "TCP", "port_start": lo, "port_end": hi, "members": [], "comment": comment}
+            obj_map[name] = {"type": "service", "protocol": "TCP", "port_start": lo, "port_end": hi, "members": [], "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
 
         elif t == "service-udp":
             lo, hi = _parse_port_range(str(obj.get("port", "0")))
-            obj_map[name] = {"type": "service", "protocol": "UDP", "port_start": lo, "port_end": hi, "members": [], "comment": comment}
+            obj_map[name] = {"type": "service", "protocol": "UDP", "port_start": lo, "port_end": hi, "members": [], "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
 
         elif t == "service-icmp":
-            obj_map[name] = {"type": "service", "protocol": "ICMP", "port_start": 0, "port_end": 0, "members": [], "comment": comment}
+            obj_map[name] = {"type": "service", "protocol": "ICMP", "port_start": 0, "port_end": 0, "members": [], "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
 
         elif t == "service-icmp6":
-            obj_map[name] = {"type": "service", "protocol": "ICMPv6", "port_start": 0, "port_end": 0, "members": [], "comment": comment}
+            obj_map[name] = {"type": "service", "protocol": "ICMPv6", "port_start": 0, "port_end": 0, "members": [], "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
 
         elif t == "service-other":
             proto_num = obj.get("ip-protocol", 0)
-            obj_map[name] = {"type": "service", "protocol": f"IP/{proto_num}", "port_start": 0, "port_end": 0, "members": [], "comment": comment}
+            obj_map[name] = {"type": "service", "protocol": f"IP/{proto_num}", "port_start": 0, "port_end": 0, "members": [], "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
 
         elif t == "service-group":
             members = [resolve(m) for m in obj.get("members", [])]
-            obj_map[name] = {"type": "service-group", "value": None, "members": members, "comment": comment}
+            obj_map[name] = {"type": "service-group", "value": None, "members": members, "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
 
         else:
             # Unknown type — store as generic host for completeness
@@ -795,9 +812,11 @@ def _write_to_db(parsed: dict, policy: FirewallPolicy, db: Session):
     # Write objects
     for name, obj in parsed["objects"].items():
         members = obj.get("members", [])
+        raw_data = obj.get("raw_data") if isinstance(obj.get("raw_data"), dict) else {}
         db_obj = FirewallObject(
             policy_id=policy.id,
             vendor=vendor,
+            object_uid=obj.get("uid") or raw_data.get("uid"),
             object_name=name,
             object_type=obj.get("type", "host"),
             value=obj.get("value"),
@@ -805,6 +824,7 @@ def _write_to_db(parsed: dict, policy: FirewallPolicy, db: Session):
             port_start=obj.get("port_start"),
             port_end=obj.get("port_end"),
             comment=str(obj.get("comment", "") or ""),
+            raw_data=redact_secrets(raw_data),
         )
         db.add(db_obj)
         db.flush()

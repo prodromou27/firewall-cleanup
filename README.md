@@ -44,7 +44,7 @@ scoring, compliance checks, and professional multi-format reporting.
 ## Requirements
 
 - Python 3.12+
-- Node.js 20 LTS+
+- Node.js 20.19+ LTS
 - (Production) Docker Engine + Docker Compose v2
 
 ## Production deployment (Docker + PostgreSQL)

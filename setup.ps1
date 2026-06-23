@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 Write-Host "=== Firewall Policy Cleanup Assistant Setup ===" -ForegroundColor Cyan
 
 $MinPython = [version]"3.12.0"
-$MinNode = [version]"20.0.0"
+$MinNode = [version]"20.19.0"
 
 function Get-SemVerFromText([string]$Text) {
     if ($Text -match "(\d+)\.(\d+)\.(\d+)") {

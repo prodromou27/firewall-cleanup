@@ -9,7 +9,8 @@ import {
 } from 'lucide-react'
 import {
   getDevicesPage, createDevice, updateDevice, deleteDevice,
-  testDevice, syncDevice, getDeviceSyncStatus, resetDeviceSync
+  testDevice, syncDevice, getDeviceSyncStatus, resetDeviceSync,
+  getDeviceVersionIntelligence, getDeviceVulnerabilities,
 } from '../api/client'
 import type { FirewallDeviceT } from '../types'
 import { clsx } from 'clsx'
@@ -609,7 +610,6 @@ function DeviceDetailDrawer({ device, onClose, onEdit }: {
   const loadVersionIntel = async () => {
     setVerLoading(true)
     try {
-      const { getDeviceVersionIntelligence } = await import('../api/client')
       setVerData(await getDeviceVersionIntelligence(device.id))
     } catch { /* ignore */ } finally { setVerLoading(false) }
   }
@@ -630,7 +630,6 @@ function DeviceDetailDrawer({ device, onClose, onEdit }: {
     if (!displayOsVersion) return
     setCveLoading(true)
     try {
-      const { getDeviceVulnerabilities } = await import('../api/client')
       const result = await getDeviceVulnerabilities(device.id, refresh)
       setCveData(result)
     } catch { setCveData({ cves: [], error: 'Failed to load CVE data' }) }

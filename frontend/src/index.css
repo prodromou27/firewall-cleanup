@@ -32,6 +32,9 @@
     @apply bg-canvas text-ink-900 antialiased font-sans;
     font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1, "cv05" 1;
   }
+  :where(a, button, input, select, textarea, [role="button"], [tabindex]):focus-visible {
+    @apply outline-none ring-2 ring-brand-500/40 ring-offset-2 ring-offset-white;
+  }
   h1, h2, h3, h4 {
     @apply font-display font-semibold tracking-tight text-ink-900;
   }
@@ -63,7 +66,7 @@
       transition-all duration-150 select-none;
   }
   .btn-danger {
-    @apply inline-flex items-center gap-1.5 bg-red-600 hover:bg-red-700
+    @apply inline-flex items-center gap-1.5 bg-destructive hover:bg-red-700
       text-white text-sm font-medium px-3.5 py-2 rounded-lg
       transition-all duration-150 active:scale-[0.98] select-none;
   }
@@ -171,22 +174,34 @@
     @apply inline-flex items-center text-xs font-semibold px-2 py-0.5 rounded-md;
   }
   .badge-critical {
-    @apply badge bg-red-600 text-white ring-1 ring-red-700 shadow-sm shadow-red-600/30;
+    @apply badge bg-severity-critical-bg text-severity-critical-fg ring-1 ring-severity-critical-border shadow-sm shadow-red-600/30;
   }
   .badge-high {
-    @apply badge bg-red-50 text-red-700 ring-1 ring-red-200/80;
+    @apply badge bg-severity-high-bg text-severity-high-fg ring-1 ring-severity-high-border/80;
   }
   .badge-medium {
-    @apply badge bg-amber-50 text-amber-700 ring-1 ring-amber-200/80;
+    @apply badge bg-severity-medium-bg text-severity-medium-fg ring-1 ring-severity-medium-border/80;
   }
   .badge-low {
-    @apply badge bg-blue-50 text-blue-700 ring-1 ring-blue-200/80;
+    @apply badge bg-severity-low-bg text-severity-low-fg ring-1 ring-severity-low-border/80;
   }
   .badge-info {
-    @apply badge bg-gray-100 text-gray-500 ring-1 ring-gray-200;
+    @apply badge bg-severity-info-bg text-severity-info-fg ring-1 ring-severity-info-border;
   }
   .badge-success {
     @apply badge bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/80;
+  }
+  .status-review {
+    @apply badge bg-orange-50 text-orange-700 ring-1 ring-orange-200;
+  }
+  .status-approved {
+    @apply badge bg-purple-50 text-purple-700 ring-1 ring-purple-200;
+  }
+  .status-completed {
+    @apply badge bg-success-500/10 text-success-600 ring-1 ring-success-500/20;
+  }
+  .status-muted {
+    @apply badge bg-ink-100 text-ink-600 ring-1 ring-ink-200;
   }
   .vendor-badge {
     @apply inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-semibold;
@@ -198,15 +213,15 @@
 
   /* ── Form controls ───────────────────────────────────────────── */
   .label-sm {
-    @apply block text-xs font-medium text-gray-600 mb-1;
+    @apply block text-xs font-medium text-ink-600 mb-1;
   }
   .input-sm {
-    @apply border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white
+    @apply border border-ink-200 rounded-lg px-3 py-2 text-sm bg-white
       focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-400
-      transition-all placeholder:text-gray-400;
+      transition-all placeholder:text-ink-400;
   }
   .select-sm {
-    @apply border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white
+    @apply border border-ink-200 rounded-lg px-3 py-2 text-sm bg-white
       focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-400
       transition-all;
   }
@@ -228,23 +243,23 @@
 
   /* ── Section labels ──────────────────────────────────────────── */
   .section-label {
-    @apply text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2;
+    @apply text-[10px] font-bold text-ink-400 uppercase tracking-widest mb-2;
   }
 
   /* ── Risk / severity colors ──────────────────────────────────── */
-  .risk-critical { @apply text-red-700 bg-red-50 ring-1 ring-red-200; }
-  .risk-high     { @apply text-orange-700 bg-orange-50 ring-1 ring-orange-200; }
-  .risk-medium   { @apply text-amber-700 bg-amber-50 ring-1 ring-amber-200; }
-  .risk-low      { @apply text-emerald-700 bg-emerald-50 ring-1 ring-emerald-200; }
+  .risk-critical { @apply text-severity-critical-softFg bg-severity-critical-soft ring-1 ring-severity-critical-softBorder; }
+  .risk-high     { @apply text-severity-high-fg bg-severity-high-bg ring-1 ring-severity-high-border; }
+  .risk-medium   { @apply text-severity-medium-fg bg-severity-medium-bg ring-1 ring-severity-medium-border; }
+  .risk-low      { @apply text-severity-low-fg bg-severity-low-bg ring-1 ring-severity-low-border; }
 
   /* ── Empty state ──────────────────────────────────────────────── */
   .empty-state {
-    @apply flex flex-col items-center justify-center text-center py-16 text-gray-400;
+    @apply flex flex-col items-center justify-center text-center py-16 text-ink-400;
   }
 
   /* ── Divider ─────────────────────────────────────────────────── */
   .divider {
-    @apply border-t border-gray-100 my-4;
+    @apply border-t border-ink-100 my-4;
   }
 
   /* ── Inline alert banners ─────────────────────────────────────── */
@@ -257,12 +272,23 @@
       rounded-xl p-4 text-sm text-blue-800;
   }
   .alert-readonly {
-    @apply flex items-start gap-3 bg-gray-50 border border-gray-200
-      rounded-xl p-3.5 text-sm text-gray-600;
+    @apply flex items-start gap-3 bg-ink-50 border border-ink-200
+      rounded-xl p-3.5 text-sm text-ink-600;
   }
 
   /* ── Skeleton loader ──────────────────────────────────────────── */
   .skeleton {
-    @apply animate-pulse bg-gray-200 rounded;
+    @apply animate-pulse bg-ink-200 rounded;
+  }
+
+  /* Dark sidebar primitives */
+  .sidebar-shell {
+    @apply w-[210px] flex-shrink-0 flex flex-col bg-sidebar shadow-[1px_0_0_var(--tw-shadow-color)] shadow-sidebar-border;
+  }
+  .sidebar-divider {
+    @apply border-t border-sidebar-border;
+  }
+  .sidebar-elevated {
+    @apply bg-sidebar-elevated border border-sidebar-border;
   }
 }

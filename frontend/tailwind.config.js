@@ -41,6 +41,52 @@ export default {
           500: '#10b981',
           600: '#059669',
         },
+        severity: {
+          critical: {
+            DEFAULT: '#dc2626',
+            bg: '#dc2626',
+            fg: '#ffffff',
+            border: '#b91c1c',
+            soft: '#fef2f2',
+            softFg: '#991b1b',
+            softBorder: '#fecaca',
+          },
+          high: {
+            DEFAULT: '#ef4444',
+            bg: '#fef2f2',
+            fg: '#991b1b',
+            border: '#fecaca',
+          },
+          medium: {
+            DEFAULT: '#d97706',
+            bg: '#fffbeb',
+            fg: '#92400e',
+            border: '#fde68a',
+          },
+          low: {
+            DEFAULT: '#0284c7',
+            bg: '#f0f9ff',
+            fg: '#075985',
+            border: '#bae6fd',
+          },
+          info: {
+            DEFAULT: '#64748b',
+            bg: '#f1f5f9',
+            fg: '#475569',
+            border: '#e2e8f0',
+          },
+        },
+        sidebar: {
+          DEFAULT: '#0f172a',
+          elevated: '#1e293b',
+          foreground: '#f8fafc',
+          muted: '#94a3b8',
+          subtle: '#64748b',
+          faint: '#475569',
+          active: 'rgba(255, 255, 255, 0.10)',
+          hover: 'rgba(255, 255, 255, 0.05)',
+          border: 'rgba(255, 255, 255, 0.08)',
+        },
         canvas: '#f4f5f9',
 
         // ── shadcn/ui semantic tokens (mapped to CSS vars in index.css) ──

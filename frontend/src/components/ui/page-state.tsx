@@ -45,8 +45,8 @@ interface ErrorStateProps {
 
 export function ErrorState({ title = 'Something went wrong', message, className }: ErrorStateProps) {
   return (
-    <div className={cn('rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700', className)}>
-      <p className="font-semibold text-red-800">{title}</p>
+    <div className={cn('rounded-lg border border-severity-high-border bg-severity-high-bg p-4 text-sm text-severity-high-fg', className)}>
+      <p className="font-semibold text-severity-critical-softFg">{title}</p>
       <div className="mt-1">{message}</div>
     </div>
   )

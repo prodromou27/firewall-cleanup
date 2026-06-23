@@ -51,8 +51,8 @@ function NavItem({ to, label, icon: Icon, active, muted }: NavItemProps) {
         active
           ? 'bg-white/10 text-white'
           : muted
-          ? 'text-slate-600 hover:text-slate-400 hover:bg-white/5'
-          : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+          ? 'text-sidebar-faint hover:text-sidebar-muted hover:bg-sidebar-hover'
+          : 'text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover'
       )}
     >
       {active && (
@@ -60,7 +60,7 @@ function NavItem({ to, label, icon: Icon, active, muted }: NavItemProps) {
       )}
       <span className={clsx(
         'flex-shrink-0 w-5 h-5 flex items-center justify-center rounded transition-colors',
-        active ? 'text-brand-400' : muted ? 'text-slate-600 group-hover:text-slate-400' : 'text-slate-500 group-hover:text-slate-300'
+        active ? 'text-brand-400' : muted ? 'text-sidebar-faint group-hover:text-sidebar-muted' : 'text-sidebar-subtle group-hover:text-sidebar-foreground'
       )}>
         <Icon className="w-3.5 h-3.5" />
       </span>
@@ -120,15 +120,15 @@ function CustomerSelector() {
         className={clsx(
           'w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition-all cursor-pointer',
           activeCustomer
-            ? 'bg-blue-500/15 border border-blue-500/25 hover:bg-blue-500/20'
-            : 'bg-white/5 border border-white/8 hover:bg-white/8'
+            ? 'bg-brand-500/15 border border-brand-500/25 hover:bg-brand-500/20'
+            : 'bg-sidebar-hover border border-sidebar-border hover:bg-sidebar-active'
         )}
       >
-        <Building2 className={clsx('w-3.5 h-3.5 flex-shrink-0', activeCustomer ? 'text-blue-400' : 'text-slate-500')} />
+        <Building2 className={clsx('w-3.5 h-3.5 flex-shrink-0', activeCustomer ? 'text-brand-400' : 'text-sidebar-subtle')} />
         <div className="flex-1 min-w-0">
           {activeCustomer ? (
             <>
-              <p className="text-[9px] font-bold text-blue-400 uppercase tracking-widest leading-none mb-0.5">
+              <p className="text-[9px] font-bold text-brand-400 uppercase tracking-widest leading-none mb-0.5">
                 Active Customer
               </p>
               <p className="text-[12px] font-semibold text-white truncate leading-tight">
@@ -136,19 +136,19 @@ function CustomerSelector() {
               </p>
             </>
           ) : (
-            <p className="text-[12px] text-slate-400 font-medium">All Customers</p>
+            <p className="text-[12px] text-sidebar-muted font-medium">All Customers</p>
           )}
         </div>
         {activeCustomer ? (
           <button
             onClick={clear}
             title="Clear customer scope"
-            className="flex-shrink-0 text-slate-500 hover:text-red-400 transition-colors p-0.5 rounded"
+            className="flex-shrink-0 text-sidebar-subtle hover:text-severity-critical transition-colors p-0.5 rounded"
           >
             <X className="w-3 h-3" />
           </button>
         ) : (
-          <ChevronDown className={clsx('w-3 h-3 flex-shrink-0 text-slate-500 transition-transform', open && 'rotate-180')} />
+          <ChevronDown className={clsx('w-3 h-3 flex-shrink-0 text-sidebar-subtle transition-transform', open && 'rotate-180')} />
         )}
         {!activeCustomer && (
           <span className="sr-only">open</span>
@@ -157,24 +157,24 @@ function CustomerSelector() {
 
       {/* Dropdown */}
       {open && (
-        <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-[#1e293b] border border-white/10 rounded-xl shadow-2xl overflow-hidden">
-          <div className="px-2.5 py-1.5 border-b border-white/5">
-            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Select Customer</p>
+        <div className="absolute left-0 right-0 top-full mt-1 z-50 sidebar-elevated rounded-xl shadow-2xl overflow-hidden">
+          <div className="px-2.5 py-1.5 border-b border-sidebar-border">
+            <p className="text-[10px] font-semibold text-sidebar-muted uppercase tracking-wider">Select Customer</p>
           </div>
           <div className="max-h-56 overflow-y-auto">
             {loading ? (
               <div className="flex justify-center py-4">
-                <div className="w-4 h-4 border-b-2 border-blue-400 rounded-full animate-spin" />
+                <div className="w-4 h-4 border-b-2 border-brand-400 rounded-full animate-spin" />
               </div>
             ) : customers.length === 0 ? (
-              <p className="text-xs text-slate-500 px-3 py-3 text-center">No customers found</p>
+              <p className="text-xs text-sidebar-subtle px-3 py-3 text-center">No customers found</p>
             ) : (
               <>
                 <button
                   onClick={() => { setActiveCustomer(null); setOpen(false); navigate('/') }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/5 transition-colors text-slate-400 hover:text-white text-[12px]"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-sidebar-hover transition-colors text-sidebar-muted hover:text-sidebar-foreground text-[12px]"
                 >
-                  <span className="text-slate-600 text-[10px]">—</span>
+                  <span className="text-sidebar-faint text-[10px]">-</span>
                   <span>All Customers</span>
                 </button>
                 {customers.map(c => (
@@ -183,15 +183,15 @@ function CustomerSelector() {
                     onClick={() => select(c)}
                     className={clsx(
                       'w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-white/5 transition-colors text-[12px]',
-                      activeCustomer?.id === c.id ? 'text-blue-300 bg-blue-500/10' : 'text-slate-300 hover:text-white'
+                      activeCustomer?.id === c.id ? 'text-brand-300 bg-brand-500/10' : 'text-sidebar-muted hover:text-sidebar-foreground'
                     )}
                   >
-                    <div className="w-5 h-5 rounded-md bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center flex-shrink-0">
+                    <div className="w-5 h-5 rounded-md bg-brand-gradient flex items-center justify-center flex-shrink-0">
                       <span className="text-white font-bold text-[8px]">{c.name.slice(0, 2).toUpperCase()}</span>
                     </div>
                     <span className="flex-1 truncate font-medium">{c.name}</span>
                     {c.high_findings > 0 && (
-                      <span className="flex-shrink-0 bg-red-500/20 text-red-400 text-[9px] font-bold px-1 py-px rounded">
+                      <span className="flex-shrink-0 bg-severity-critical/20 text-severity-critical text-[9px] font-bold px-1 py-px rounded">
                         {c.high_findings}H
                       </span>
                     )}
@@ -230,12 +230,12 @@ function UserFooter() {
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-[12px] font-semibold text-white truncate leading-tight">{name}</p>
-          <p className="text-[10px] text-slate-500 truncate">{ROLE_LABELS[user.role] || user.role}</p>
+          <p className="text-[10px] text-sidebar-subtle truncate">{ROLE_LABELS[user.role] || user.role}</p>
         </div>
         <button
           onClick={() => { void logout() }}
           title="Sign out"
-          className="flex-shrink-0 text-slate-500 hover:text-red-400 transition-colors p-1 rounded"
+          className="flex-shrink-0 text-sidebar-subtle hover:text-severity-critical transition-colors p-1 rounded"
         >
           <LogOut className="w-3.5 h-3.5" />
         </button>
@@ -258,10 +258,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     <div className="flex h-screen bg-canvas overflow-hidden">
 
       {/* ── Sidebar ───────────────────────────────────────────── */}
-      <aside
-        className="w-[210px] flex-shrink-0 flex flex-col"
-        style={{ background: '#0f172a', boxShadow: '1px 0 0 rgba(255,255,255,0.04)' }}
-      >
+      <aside className="sidebar-shell">
         {/* Brand */}
         <div className="px-3 pt-4 pb-3 mb-1">
           <div className="bg-white rounded-lg px-2.5 py-1.5 inline-flex items-center">
@@ -273,7 +270,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <CustomerSelector />
 
         {/* Divider */}
-        <div className="mx-3 mb-2 border-t border-white/5" />
+        <div className="mx-3 mb-2 sidebar-divider" />
 
         {/* Main nav */}
         <nav className="flex-1 px-1 py-1 space-y-0.5 overflow-y-auto min-h-0">
@@ -290,7 +287,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         </nav>
 
         {/* Utility links */}
-        <div className="px-1 pb-2 space-y-0.5 border-t border-white/5 pt-2">
+        <div className="px-1 pb-2 space-y-0.5 sidebar-divider pt-2">
           {isAdmin && (
             <NavItem to="/audit" label="Audit Trail" icon={ScrollText} active={isActive('/audit')} muted />
           )}
@@ -300,12 +297,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
         </div>
 
         {/* Footer */}
-        <div className="px-4 py-3 border-t border-white/5">
+        <div className="px-4 py-3 sidebar-divider">
           <div className="flex items-center gap-2 mb-1">
             <Eye className="w-3 h-3 text-emerald-400" />
-            <span className="text-[11px] text-slate-500 font-medium">Read-Only Mode</span>
+            <span className="text-[11px] text-sidebar-subtle font-medium">Read-Only Mode</span>
           </div>
-          <p className="text-slate-700 text-[10px] font-mono">v2.1.0</p>
+          <p className="text-sidebar-faint text-[10px] font-mono">v2.1.0</p>
         </div>
 
         {/* Current user + sign out */}

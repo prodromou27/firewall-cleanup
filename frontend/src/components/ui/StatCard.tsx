@@ -10,26 +10,27 @@ interface Props {
 }
 
 const colorMap = {
-  red: 'text-red-600 bg-red-50',
-  yellow: 'text-yellow-600 bg-yellow-50',
-  blue: 'text-blue-600 bg-blue-50',
-  green: 'text-green-600 bg-green-50',
-  gray: 'text-gray-600 bg-gray-50',
-  indigo: 'text-indigo-600 bg-indigo-50',
-  orange: 'text-orange-600 bg-orange-50',
+  red: 'text-severity-critical bg-severity-critical-soft',
+  yellow: 'text-severity-medium bg-severity-medium-bg',
+  blue: 'text-brand-600 bg-brand-50',
+  green: 'text-success-600 bg-success-500/10',
+  gray: 'text-ink-600 bg-ink-100',
+  indigo: 'text-brand-700 bg-brand-50',
+  orange: 'text-severity-high-fg bg-severity-high-bg',
 }
 
 export function StatCard({ title, value, icon, color = 'blue', subtitle }: Props) {
+  const [valueClass, iconBgClass] = (colorMap[color] ?? colorMap.blue).split(' ')
   return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-5">
+    <div className="stat-card">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm font-medium text-gray-500">{title}</p>
-          <p className={clsx('mt-1 text-3xl font-bold', colorMap[color]?.split(' ')[0] ?? 'text-blue-600')}>{value}</p>
-          {subtitle && <p className="mt-1 text-xs text-gray-400">{subtitle}</p>}
+          <p className="stat-label">{title}</p>
+          <p className={clsx('stat-value', valueClass)}>{value}</p>
+          {subtitle && <p className="mt-1 text-xs text-ink-400">{subtitle}</p>}
         </div>
         {icon && (
-          <div className={clsx('p-3 rounded-full', colorMap[color])}>
+          <div className={clsx('p-3 rounded-lg', valueClass, iconBgClass)}>
             {icon}
           </div>
         )}

@@ -6,16 +6,16 @@ interface Props {
 }
 
 export function SeverityBadge({ severity, size = 'md' }: Props) {
+  const severityClass: Record<string, string> = {
+    Critical: 'badge-critical',
+    High: 'badge-high',
+    Medium: 'badge-medium',
+    Low: 'badge-low',
+    Informational: 'badge-info',
+  }
   const cls = clsx(
-    'inline-flex items-center font-semibold rounded',
+    severityClass[severity] || 'badge-info',
     size === 'sm' ? 'text-xs px-2 py-0.5' : 'text-sm px-2.5 py-0.5',
-    {
-      'bg-red-600 text-white ring-1 ring-red-700': severity === 'Critical',
-      'bg-red-100 text-red-800': severity === 'High',
-      'bg-amber-100 text-amber-800': severity === 'Medium',
-      'bg-sky-100 text-sky-800': severity === 'Low',
-      'bg-slate-100 text-slate-600': severity === 'Informational',
-    }
   )
   return <span className={cls}>{severity}</span>
 }
@@ -25,12 +25,13 @@ interface StatusProps {
 }
 
 export function StatusBadge({ status }: StatusProps) {
-  const cls = clsx('inline-flex items-center text-xs font-semibold rounded px-2 py-0.5', {
-    'bg-orange-100 text-orange-800': status === 'Review Required',
-    'bg-purple-100 text-purple-800': status === 'Approved for Cleanup',
-    'bg-green-100 text-green-800': status === 'Cleanup Completed',
-    'bg-gray-100 text-gray-600': status === 'False Positive',
-    'bg-slate-100 text-slate-700': status === 'Accepted Risk',
-  })
+  const statusClass: Record<string, string> = {
+    'Review Required': 'status-review',
+    'Approved for Cleanup': 'status-approved',
+    'Cleanup Completed': 'status-completed',
+    'False Positive': 'status-muted',
+    'Accepted Risk': 'status-muted',
+  }
+  const cls = clsx(statusClass[status] || 'status-muted', 'text-xs px-2 py-0.5')
   return <span className={cls}>{status}</span>
 }

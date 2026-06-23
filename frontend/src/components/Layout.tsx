@@ -14,23 +14,41 @@ import logoImg from '../assets/logo.png'
 
 /* ── Nav definitions ─────────────────────────────────────────── */
 
-const globalNav = [
-  { to: '/',                label: 'Dashboard',       icon: LayoutDashboard, exact: true },
-  { to: '/customers',       label: 'Customers',       icon: Users },
-  { to: '/findings',        label: 'Findings',        icon: AlertTriangle },
-  { to: '/cleanup-plan',    label: 'Cleanup Plan',    icon: ListChecks },
-  { to: '/changes',         label: 'Change Watch',    icon: GitCompareArrows },
-  { to: '/policies',        label: 'Policies',        icon: List },
-  { to: '/posture',         label: 'Posture',         icon: TrendingUp },
-  { to: '/devices',         label: 'Devices',         icon: Server },
-  { to: '/vulnerabilities', label: 'Vulnerabilities', icon: ShieldAlert },
-  { to: '/objects',         label: 'Objects',         icon: Package },
-  { to: '/reports',         label: 'Reports',         icon: FileText },
-]
-
-const utilityNav = [
-  { to: '/upload',   label: 'Upload Policy', icon: Upload },
-  { to: '/settings', label: 'Settings',      icon: Settings },
+// Grouped product navigation — only routes that actually exist (no dead links).
+const navGroups: { title: string; items: { to: string; label: string; icon: React.ElementType; exact?: boolean }[] }[] = [
+  {
+    title: 'Overview',
+    items: [
+      { to: '/',         label: 'Dashboard',        icon: LayoutDashboard, exact: true },
+      { to: '/posture',  label: 'Security Posture', icon: TrendingUp },
+    ],
+  },
+  {
+    title: 'Analysis',
+    items: [
+      { to: '/upload',         label: 'Upload',         icon: Upload },
+      { to: '/policies',       label: 'Policies',       icon: List },
+      { to: '/objects',        label: 'Objects',        icon: Package },
+      { to: '/findings',       label: 'Findings',       icon: AlertTriangle },
+      { to: '/cleanup-plan',   label: 'Cleanup Plan',   icon: ListChecks },
+      { to: '/changes',        label: 'Change Watch',   icon: GitCompareArrows },
+    ],
+  },
+  {
+    title: 'Operations',
+    items: [
+      { to: '/devices',         label: 'Devices',         icon: Server },
+      { to: '/vulnerabilities', label: 'Vulnerabilities', icon: ShieldAlert },
+      { to: '/reports',         label: 'Reports',         icon: FileText },
+    ],
+  },
+  {
+    title: 'Administration',
+    items: [
+      { to: '/customers', label: 'Customers', icon: Users },
+      { to: '/settings',  label: 'Settings',  icon: Settings },
+    ],
+  },
 ]
 
 /* ── NavItem ─────────────────────────────────────────────────── */
@@ -275,29 +293,26 @@ export function Layout({ children }: { children: React.ReactNode }) {
         {/* Divider */}
         <div className="mx-3 mb-2 border-t border-white/5" />
 
-        {/* Main nav */}
-        <nav className="flex-1 px-1 py-1 space-y-0.5 overflow-y-auto min-h-0">
-          {globalNav.map(({ to, label, icon, exact }) => (
-            <NavItem
-              key={to}
-              to={to}
-              label={label}
-              icon={icon}
-              exact={exact}
-              active={isActive(to, exact)}
-            />
+        {/* Grouped product nav */}
+        <nav className="flex-1 px-1 py-1 overflow-y-auto min-h-0">
+          {navGroups.map(group => (
+            <div key={group.title} className="mb-3">
+              <p className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">{group.title}</p>
+              <div className="space-y-0.5">
+                {group.items.map(({ to, label, icon, exact }) => (
+                  <NavItem key={to} to={to} label={label} icon={icon} exact={exact} active={isActive(to, exact)} />
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
 
-        {/* Utility links */}
-        <div className="px-1 pb-2 space-y-0.5 border-t border-white/5 pt-2">
-          {isAdmin && (
+        {/* Admin-only utility links */}
+        {isAdmin && (
+          <div className="px-1 pb-2 space-y-0.5 border-t border-white/5 pt-2">
             <NavItem to="/audit" label="Audit Trail" icon={ScrollText} active={isActive('/audit')} muted />
-          )}
-          {utilityNav.map(({ to, label, icon }) => (
-            <NavItem key={to} to={to} label={label} icon={icon} active={isActive(to)} muted />
-          ))}
-        </div>
+          </div>
+        )}
 
         {/* Footer */}
         <div className="px-4 py-3 border-t border-white/5">

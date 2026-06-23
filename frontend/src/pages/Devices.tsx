@@ -593,15 +593,47 @@ interface CVEEntry {
   cvss_severity: string; url: string; published: string
 }
 
+function safeDateTime(value: string | null | undefined, fallback = 'Never') {
+  if (!value) return fallback
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? fallback : date.toLocaleString()
+}
+
+function safeDate(value: string | null | undefined, fallback = '—') {
+  if (!value) return fallback
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? fallback : date.toLocaleDateString()
+}
+
+function safeDeviceInterfaces(value: unknown): DeviceInterface[] {
+  let parsed = value
+  if (typeof value === 'string') {
+    if (!value.trim()) return []
+    try {
+      parsed = JSON.parse(value)
+    } catch {
+      return []
+    }
+  }
+  if (!Array.isArray(parsed)) return []
+  return parsed
+    .filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object')
+    .map(item => ({
+      name: String(item.name || item.interface || item.interface_name || ''),
+      ip: String(item.ip || item.ip_address || item['ipv4-address'] || ''),
+      mask: String(item.mask || item.netmask || item['ipv4-mask-length'] || ''),
+      type: String(item.type || item.topology || ''),
+      status: String(item.status || item.state || ''),
+    }))
+    .filter(item => item.name)
+}
+
 function DeviceDetailDrawer({ device, onClose, onEdit }: {
   device: FirewallDeviceT
   onClose: () => void
   onEdit: () => void
 }) {
-  const interfaces: DeviceInterface[] = (() => {
-    try { return device.device_interfaces ? JSON.parse(device.device_interfaces) : [] }
-    catch { return [] }
-  })()
+  const interfaces = safeDeviceInterfaces(device.device_interfaces)
 
   const [cveData, setCveData]     = useState<{ cves: CVEEntry[]; error?: string; cached?: boolean; os_version?: string | null; queryable?: boolean; version_source?: string; raw_os_version?: string | null } | null>(null)
   const [cveLoading, setCveLoading] = useState(false)
@@ -631,7 +663,7 @@ function DeviceDetailDrawer({ device, onClose, onEdit }: {
     setCveLoading(true)
     try {
       const result = await getDeviceVulnerabilities(device.id, refresh)
-      setCveData(result)
+      setCveData({ ...result, cves: Array.isArray(result.cves) ? result.cves : [] })
     } catch { setCveData({ cves: [], error: 'Failed to load CVE data' }) }
     finally { setCveLoading(false) }
   }
@@ -773,9 +805,9 @@ function DeviceDetailDrawer({ device, onClose, onEdit }: {
                 { label: 'Environment', value: device.environment_type },
                 { label: 'Criticality', value: device.criticality },
                 { label: 'Auto-Sync', value: device.sync_interval_hours ? `Every ${device.sync_interval_hours}h` : 'Disabled' },
-                { label: 'Last Sync', value: device.last_sync_at ? new Date(device.last_sync_at).toLocaleString() : 'Never' },
+                { label: 'Last Sync', value: safeDateTime(device.last_sync_at) },
                 { label: 'Last Policy', value: device.last_policy_id ? device.last_policy_id.slice(0, 8) + '…' : '—' },
-                { label: 'Added', value: device.created_at ? new Date(device.created_at).toLocaleDateString() : '—' },
+                { label: 'Added', value: safeDate(device.created_at) },
               ].map(({ label, value }) => (
                 <div key={label} className="flex items-center justify-between">
                   <span className="text-xs text-gray-500">{label}</span>
@@ -814,9 +846,9 @@ function DeviceDetailDrawer({ device, onClose, onEdit }: {
                   {verData.normalized.os_version || 'unknown'} · train {verData.normalized.release_train || '—'}
                   {!verData.catalog_available && <span className="text-gray-400 ml-1">(no catalog data)</span>}
                 </p>
-                {verData.findings.length === 0
+                {(Array.isArray(verData.findings) ? verData.findings : []).length === 0
                   ? <p className="text-xs text-green-600">No version advisories.</p>
-                  : verData.findings.map((f, i) => (
+                  : (Array.isArray(verData.findings) ? verData.findings : []).map((f, i) => (
                     <div key={i} className="bg-gray-50 border border-gray-200 rounded-lg p-2.5">
                       <div className="flex items-center justify-between mb-0.5">
                         <span className="text-xs font-semibold text-gray-800">{f.title}</span>
@@ -856,8 +888,8 @@ function DeviceDetailDrawer({ device, onClose, onEdit }: {
                   <p className="text-xs text-gray-600">
                     {cveData.error
                       ? <span className="font-semibold text-amber-600">CVE lookup unavailable</span>
-                      : cveData.cves.length > 0
-                      ? <span className="font-semibold text-red-600">{cveData.cves.length} CVE(s) found</span>
+                      : (Array.isArray(cveData.cves) ? cveData.cves : []).length > 0
+                      ? <span className="font-semibold text-red-600">{(Array.isArray(cveData.cves) ? cveData.cves : []).length} CVE(s) found</span>
                       : <span className="font-semibold text-green-600">No CVEs found</span>
                     } for {cveData.os_version || displayOsVersion}
                     {cveData.cached && <span className="text-gray-400 ml-1">(cached)</span>}
@@ -865,7 +897,7 @@ function DeviceDetailDrawer({ device, onClose, onEdit }: {
                   <button onClick={() => loadCVEs(true)} className="text-[10px] text-blue-500 hover:underline">Refresh</button>
                 </div>
                 {cveData.error && <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded p-2">{cveData.error}</p>}
-                {cveData.cves.slice(0, 5).map(cve => (
+                {(Array.isArray(cveData.cves) ? cveData.cves : []).slice(0, 5).map(cve => (
                   <div key={cve.cve_id} className="bg-gray-50 border border-gray-200 rounded-lg p-2.5">
                     <div className="flex items-center justify-between mb-1">
                       <a href={cve.url} target="_blank" rel="noopener" className="text-xs font-bold text-blue-600 hover:underline">{cve.cve_id}</a>
@@ -882,8 +914,8 @@ function DeviceDetailDrawer({ device, onClose, onEdit }: {
                     <p className="text-[10px] text-gray-600 line-clamp-2">{cve.description}</p>
                   </div>
                 ))}
-                {cveData.cves.length > 5 && (
-                  <p className="text-xs text-gray-400 text-center">+{cveData.cves.length - 5} more — <a href={`https://nvd.nist.gov/vuln/search/results?query=${device.vendor}+${displayOsVersion}`} target="_blank" rel="noopener" className="text-blue-500 hover:underline">view all on NVD</a></p>
+                {(Array.isArray(cveData.cves) ? cveData.cves : []).length > 5 && (
+                  <p className="text-xs text-gray-400 text-center">+{(Array.isArray(cveData.cves) ? cveData.cves : []).length - 5} more — <a href={`https://nvd.nist.gov/vuln/search/results?query=${device.vendor}+${displayOsVersion}`} target="_blank" rel="noopener" className="text-blue-500 hover:underline">view all on NVD</a></p>
                 )}
               </div>
             )}
@@ -1060,7 +1092,7 @@ function DeviceCard({
           <SyncStatusChip status={device.sync_status} />
           {device.last_sync_at ? (
             <span className="text-xs text-gray-400">
-              {new Date(device.last_sync_at).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}
+              {safeDateTime(device.last_sync_at)}
             </span>
           ) : (
             <span className="text-xs text-gray-400">No sync yet</span>

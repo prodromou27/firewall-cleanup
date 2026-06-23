@@ -1198,7 +1198,7 @@ export function Findings() {
           ) : null}
         />
       ) : (
-        <div className="table-shell table-scroll max-h-[70vh]">
+        <div className="rounded-lg border border-ink-200/80 bg-white shadow-card overflow-auto max-h-[70vh]">
           {/* Bulk action bar */}
           {selected.size > 0 && (
             <div className="flex items-center gap-3 px-4 py-2.5 bg-blue-50 border-b border-blue-200">
@@ -1263,18 +1263,19 @@ export function Findings() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
 
-          {pageCount > 1 && (
-            <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 text-sm bg-gray-50">
-              <span className="text-gray-500">Page {page} of {pageCount} · {total} total</span>
-              <div className="flex gap-2">
-                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-                  className="btn-secondary py-1 px-3 text-xs">← Prev</button>
-                <button onClick={() => setPage(p => Math.min(pageCount, p + 1))} disabled={page === pageCount}
-                  className="btn-secondary py-1 px-3 text-xs">Next →</button>
-              </div>
-            </div>
-          )}
+      {/* Pagination — outside the scroll container so it is always reachable */}
+      {!loading && !error && pageCount > 1 && (
+        <div className="mt-3 flex items-center justify-between rounded-lg border border-ink-200/80 bg-white px-4 py-3 text-sm shadow-card">
+          <span className="text-gray-500">Page {page} of {pageCount} · {total} total</span>
+          <div className="flex gap-2">
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+              className="btn-secondary py-1 px-3 text-xs">← Prev</button>
+            <button onClick={() => setPage(p => Math.min(pageCount, p + 1))} disabled={page === pageCount}
+              className="btn-secondary py-1 px-3 text-xs">Next →</button>
+          </div>
         </div>
       )}
     </div>{/* end page-body */}

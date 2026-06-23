@@ -533,7 +533,24 @@ def _cp_translate(raw: dict) -> dict:
             obj_map[name] = {"type": "range", "value": value, "members": [], "comment": comment}
 
         elif t in ("group", "address-range-group"):
-            members = [resolve(m) for m in obj.get("members", [])]
+            # Member lists vary by CP version/detail-level: list of full objects,
+            # of {name,uid} refs, or of bare uid strings. Resolve all shapes and
+            # fall back to uid/name so members are never silently dropped.
+            raw_members = obj.get("members") or obj.get("member") or []
+            members = []
+            for m in raw_members:
+                rname = resolve(m)
+                if not rname and isinstance(m, dict):
+                    rname = m.get("name") or m.get("uid") or ""
+                if not rname and isinstance(m, str):
+                    rname = m
+                if rname:
+                    members.append(rname)
+            if raw_members and not members:
+                logger.warning("CP group '%s': %d raw members but none resolved (shape=%s)",
+                               name, len(raw_members), type(raw_members[0]).__name__)
+            elif not raw_members:
+                logger.info("CP group '%s' returned no members from the API (details-level/membership)", name)
             obj_map[name] = {"type": "group", "value": None, "members": members, "comment": comment}
 
         elif t == "wildcard":

@@ -589,7 +589,9 @@ class CheckPointConnector:
         objects += self._fetch_typed("show-networks")
         objects += self._fetch_typed("show-address-ranges")
         objects += self._fetch_typed("show-wildcards")
-        objects += self._fetch_typed("show-groups")
+        groups = self._fetch_typed("show-groups")
+        self._enrich_group_members(groups)
+        objects += groups
         # Service objects
         objects += self._fetch_typed("show-services-tcp")
         objects += self._fetch_typed("show-services-udp")
@@ -597,6 +599,36 @@ class CheckPointConnector:
         objects += self._fetch_typed("show-services-other")
         objects += self._fetch_typed("show-service-groups")
         return objects
+
+    def get_group(self, identifier: str, by_uid: bool = True) -> dict:
+        """Fetch a single address group's full membership via show-group.
+
+        show-groups occasionally returns groups without an expanded members list
+        (varies by version / MDS domain). show-group on a single object reliably
+        returns the members array.
+        """
+        key = "uid" if by_uid else "name"
+        try:
+            return self._post_raw("show-group", {key: identifier, "details-level": "full"})
+        except Exception as e:
+            logger.debug("show-group failed for %s=%s: %s", key, identifier, e)
+            return {}
+
+    def _enrich_group_members(self, groups: list[dict]) -> None:
+        """In place: fetch membership for any group whose members came back empty."""
+        enriched = 0
+        for o in groups:
+            if not isinstance(o, dict):
+                continue
+            if o.get("members"):
+                continue
+            uid, name = o.get("uid"), o.get("name")
+            full = self.get_group(uid, by_uid=True) if uid else (self.get_group(name, by_uid=False) if name else {})
+            if full.get("members"):
+                o["members"] = full["members"]
+                enriched += 1
+        if enriched:
+            logger.info("Enriched %d Check Point group(s) with explicit show-group membership", enriched)
 
     # ── Time objects ─────────────────────────────────────────────────────────
 

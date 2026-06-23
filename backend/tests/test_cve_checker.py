@@ -81,6 +81,10 @@ def test_keyword_filter_requires_matching_version_or_train():
     unrelated = {
         "cve": {"descriptions": [{"lang": "en", "value": "Affects Check Point R80.40 gateways."}]}
     }
+    same_major_different_minor = {
+        "cve": {"descriptions": [{"lang": "en", "value": "Affects Check Point R81.10 gateways."}]}
+    }
 
     assert C._keyword_vuln_matches_version(matching, "CheckPoint", "R81.20") is True
     assert C._keyword_vuln_matches_version(unrelated, "CheckPoint", "R81.20") is False
+    assert C._keyword_vuln_matches_version(same_major_different_minor, "CheckPoint", "R81.20") is False

@@ -1430,6 +1430,7 @@ def get_device_version_intelligence(
     only an Informational finding is returned.
     """
     from app.analysis import version_intel
+    from app.analysis.advisory_providers import advisory_sources
     from app.models.version_catalog import VersionCatalogEntry
 
     d = _get_device_authz(device_id, db, user)
@@ -1442,6 +1443,7 @@ def get_device_version_intelligence(
     result = version_intel.analyze_device(d, catalog)
     result["device_name"] = d.name
     result["vendor"] = d.vendor
+    result["advisory_sources"] = advisory_sources(d.vendor, result.get("normalized", {}).get("os_version", ""))
     return result
 
 
@@ -1462,6 +1464,7 @@ def get_device_vulnerabilities(
     """
     d = _get_device_authz(device_id, db, user)
 
+    from app.analysis.advisory_providers import advisory_sources
     from app.analysis.cve_checker import get_device_cves
     from app.analysis.version_intel import resolve_device_os_version
     from app.models.customer import Customer
@@ -1498,6 +1501,7 @@ def get_device_vulnerabilities(
     result["version_source"] = resolved_version["source"]
     result["raw_os_version"] = resolved_version["raw_os_version"]
     result["queryable"]      = resolved_version["queryable"]
+    result["advisory_sources"] = advisory_sources(d.vendor, os_ver or "")
 
     # Add severity summary
     cves = result.get("cves", [])

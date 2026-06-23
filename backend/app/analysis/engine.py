@@ -453,14 +453,12 @@ def _consolidate_findings(findings: List[dict]) -> List[dict]:
         consolidated.append(finding)
 
     if suppressed_summary:
-        for finding in consolidated:
-            evidence = finding.setdefault("evidence", {})
-            evidence.setdefault("consolidated_related_findings", [])
         for suppressed in suppressed_summary:
             target_rules = set(suppressed["affected_rules"])
             for finding in consolidated:
                 if _rule_ids(finding).intersection(target_rules):
-                    finding["evidence"]["consolidated_related_findings"].append(suppressed)
+                    evidence = finding.setdefault("evidence", {})
+                    evidence.setdefault("consolidated_related_findings", []).append(suppressed)
                     break
 
     return consolidated

@@ -43,8 +43,8 @@ scoring, compliance checks, and professional multi-format reporting.
 
 ## Requirements
 
-- Python 3.12
-- Node.js 18+
+- Python 3.12+
+- Node.js 20 LTS+
 - (Production) Docker Engine + Docker Compose v2
 
 ## Production deployment (Docker + PostgreSQL)
@@ -62,6 +62,9 @@ The installer is idempotent: it installs Docker, generates `.env` + secrets,
 opens the firewall, builds, launches, runs `alembic upgrade head`, seeds the
 bootstrap admin, and health-checks the stack. See **[DEPLOY.md](DEPLOY.md)** for
 HTTPS/TLS, the DEV→PROD promotion loop, auto-update, and troubleshooting.
+
+See **[docs/UPGRADE.md](docs/UPGRADE.md)** before changing Python, Node/npm,
+package versions, Docker base images, or production dependencies.
 
 ## Local development
 

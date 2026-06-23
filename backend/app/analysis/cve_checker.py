@@ -267,8 +267,10 @@ def _version_tokens(vendor: str, os_version: str) -> List[str]:
         if not m:
             return []
         version = m.group(0).lower()
-        train = version.split(".")[0]
-        return list(dict.fromkeys([version, train]))
+        # If a minor train is known (for example R81.20), require that exact
+        # train in keyword fallback results. Matching only "R81" is too broad
+        # and can pull unrelated Check Point advisories into the report.
+        return [version]
     if v in ("fortigate", "fortinet", "paloalto", "cisco", "ciscoasa"):
         m = re.search(r"\d+\.\d+(?:[.\d]*)", raw)
         if not m:

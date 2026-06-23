@@ -11,8 +11,9 @@ import {
   getFindings, updateFinding, bulkUpdateFindings, getPolicies, getRemediation, type Remediation,
   addFindingComment, getFindingComments, getFindingsExportUrl,
 } from '../api/client'
-import { SeverityBadge, StatusBadge } from '../components/ui/SeverityBadge'
+import { SeverityBadge, StatusBadge, ConfidenceBadge } from '../components/ui/SeverityBadge'
 import { EmptyState, ErrorState, LoadingState } from '../components/ui/page-state'
+import { DetailDrawer } from '../components/ui/DetailDrawer'
 import { useAuth } from '../contexts/AuthContext'
 import type { Finding, Policy, AffectedRuleData, FindingComment } from '../types'
 import { fetchFailureMessage, friendlyErrorMessage } from '../utils/errors'
@@ -464,7 +465,7 @@ function CommentThread({ findingId }: { findingId: string }) {
           {comments.map(c => (
             <div key={c.id} className="flex gap-2.5">
               <div className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center">
-                <User className="w-3 h-3 text-blue-600" />
+                <User className="w-3 h-3 text-brand-600" />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-0.5">
@@ -631,8 +632,8 @@ function FindingRow({ finding, onUpdate, selected, onSelect }: {
   }
 
   const sevBg: Record<string, string> = {
-    Critical: 'border-l-red-600', High: 'border-l-red-500', Medium: 'border-l-amber-500',
-    Low: 'border-l-sky-500', Informational: 'border-l-slate-300',
+    Critical: 'border-l-red-900', High: 'border-l-red-600', Medium: 'border-l-orange-500',
+    Low: 'border-l-amber-500', Informational: 'border-l-slate-300',
   }
 
   const hasRules = (finding.affected_rules_data?.length ?? 0) > 0
@@ -640,12 +641,12 @@ function FindingRow({ finding, onUpdate, selected, onSelect }: {
   return (
     <>
       <tr
-        className={`border-l-4 ${sevBg[finding.severity] || 'border-l-gray-200'} hover:bg-gray-50 cursor-pointer transition-colors ${selected ? 'bg-blue-50' : ''}`}
+        className={`border-l-4 ${sevBg[finding.severity] || 'border-l-gray-200'} hover:bg-ink-50 cursor-pointer transition-colors ${selected ? 'bg-brand-50' : ''}`}
         onClick={() => setExpanded(!expanded)}
       >
         <td className="px-2 py-3 w-8" onClick={e => { e.stopPropagation(); onSelect(finding.id, !selected) }}>
           {selected
-            ? <CheckSquare className="w-4 h-4 text-blue-600" />
+            ? <CheckSquare className="w-4 h-4 text-brand-600" />
             : <Square className="w-4 h-4 text-gray-300 hover:text-gray-500" />}
         </td>
         <td className="px-4 py-3"><SeverityBadge severity={finding.severity} size="sm" /></td>
@@ -681,7 +682,7 @@ function FindingRow({ finding, onUpdate, selected, onSelect }: {
         <td className="px-4 py-3 text-gray-300 text-xs">
           <div className="flex items-center gap-1">
             {hasRules && (
-              <span className="text-xs text-blue-400 font-medium">
+              <span className="text-xs text-info-500 font-medium">
                 {finding.affected_rules_data!.length} rule{finding.affected_rules_data!.length !== 1 ? 's' : ''}
               </span>
             )}
@@ -691,9 +692,15 @@ function FindingRow({ finding, onUpdate, selected, onSelect }: {
       </tr>
 
       {expanded && (
-        <tr>
-          <td colSpan={8} className="bg-gray-50 border-b border-gray-200 px-4 pb-5">
-            <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-5 mt-1 shadow-sm">
+        <DetailDrawer
+          open
+          onClose={() => setExpanded(false)}
+          width="xl"
+          title={finding.title}
+          subtitle={FINDING_TYPES[finding.finding_type] || finding.finding_type}
+          badges={<><SeverityBadge severity={finding.severity} size="sm" /><StatusBadge status={finding.status} /><ConfidenceBadge confidence={finding.confidence || 'Medium'} /></>}
+        >
+          <div className="space-y-5">
 
               {/* Description */}
               <div>
@@ -871,9 +878,8 @@ function FindingRow({ finding, onUpdate, selected, onSelect }: {
                 <CommentThread findingId={finding.id} />
               </div>
 
-            </div>
-          </td>
-        </tr>
+          </div>
+        </DetailDrawer>
       )}
     </>
   )
@@ -1239,7 +1245,7 @@ export function Findings() {
                 <th className="px-2 py-3 w-8">
                   <button onClick={toggleAll} className="flex items-center">
                     {selected.size === findings.length && findings.length > 0
-                      ? <CheckSquare className="w-4 h-4 text-blue-600" />
+                      ? <CheckSquare className="w-4 h-4 text-brand-600" />
                       : <Square className="w-4 h-4 text-gray-300" />}
                   </button>
                 </th>

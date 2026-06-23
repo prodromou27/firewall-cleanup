@@ -81,10 +81,10 @@ function CleanupRow({ icon: Icon, label, count, max, to }: {
 /* ── Severity block ──────────────────────────────────────── */
 function SevBlock({ severity, count, to }: { severity: string; count: number; to: string }) {
   const cfg: Record<string, string> = {
-    Critical: 'bg-red-600 border-red-700 text-white',
-    High: 'bg-red-50 border-red-100 text-red-700',
-    Medium: 'bg-amber-50 border-amber-100 text-amber-700',
-    Low: 'bg-sky-50 border-sky-100 text-sky-700',
+    Critical: 'bg-red-900 border-red-950 text-white shadow-sm',
+    High: 'bg-red-600 border-red-700 text-white',
+    Medium: 'bg-orange-50 border-orange-200 text-orange-700',
+    Low: 'bg-amber-50 border-amber-200 text-amber-700',
     Informational: 'bg-slate-50 border-slate-200 text-slate-500',
   }
   return (
@@ -151,7 +151,7 @@ function RiskHeatmap({ data, showCustomer }: { data: RiskHeatmapEntry[]; showCus
                 </td>
                 <td className="py-2.5 text-right">
                   <Link to={`/findings?policy_id=${e.policy_id}`}
-                    className="text-[11px] text-blue-600 hover:text-blue-800 font-medium inline-flex items-center gap-1">
+                    className="text-[11px] text-brand-600 hover:text-brand-700 font-medium inline-flex items-center gap-1">
                     View <ArrowRight className="w-3 h-3" />
                   </Link>
                 </td>
@@ -358,7 +358,7 @@ export function Dashboard() {
           <div className="card">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-semibold text-gray-900">Findings by Severity</h2>
-              <Link to={`/findings${filterBase}`} className="text-xs text-blue-600 hover:text-blue-800 font-medium">View all</Link>
+              <Link to={`/findings${filterBase}`} className="text-xs text-brand-600 hover:text-brand-700 font-medium">View all</Link>
             </div>
             <div className="grid grid-cols-2 gap-2 mb-4">
               {['Critical','High','Medium','Low','Informational'].map(sev => (

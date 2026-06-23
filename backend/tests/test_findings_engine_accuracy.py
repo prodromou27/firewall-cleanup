@@ -3,8 +3,10 @@
 from app.analysis.duplicate_detector import detect_duplicates
 from app.analysis.engine import (
     _analyze_empty_groups,
+    _analyze_exposed_services,
     _analyze_permissive,
     _analyze_risky_services,
+    _consolidate_findings,
     _analyze_unused_objects,
     _analyze_usage,
 )
@@ -155,3 +157,16 @@ def test_empty_groups_include_customer_groups_and_suppress_vendor_builtins():
     assert findings[0]["finding_type"] == "empty_group"
     assert findings[0]["evidence"]["object_name"] == "CustomerEmpty"
     _assert_quality(findings)
+
+
+def test_consolidation_suppresses_generic_risky_service_when_specific_exposure_exists():
+    rule = _rule(1, sources=["any"], destinations=["10.0.0.10/32"], services=["tcp/3389"])
+    findings = _analyze_risky_services([rule], {}) + _analyze_exposed_services([rule], {})
+
+    consolidated = _consolidate_findings(findings)
+    types = {f["finding_type"] for f in consolidated}
+
+    assert "rdp_exposed" in types
+    assert "risky_service" not in types
+    rdp = [f for f in consolidated if f["finding_type"] == "rdp_exposed"][0]
+    assert rdp["evidence"]["consolidated_related_findings"][0]["finding_type"] == "risky_service"

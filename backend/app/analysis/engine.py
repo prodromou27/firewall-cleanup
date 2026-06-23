@@ -181,6 +181,8 @@ def run_analysis(policy_id: str, db: Session) -> str:
         # 21. Import quality summary (parse completeness, hit-data availability)
         findings.extend(_analyze_import_quality(rules, objects, policy))
 
+        findings = _consolidate_findings(findings)
+
         # Save findings
         finding_count = 0
         high_count = 0
@@ -365,6 +367,103 @@ def _obj_to_dict(o: FirewallObject) -> dict:
         "members": o.members or [],
         "raw_data": o.raw_data or {},
     }
+
+
+_SEVERITY_RANK = {"Informational": 0, "Low": 1, "Medium": 2, "High": 3, "Critical": 4}
+
+
+def _finding_scope_key(finding: dict) -> tuple:
+    return (
+        finding.get("finding_type"),
+        tuple(sorted(finding.get("affected_rules") or [])),
+        tuple(sorted(finding.get("affected_objects") or [])),
+        json.dumps(finding.get("evidence") or {}, sort_keys=True, default=str),
+    )
+
+
+def _rule_ids(finding: dict) -> set:
+    return {r for r in finding.get("affected_rules") or [] if r}
+
+
+def _consolidate_findings(findings: List[dict]) -> List[dict]:
+    """Reduce duplicate/overlapping findings before customer-facing persistence.
+
+    Detectors intentionally stay independent. This pass removes exact duplicates
+    and suppresses generic findings when a more specific finding on the same
+    rule already explains the risk.
+    """
+    deduped: Dict[tuple, dict] = {}
+    for finding in findings:
+        key = _finding_scope_key(finding)
+        current = deduped.get(key)
+        if not current:
+            deduped[key] = finding
+            continue
+        if _SEVERITY_RANK.get(finding.get("severity", "Informational"), 0) > _SEVERITY_RANK.get(current.get("severity", "Informational"), 0):
+            deduped[key] = finding
+
+    items = list(deduped.values())
+    specific_by_rule: Dict[str, set] = {}
+    for finding in items:
+        ftype = finding.get("finding_type")
+        if ftype in {
+            "rdp_exposed",
+            "ssh_exposed",
+            "database_exposed",
+            "cleartext_service",
+            "any_to_any_allow",
+            "shadowed_rule",
+            "duplicate_rule",
+        }:
+            for rid in _rule_ids(finding):
+                specific_by_rule.setdefault(rid, set()).add(ftype)
+
+    consolidated = []
+    suppressed_summary = []
+    for finding in items:
+        ftype = finding.get("finding_type")
+        rules = _rule_ids(finding)
+        suppress = False
+        reason = ""
+        for rid in rules:
+            specifics = specific_by_rule.get(rid, set())
+            if ftype == "risky_service" and specifics.intersection({"rdp_exposed", "ssh_exposed", "database_exposed", "cleartext_service"}):
+                suppress = True
+                reason = "covered_by_specific_service_exposure"
+                break
+            if ftype == "inbound_from_internet" and specifics.intersection({"rdp_exposed", "ssh_exposed", "database_exposed", "any_to_any_allow"}):
+                suppress = True
+                reason = "covered_by_specific_inbound_exposure"
+                break
+            if ftype in {"zero_hit_rule", "low_usage_rule"} and "shadowed_rule" in specifics:
+                suppress = True
+                reason = "covered_by_shadowed_rule"
+                break
+            if ftype == "mergeable_rules" and "duplicate_rule" in specifics:
+                suppress = True
+                reason = "covered_by_duplicate_rule"
+                break
+        if suppress:
+            suppressed_summary.append({
+                "finding_type": ftype,
+                "affected_rules": sorted(rules),
+                "reason": reason,
+            })
+            continue
+        consolidated.append(finding)
+
+    if suppressed_summary:
+        for finding in consolidated:
+            evidence = finding.setdefault("evidence", {})
+            evidence.setdefault("consolidated_related_findings", [])
+        for suppressed in suppressed_summary:
+            target_rules = set(suppressed["affected_rules"])
+            for finding in consolidated:
+                if _rule_ids(finding).intersection(target_rules):
+                    finding["evidence"]["consolidated_related_findings"].append(suppressed)
+                    break
+
+    return consolidated
 
 
 

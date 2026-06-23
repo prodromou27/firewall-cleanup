@@ -19,6 +19,7 @@ SAFETY: Read-only API calls. No configuration is modified.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
@@ -236,6 +237,136 @@ def _query_nvd(cpe_string: str, nvd_api_key: Optional[str] = None):
 
 # ── DB-cached lookup ──────────────────────────────────────────────────────────
 
+def keyword_queries(vendor: str, os_version: str) -> List[str]:
+    """Fallback NVD keyword searches for vendors with inconsistent CPE naming."""
+    v = vendor.lower()
+    if v == "checkpoint":
+        return [
+            "Check Point Quantum Security Gateway",
+            "Check Point Security Gateway",
+            "Check Point Gaia",
+        ]
+    if v in ("fortigate", "fortinet"):
+        return ["Fortinet FortiOS"]
+    if v == "paloalto":
+        return ["Palo Alto PAN-OS"]
+    if v in ("cisco", "ciscoasa"):
+        return ["Cisco Adaptive Security Appliance"]
+    if v in ("huawei", "huaweiusg", "huawei_usg"):
+        return ["Huawei USG firewall"]
+    return []
+
+
+def _version_tokens(vendor: str, os_version: str) -> List[str]:
+    raw = (os_version or "").strip()
+    if not raw:
+        return []
+    v = vendor.lower()
+    if v == "checkpoint":
+        m = re.search(r"[Rr]\d+(?:\.\d+)?", raw)
+        if not m:
+            return []
+        version = m.group(0).lower()
+        train = version.split(".")[0]
+        return list(dict.fromkeys([version, train]))
+    if v in ("fortigate", "fortinet", "paloalto", "cisco", "ciscoasa"):
+        m = re.search(r"\d+\.\d+(?:[.\d]*)", raw)
+        if not m:
+            return []
+        version = m.group(0).lower()
+        train = ".".join(version.split(".")[:2])
+        return list(dict.fromkeys([version, train]))
+    if v in ("huawei", "huaweiusg", "huawei_usg"):
+        m = re.search(r"V\d+R\d+[A-Z0-9]*", raw, re.IGNORECASE)
+        return [m.group(0).lower()] if m else []
+    return [raw.lower()]
+
+
+def _keyword_vuln_matches_version(vuln: dict, vendor: str, os_version: str) -> bool:
+    tokens = _version_tokens(vendor, os_version)
+    if not tokens:
+        return False
+    haystack = json.dumps(vuln, default=str).lower()
+    return any(token in haystack for token in tokens)
+
+
+def _query_nvd_keyword(query: str, vendor: str, os_version: str, nvd_api_key: Optional[str] = None):
+    """Query NVD by keyword as a fallback when exact CPE names miss advisories."""
+    global _query_nvd_error
+    _query_nvd_error = None
+    try:
+        import httpx
+    except ImportError:
+        logger.warning("httpx not installed - CVE lookup unavailable. Run: pip install httpx")
+        _query_nvd_error = "CVE lookup dependency (httpx) is not installed on the server."
+        return None
+
+    headers: dict = {}
+    if nvd_api_key:
+        headers["apiKey"] = nvd_api_key
+
+    params = {
+        "keywordSearch": query,
+        "resultsPerPage": MAX_RESULTS,
+        "startIndex": 0,
+        "noRejected": "",
+    }
+
+    try:
+        time.sleep(0.7)
+        with httpx.Client(timeout=15) as client:
+            resp = client.get(NVD_API_BASE, params=params, headers=headers)
+            if resp.status_code == 403:
+                _query_nvd_error = (
+                    "NVD rate-limited the request (HTTP 403). Configure an NVD API "
+                    "key or retry shortly."
+                )
+                return None
+            if resp.status_code != 200:
+                _query_nvd_error = f"NVD API returned HTTP {resp.status_code}."
+                return None
+            data = resp.json()
+    except Exception as exc:
+        _query_nvd_error = (
+            f"Could not reach the NVD API ({exc.__class__.__name__}). The server may "
+            "have no outbound internet access to services.nvd.nist.gov."
+        )
+        return None
+
+    results = []
+    for vuln in data.get("vulnerabilities", []):
+        if not _keyword_vuln_matches_version(vuln, vendor, os_version):
+            continue
+        cve_data = vuln.get("cve", {})
+        cve_id = cve_data.get("id", "")
+        descs = cve_data.get("descriptions", [])
+        desc = next((d["value"] for d in descs if d.get("lang") == "en"), "")
+        metrics = cve_data.get("metrics", {})
+        cvss_score = None
+        cvss_severity = "Unknown"
+        cvss_vector = None
+        for metric_key in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
+            if metric_key in metrics:
+                m = metrics[metric_key][0].get("cvssData", {})
+                cvss_score = m.get("baseScore")
+                cvss_severity = m.get("baseSeverity", metrics[metric_key][0].get("baseSeverity", "Unknown"))
+                cvss_vector = m.get("vectorString")
+                break
+        results.append({
+            "cve_id": cve_id,
+            "description": desc[:500] if desc else "",
+            "cvss_score": cvss_score,
+            "cvss_severity": cvss_severity.upper() if cvss_severity else "UNKNOWN",
+            "cvss_vector": cvss_vector,
+            "published": cve_data.get("published", ""),
+            "last_modified": cve_data.get("lastModified", ""),
+            "url": f"https://nvd.nist.gov/vuln/detail/{cve_id}",
+            "cpe": f"keyword:{query}",
+            "match_source": "keyword",
+        })
+    return results
+
+
 def get_device_cves(
     device_id: str,
     vendor: str,
@@ -284,6 +415,7 @@ def get_device_cves(
                     "cached":      True,
                     "last_checked": cached.last_checked.isoformat() if cached.last_checked else None,
                     "error":       None,
+                    "lookup_method": "cache",
                 }
 
     # No cache — query NVD
@@ -307,14 +439,28 @@ def get_device_cves(
     merged: dict = {}
     any_ok = False
     last_err = None
+    lookup_methods = []
     for c in cpes:
         part = _query_nvd(c, nvd_api_key)
         if part is None:
             last_err = _query_nvd_error
             continue
         any_ok = True
+        lookup_methods.append("cpe")
         for item in part:
             merged.setdefault(item.get("cve_id"), item)
+
+    if not merged:
+        for query in keyword_queries(vendor, os_version or ""):
+            part = _query_nvd_keyword(query, vendor, os_version or "", nvd_api_key)
+            if part is None:
+                last_err = _query_nvd_error
+                continue
+            any_ok = True
+            lookup_methods.append("keyword")
+            for item in part:
+                merged.setdefault(item.get("cve_id"), item)
+
     raw   = list(merged.values()) if any_ok else None
     error = None if raw is not None else (last_err or "NVD API unavailable.")
     cves  = raw or []
@@ -350,4 +496,5 @@ def get_device_cves(
         "cached":      False,
         "last_checked": datetime.utcnow().isoformat(),
         "error":       error,
+        "lookup_method": "+".join(dict.fromkeys(lookup_methods)) if lookup_methods else None,
     }

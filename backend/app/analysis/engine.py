@@ -1,9 +1,9 @@
 """Main analysis engine — orchestrates all analyzers."""
 from typing import List, Dict, Any
 from datetime import datetime, timedelta
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
-from app.models.policy import FirewallPolicy, FirewallRule, FirewallObject, AnalysisRun
+from app.models.policy import FirewallPolicy, FirewallRule, FirewallObject, ObjectMember, AnalysisRun
 from app.models.finding import Finding, FindingComment
 from app.analysis.normalizer import (
     build_object_map, expand_rule_sources, expand_rule_destinations,
@@ -57,6 +57,9 @@ def run_analysis(policy_id: str, db: Session) -> str:
         )
         objects_orm = (
             db.query(FirewallObject)
+            .options(
+                selectinload(FirewallObject.member_entries).selectinload(ObjectMember.member)
+            )
             .filter(FirewallObject.policy_id == policy_id)
             .all()
         )
@@ -177,7 +180,7 @@ def run_analysis(policy_id: str, db: Session) -> str:
         findings.extend(_analyze_broad_networks(objects))
 
         # 20. Service objects with large port ranges
-        findings.extend(_analyze_service_ranges(objects))
+        findings.extend(_analyze_service_ranges(objects, rules, obj_map))
 
         # 21. Import quality summary (parse completeness, hit-data availability)
         findings.extend(_analyze_import_quality(rules, objects, policy))
@@ -337,12 +340,12 @@ def _rule_to_dict(r: FirewallRule) -> dict:
         "rule_number": r.rule_number,
         "rule_name": r.rule_name,
         "section": r.section,
-        "source_interfaces": r.source_interfaces or [],
-        "destination_interfaces": r.destination_interfaces or [],
-        "sources": r.sources or [],
-        "destinations": r.destinations or [],
-        "services": r.services or [],
-        "applications": r.applications or [],
+        "source_interfaces": _json_list(r.source_interfaces),
+        "destination_interfaces": _json_list(r.destination_interfaces),
+        "sources": _json_list(r.sources),
+        "destinations": _json_list(r.destinations),
+        "services": _json_list(r.services),
+        "applications": _json_list(r.applications),
         "action": r.action,
         "schedule": r.schedule,
         "enabled": r.enabled,
@@ -355,7 +358,42 @@ def _rule_to_dict(r: FirewallRule) -> dict:
     }
 
 
+def _json_list(value) -> list:
+    """Return a list from native JSON columns or legacy json.dumps strings."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+        except (TypeError, ValueError):
+            return [text]
+        if isinstance(parsed, list):
+            return parsed
+        if parsed in (None, ""):
+            return []
+        return [parsed]
+    return [value]
+
+
 def _obj_to_dict(o: FirewallObject) -> dict:
+    members = list(o.members or [])
+    for entry in o.member_entries or []:
+        if entry.member_name:
+            members.append(entry.member_name)
+        if entry.member:
+            if entry.member.object_name:
+                members.append(entry.member.object_name)
+            if entry.member.object_uid:
+                members.append(entry.member.object_uid)
+    members = list(dict.fromkeys(str(m).strip() for m in members if str(m or "").strip()))
+
     return {
         "id": o.id,
         "vendor": o.vendor,
@@ -366,7 +404,7 @@ def _obj_to_dict(o: FirewallObject) -> dict:
         "protocol": o.protocol,
         "port_start": o.port_start,
         "port_end": o.port_end,
-        "members": o.members or [],
+        "members": members,
         "raw_data": o.raw_data or {},
     }
 
@@ -1985,11 +2023,74 @@ def _is_cp_predefined(name: str) -> bool:
     return False
 
 
-def _analyze_service_ranges(objects: List[dict]) -> List[dict]:
-    """Detect service objects that span large port ranges."""
+def _used_service_aliases(rules: List[dict], obj_map: Dict[str, dict]) -> set[str]:
+    used: set[str] = set()
+
+    def collect(ref, visited: set[str]) -> None:
+        name = _ref_name(ref)
+        if not name or name.lower() == "any" or name in visited:
+            return
+        visited.add(name)
+        used.add(name)
+        obj = obj_map.get(name)
+        if not obj:
+            return
+        used.update(_object_aliases(obj))
+        if _is_group_object(obj):
+            for member in _member_refs(obj):
+                collect(member, visited)
+
+    for rule in rules or []:
+        for service in rule.get("services", []) or []:
+            collect(service, set())
+    return used
+
+
+def _port_expr_large_span(obj: dict, fallback_span: int) -> int:
+    """Return the largest explicit port span, preserving discrete CP port lists.
+
+    Check Point service objects may use comma-separated destination ports such
+    as "80,443". The normalized database shape can only store one start/end
+    pair, so using 80-443 would incorrectly report a wide continuous range.
+    """
+    raw = obj.get("raw_data") or {}
+    port_expr = raw.get("port") if isinstance(raw, dict) else None
+    if not isinstance(port_expr, str) or "," not in port_expr:
+        return fallback_span
+
+    largest = 0
+    for part in port_expr.split(","):
+        text = part.strip()
+        if not text:
+            continue
+        if "-" in text:
+            lo, hi = text.split("-", 1)
+            try:
+                largest = max(largest, int(hi.strip()) - int(lo.strip()))
+            except ValueError:
+                return fallback_span
+            continue
+        try:
+            int(text)
+        except ValueError:
+            return fallback_span
+    return largest
+
+
+def _analyze_service_ranges(
+    objects: List[dict],
+    rules: List[dict] | None = None,
+    obj_map: Dict[str, dict] | None = None,
+) -> List[dict]:
+    """Detect used service objects that span large continuous port ranges."""
     findings = []
+    used_services = None
+    if rules is not None:
+        used_services = _used_service_aliases(rules, obj_map or build_object_map(objects))
     for obj in objects:
         if not _is_service_object(obj):
+            continue
+        if used_services is not None and not (_object_aliases(obj) & used_services):
             continue
         # Skip vendor built-in services; customers cannot modify them.
         if _is_vendor_builtin_object(obj):
@@ -1998,7 +2099,7 @@ def _analyze_service_ranges(objects: List[dict]) -> List[dict]:
         end = obj.get("port_end")
         if start is None or end is None:
             continue
-        span = int(end) - int(start)
+        span = _port_expr_large_span(obj, int(end) - int(start))
         if span >= _LARGE_PORT_RANGE:
             findings.append({
                 "finding_type": "service_range",

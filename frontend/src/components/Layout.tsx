@@ -1,5 +1,6 @@
 ﻿import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useState, useRef } from 'react'
+import type React from 'react'
 import { clsx } from 'clsx'
 import {
   LayoutDashboard, Users, Upload, List, AlertTriangle,

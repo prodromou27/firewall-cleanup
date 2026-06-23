@@ -772,10 +772,24 @@ def _cp_logging(track) -> bool:
 
 def _parse_port_range(port_str: str) -> tuple[int, int]:
     s = str(port_str).strip()
+    if "," in s:
+        bounds = [_parse_port_range(part) for part in s.split(",") if part.strip()]
+        if bounds:
+            return min(lo for lo, _ in bounds), max(hi for _, hi in bounds)
     if "-" in s:
         parts = s.split("-", 1)
         try:
             return int(parts[0] or 0), int(parts[1] or 65535)
+        except ValueError:
+            pass
+    if s.startswith(">"):
+        try:
+            return int(s[1:].strip()) + 1, 65535
+        except ValueError:
+            pass
+    if s.startswith("<"):
+        try:
+            return 0, int(s[1:].strip()) - 1
         except ValueError:
             pass
     try:
@@ -823,6 +837,7 @@ def _write_to_db(parsed: dict, policy: FirewallPolicy, db: Session):
             protocol=obj.get("protocol"),
             port_start=obj.get("port_start"),
             port_end=obj.get("port_end"),
+            members=members,
             comment=str(obj.get("comment", "") or ""),
             raw_data=redact_secrets(raw_data),
         )
@@ -840,19 +855,19 @@ def _write_to_db(parsed: dict, policy: FirewallPolicy, db: Session):
             rule_name=r.get("rule_name", ""),
             section=r.get("section", ""),
             rule_number=seq + 1,
-            source_interfaces=json.dumps(r.get("source_interfaces", [])),
-            destination_interfaces=json.dumps(r.get("destination_interfaces", [])),
-            sources=json.dumps(r.get("sources", [])),
-            destinations=json.dumps(r.get("destinations", [])),
-            services=json.dumps(r.get("services", [])),
-            applications=json.dumps(r.get("applications", [])),
+            source_interfaces=r.get("source_interfaces", []),
+            destination_interfaces=r.get("destination_interfaces", []),
+            sources=r.get("sources", []),
+            destinations=r.get("destinations", []),
+            services=r.get("services", []),
+            applications=r.get("applications", []),
             action=r.get("action", "accept"),
             schedule=r.get("schedule", "always"),
             enabled=r.get("enabled", True),
             logging_enabled=r.get("logging_enabled", False),
             nat_enabled=r.get("nat_enabled", False),
             comments=r.get("comments", ""),
-            hit_count=r.get("hit_count", 0),
+            hit_count=r.get("hit_count"),
             last_hit=r.get("last_hit"),
             first_hit=r.get("first_hit"),
         )

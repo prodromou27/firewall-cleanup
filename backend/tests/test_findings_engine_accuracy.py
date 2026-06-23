@@ -6,9 +6,12 @@ from app.analysis.engine import (
     _analyze_exposed_services,
     _analyze_permissive,
     _analyze_risky_services,
+    _analyze_service_ranges,
     _consolidate_findings,
     _analyze_unused_objects,
     _analyze_usage,
+    _obj_to_dict,
+    _rule_to_dict,
 )
 from app.analysis.normalizer import build_object_map
 from app.analysis.shadow_detector import detect_shadows
@@ -189,6 +192,121 @@ def test_checkpoint_raw_group_members_prevent_empty_group_false_positive():
 
     names = {f["evidence"]["object_name"] for f in findings}
     assert names == {"TrulyEmpty"}
+
+
+def test_db_object_member_entries_prevent_unused_member_false_positive():
+    class DbObject:
+        id = "obj-db-group"
+        vendor = "CheckPoint"
+        object_uid = "uid-group"
+        object_name = "DB-Group"
+        object_type = "address_group"
+        value = ""
+        protocol = None
+        port_start = None
+        port_end = None
+        members = []
+        raw_data = {}
+
+    class DbMember:
+        object_name = "DB-Host"
+        object_uid = "uid-host"
+
+    class DbEntry:
+        member_name = "DB-Host"
+        member = DbMember()
+
+    db_group = DbObject()
+    db_group.member_entries = [DbEntry()]
+
+    objects = [
+        _obj_to_dict(db_group),
+        _object("DB-Host", "host", "10.20.30.40/32", [], object_uid="uid-host"),
+        _object("Orphan", "host", "10.20.30.99/32", [], object_uid="uid-orphan"),
+    ]
+    obj_map = build_object_map(objects)
+
+    findings = _analyze_unused_objects([_rule(1, sources=["DB-Group"])], objects, obj_map)
+
+    names = {f["evidence"]["object_name"] for f in findings}
+    assert names == {"Orphan"}
+
+
+def test_legacy_json_string_rule_refs_still_mark_group_members_used():
+    class DbRule:
+        id = "rule-db"
+        rule_id = "1"
+        rule_uid = "uid-rule"
+        rule_number = 1
+        rule_name = "Legacy synced rule"
+        section = ""
+        source_interfaces = "[]"
+        destination_interfaces = "[]"
+        sources = '["CP-Group"]'
+        destinations = '["any"]'
+        services = '["Any"]'
+        applications = "[]"
+        action = "accept"
+        schedule = "Any"
+        enabled = True
+        logging_enabled = True
+        nat_enabled = False
+        comments = ""
+        hit_count = None
+        last_hit = None
+        first_hit = None
+
+    objects = [
+        _object("CP-Group", "address_group", "", ["CP-Host"], object_uid="uid-group"),
+        _object("CP-Host", "host", "10.10.10.10/32", [], object_uid="uid-host"),
+        _object("Orphan", "host", "10.10.10.99/32", [], object_uid="uid-orphan"),
+    ]
+
+    findings = _analyze_unused_objects([_rule_to_dict(DbRule())], objects, build_object_map(objects))
+
+    names = {f["evidence"]["object_name"] for f in findings}
+    assert names == {"Orphan"}
+
+
+def test_checkpoint_discrete_port_list_is_not_reported_as_wide_range():
+    objects = [
+        _object(
+            "CP-Web-Ports",
+            "service",
+            "tcp/80-443",
+            [],
+            protocol="tcp",
+            port_start=80,
+            port_end=443,
+            raw_data={"type": "service-tcp", "port": "80,443"},
+        ),
+        _object(
+            "CP-Wide-Used",
+            "service",
+            "tcp/2000-4000",
+            [],
+            protocol="tcp",
+            port_start=2000,
+            port_end=4000,
+            raw_data={"type": "service-tcp", "port": "2000-4000"},
+        ),
+        _object(
+            "CP-Wide-Unused",
+            "service",
+            "tcp/10000-20000",
+            [],
+            protocol="tcp",
+            port_start=10000,
+            port_end=20000,
+            raw_data={"type": "service-tcp", "port": "10000-20000"},
+        ),
+    ]
+    rules = [_rule(1, services=["CP-Web-Ports", "CP-Wide-Used"])]
+
+    findings = _analyze_service_ranges(objects, rules, build_object_map(objects))
+
+    names = {f["evidence"]["object_name"] for f in findings}
+    assert names == {"CP-Wide-Used"}
 
 
 def test_consolidation_suppresses_generic_risky_service_when_specific_exposure_exists():

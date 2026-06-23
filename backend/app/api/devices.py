@@ -1430,7 +1430,7 @@ def get_device_version_intelligence(
     only an Informational finding is returned.
     """
     from app.analysis import version_intel
-    from app.analysis.advisory_providers import advisory_sources
+    from app.analysis.advisory_providers import collect_advisory_context
     from app.models.version_catalog import VersionCatalogEntry
 
     d = _get_device_authz(device_id, db, user)
@@ -1443,7 +1443,9 @@ def get_device_version_intelligence(
     result = version_intel.analyze_device(d, catalog)
     result["device_name"] = d.name
     result["vendor"] = d.vendor
-    result["advisory_sources"] = advisory_sources(d.vendor, result.get("normalized", {}).get("os_version", ""))
+    advisory_context = collect_advisory_context(d.vendor, result.get("normalized", {}).get("os_version", ""))
+    result["advisory_sources"] = advisory_context["sources"]
+    result["advisory_context"] = advisory_context
     return result
 
 
@@ -1464,7 +1466,7 @@ def get_device_vulnerabilities(
     """
     d = _get_device_authz(device_id, db, user)
 
-    from app.analysis.advisory_providers import advisory_sources
+    from app.analysis.advisory_providers import collect_advisory_context
     from app.analysis.cve_checker import get_device_cves
     from app.analysis.version_intel import resolve_device_os_version
     from app.models.customer import Customer
@@ -1501,7 +1503,10 @@ def get_device_vulnerabilities(
     result["version_source"] = resolved_version["source"]
     result["raw_os_version"] = resolved_version["raw_os_version"]
     result["queryable"]      = resolved_version["queryable"]
-    result["advisory_sources"] = advisory_sources(d.vendor, os_ver or "")
+    cve_ids = [c.get("cve_id") for c in result.get("cves", []) if c.get("cve_id")]
+    advisory_context = collect_advisory_context(d.vendor, os_ver or "", cve_ids=cve_ids)
+    result["advisory_sources"] = advisory_context["sources"]
+    result["advisory_context"] = advisory_context
 
     # Add severity summary
     cves = result.get("cves", [])

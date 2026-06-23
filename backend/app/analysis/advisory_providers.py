@@ -9,7 +9,8 @@ release-note retrieval.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import List
+from datetime import datetime, timezone
+from typing import Callable, Iterable, List, Optional
 from urllib.parse import quote_plus
 
 
@@ -24,6 +25,147 @@ class AdvisorySource:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class AdvisoryRecord:
+    provider: str
+    source_type: str
+    title: str
+    url: str
+    cve_id: Optional[str] = None
+    severity: Optional[str] = None
+    published: Optional[str] = None
+    updated: Optional[str] = None
+    known_exploited: bool = False
+    notes: str = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class ProviderResult:
+    provider: str
+    status: str
+    machine_readable: bool
+    fetched_at: Optional[str]
+    source: AdvisorySource
+    records: List[AdvisoryRecord]
+    error: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["source"] = self.source.to_dict()
+        data["records"] = [r.to_dict() for r in self.records]
+        return data
+
+
+HttpGet = Callable[[str], object]
+
+
+class AdvisoryProvider:
+    """Base class for advisory sources.
+
+    Providers are deliberately read-only. A provider may be a simple reference
+    link, or it may fetch a machine-readable public feed when explicitly asked.
+    """
+
+    source: AdvisorySource
+
+    def __init__(self, source: AdvisorySource):
+        self.source = source
+
+    @property
+    def name(self) -> str:
+        return self.source.provider
+
+    def fetch(self, *, vendor: str, os_version: str = "", cve_ids: Optional[Iterable[str]] = None,
+              http_get: Optional[HttpGet] = None) -> ProviderResult:
+        return ProviderResult(
+            provider=self.name,
+            status="reference_only",
+            machine_readable=self.source.machine_readable,
+            fetched_at=None,
+            source=self.source,
+            records=[],
+            error=None,
+        )
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _http_json(url: str, http_get: Optional[HttpGet]) -> dict:
+    if http_get is None:
+        try:
+            import httpx
+        except ImportError as exc:
+            raise RuntimeError("httpx is not installed") from exc
+        with httpx.Client(timeout=15) as client:
+            resp = client.get(url)
+            resp.raise_for_status()
+            return resp.json()
+    response = http_get(url)
+    if isinstance(response, dict):
+        return response
+    if hasattr(response, "json"):
+        return response.json()
+    raise RuntimeError("http_get must return a dict or an object with json()")
+
+
+class NvdReferenceProvider(AdvisoryProvider):
+    """NVD CVE lookup is handled by cve_checker; this provider advertises source metadata."""
+
+
+class CisaKevProvider(AdvisoryProvider):
+    """Fetch CISA KEV and filter by CVE IDs when provided."""
+
+    def fetch(self, *, vendor: str, os_version: str = "", cve_ids: Optional[Iterable[str]] = None,
+              http_get: Optional[HttpGet] = None) -> ProviderResult:
+        target_ids = {c.upper() for c in (cve_ids or []) if c}
+        try:
+            data = _http_json(self.source.url, http_get)
+            records = []
+            for item in data.get("vulnerabilities", []):
+                cve = (item.get("cveID") or item.get("cve_id") or "").upper()
+                if target_ids and cve not in target_ids:
+                    continue
+                records.append(AdvisoryRecord(
+                    provider=self.name,
+                    source_type=self.source.source_type,
+                    title=item.get("vulnerabilityName") or cve or "Known exploited vulnerability",
+                    url=item.get("notes") or self.source.url,
+                    cve_id=cve or None,
+                    severity=None,
+                    published=item.get("dateAdded"),
+                    updated=item.get("dueDate"),
+                    known_exploited=True,
+                    notes=item.get("shortDescription") or "",
+                ))
+            return ProviderResult(
+                provider=self.name,
+                status="ok",
+                machine_readable=True,
+                fetched_at=_now_iso(),
+                source=self.source,
+                records=records,
+            )
+        except Exception as exc:
+            return ProviderResult(
+                provider=self.name,
+                status="error",
+                machine_readable=True,
+                fetched_at=_now_iso(),
+                source=self.source,
+                records=[],
+                error=str(exc),
+            )
+
+
+class VendorReferenceProvider(AdvisoryProvider):
+    """Reference-only vendor provider for human verification links."""
 
 
 def _nvd_query(vendor: str, os_version: str) -> str:
@@ -170,3 +312,68 @@ def advisory_sources(vendor: str, os_version: str = "") -> List[dict]:
         ))
 
     return [s.to_dict() for s in sources]
+
+
+def advisory_provider_objects(vendor: str, os_version: str = "") -> List[AdvisoryProvider]:
+    """Return provider objects for source discovery and optional fetches."""
+    providers: List[AdvisoryProvider] = []
+    for raw in advisory_sources(vendor, os_version):
+        source = AdvisorySource(**raw)
+        if source.provider == "NVD":
+            providers.append(NvdReferenceProvider(source))
+        elif source.provider == "CISA KEV":
+            providers.append(CisaKevProvider(source))
+        else:
+            providers.append(VendorReferenceProvider(source))
+    return providers
+
+
+def collect_advisory_context(
+    vendor: str,
+    os_version: str = "",
+    *,
+    cve_ids: Optional[Iterable[str]] = None,
+    fetch: bool = False,
+    http_get: Optional[HttpGet] = None,
+) -> dict:
+    """Return advisory provider metadata and optional fetched records.
+
+    ``fetch=False`` is the safe default for API responses. It returns provider
+    status/source metadata without network calls. ``fetch=True`` lets callers
+    retrieve machine-readable public feeds such as CISA KEV; reference-only
+    vendor providers remain links for manual verification.
+    """
+    providers = advisory_provider_objects(vendor, os_version)
+    results = []
+    for provider in providers:
+        if fetch and provider.source.machine_readable and provider.source.provider != "NVD":
+            results.append(provider.fetch(
+                vendor=vendor,
+                os_version=os_version,
+                cve_ids=cve_ids,
+                http_get=http_get,
+            ))
+        else:
+            results.append(provider.fetch(
+                vendor=vendor,
+                os_version=os_version,
+                cve_ids=cve_ids,
+                http_get=None,
+            ))
+
+    records = []
+    for result in results:
+        records.extend(result.records)
+
+    return {
+        "vendor": vendor,
+        "os_version": os_version,
+        "fetched": fetch,
+        "sources": [r.source.to_dict() for r in results],
+        "providers": [r.to_dict() for r in results],
+        "records": [r.to_dict() for r in records],
+        "manual_verification_required": any(
+            not r.machine_readable and r.source.source_type in {"vendor_advisory", "release_notes_search"}
+            for r in results
+        ),
+    }

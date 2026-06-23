@@ -13,6 +13,24 @@ context. It must not treat every source as equally authoritative.
 4. Use the manually managed Version Catalog for customer-specific recommended
    versions and support status.
 
+## Provider Framework
+
+The backend provider framework lives in
+`backend/app/analysis/advisory_providers.py`.
+
+It exposes:
+
+- `advisory_sources(vendor, os_version)`: simple source/link metadata.
+- `advisory_provider_objects(vendor, os_version)`: provider instances.
+- `collect_advisory_context(...)`: structured provider status and optional
+  fetched records.
+
+Normal API responses use `collect_advisory_context(..., fetch=False)`, so device
+views do not block on internet access. Machine-readable providers can be fetched
+explicitly with `fetch=True`; currently CISA KEV is implemented as a fetchable
+provider. Vendor release-note portals remain reference-only unless they expose a
+stable public API or feed.
+
 ## Vendor Reliability
 
 | Vendor | Public CVE Data | Vendor Advisory Data | Release Notes |

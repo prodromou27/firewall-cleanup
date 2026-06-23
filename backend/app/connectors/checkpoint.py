@@ -614,21 +614,35 @@ class CheckPointConnector:
             logger.debug("show-group failed for %s=%s: %s", key, identifier, e)
             return {}
 
-    def _enrich_group_members(self, groups: list[dict]) -> None:
-        """In place: fetch membership for any group whose members came back empty."""
+    def _enrich_group_members(self, groups: list[dict], max_calls: int = 300) -> None:
+        """In place: fetch membership for groups whose members came back empty.
+
+        Bounded + isolated so it can NEVER stall or fail the overall sync:
+        - capped at max_calls per-group lookups (large MDS can have many groups);
+        - each call uses a short timeout;
+        - all errors are swallowed (best-effort enrichment).
+        """
+        empty = [o for o in groups if isinstance(o, dict) and not o.get("members")]
+        if not empty:
+            return
+        if len(empty) > max_calls:
+            logger.warning("%d Check Point groups lack members; enriching first %d (cap)", len(empty), max_calls)
+        saved_timeout = self.timeout
         enriched = 0
-        for o in groups:
-            if not isinstance(o, dict):
-                continue
-            if o.get("members"):
-                continue
-            uid, name = o.get("uid"), o.get("name")
-            full = self.get_group(uid, by_uid=True) if uid else (self.get_group(name, by_uid=False) if name else {})
-            if full.get("members"):
-                o["members"] = full["members"]
-                enriched += 1
-        if enriched:
-            logger.info("Enriched %d Check Point group(s) with explicit show-group membership", enriched)
+        try:
+            self.timeout = min(saved_timeout, 15)
+            for o in empty[:max_calls]:
+                uid, name = o.get("uid"), o.get("name")
+                try:
+                    full = self.get_group(uid, by_uid=True) if uid else (self.get_group(name, by_uid=False) if name else {})
+                except Exception:
+                    continue
+                if full.get("members"):
+                    o["members"] = full["members"]
+                    enriched += 1
+        finally:
+            self.timeout = saved_timeout
+        logger.info("Check Point group enrichment: %d/%d empty groups populated via show-group", enriched, len(empty))
 
     # ── Time objects ─────────────────────────────────────────────────────────
 

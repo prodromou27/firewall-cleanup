@@ -31,6 +31,11 @@ COPY . .
 RUN mkdir -p /app/uploads
 ENV UPLOAD_DIR=/app/uploads
 
+# Flush stdout/stderr immediately so application logs appear in
+# `docker compose logs` in real time (Python block-buffers otherwise).
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
 EXPOSE 8000
 
 # No --reload in container; suppress the uvicorn Server header.

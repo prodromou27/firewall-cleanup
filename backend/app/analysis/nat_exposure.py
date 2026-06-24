@@ -110,6 +110,27 @@ def _service_is_any(services: List[str]) -> bool:
     return not services or any(is_any(s) for s in services)
 
 
+def _vip_internal_targets(dsts: List[str], obj_map: dict) -> List[str]:
+    """Map any destination that is a FortiGate VIP to its mapped internal host.
+
+    A policy whose destination is a VIP matches on the VIP's public external IP
+    and DNATs to an internal host. For exposure we care about that internal host,
+    while the *service restriction stays the policy's own* — we never infer
+    "any service" from the VIP, so a port-restricted inbound rule is not inflated.
+    Reads raw_data (the DB-persisted channel). Returns [] when no dst is a VIP.
+    """
+    targets: List[str] = []
+    for d in dsts:
+        obj = (obj_map or {}).get(str(d))
+        if not obj or (obj.get("object_type") or "").lower() != "vip":
+            continue
+        raw = obj.get("raw_data") or {}
+        mapped = (obj.get("mapped_ip") or raw.get("mappedip") or "").strip()
+        if mapped:
+            targets.append(mapped.split()[0].strip('"'))
+    return targets
+
+
 def _norm(nat: dict) -> dict:
     """Coerce a stored NAT rule into the documented shape with list fields."""
     return {
@@ -334,22 +355,27 @@ def _build_exposure(security_rules: List[dict], nats: List[dict], available: boo
         if not _any_public(srcs):
             continue
         dsts = _as_list(r.get("destinations"))
+        # If the policy targets a VIP, the real exposed host is the VIP's mapped
+        # internal IP (inbound DNAT). The service restriction stays the policy's.
+        vip_names = [str(d) for d in dsts if _vip_internal_targets([d], obj_map)]
+        vip_targets = _vip_internal_targets(dsts, obj_map)
+        effective_dsts = vip_targets or dsts
         ports = _ports_from_services(_as_list(r.get("services")), obj_map)
         svc_any = _service_is_any(_as_list(r.get("services")))
-        if not _all_private(dsts):
+        if not _all_private(effective_dsts):
             continue
         rid = r.get("rule_id", r.get("rule_number", "?"))
-        for d in dsts:
+        for d in effective_dsts:
             policy_targets.setdefault(d.lower(), []).append(rid)
         exposures.append({
             "public_ip": "Any/Internet" if any(is_any(s) for s in srcs) else ", ".join(srcs),
-            "internal_target": ", ".join(dsts),
+            "internal_target": ", ".join(effective_dsts),
             "ports": sorted(set(ports)),
             "service_any": svc_any,
-            "source": "policy",
+            "source": "policy+nat" if vip_names else "policy",
             "logging": bool(r.get("logging_enabled", True)),
             "confidence": "High",
-            "nat_rules": [],
+            "nat_rules": vip_names,
             "security_rules": [rid],
         })
 

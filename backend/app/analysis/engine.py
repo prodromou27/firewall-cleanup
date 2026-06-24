@@ -587,7 +587,8 @@ def _import_quality_notes(rules: List[dict], objects: List[dict], policy) -> Lis
              "No hit counts were available for this policy, so zero-hit and low-usage "
              "rule findings were not generated. Enable hit-count collection / re-sync to "
              "include usage analysis.")
-    if not (policy.nat_rules or []):
+    has_vip = any((o.get("object_type") or "").lower() == "vip" for o in objects)
+    if not (policy.nat_rules or []) and not has_vip:
         note("import_quality", "NAT data unavailable",
              "No NAT rules were captured, so NAT-to-policy mapping and NAT-based public "
              "exposure analysis were limited. Public exposure was derived from the security "

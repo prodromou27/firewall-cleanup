@@ -34,7 +34,14 @@ is a false positive. The "context key" per vendor:
 - **Central NAT / VIP**: with Central NAT, the firewall policy destination is the
   **pre-NAT (public) address/VIP**, and DNAT is resolved by a separate Central
   DNAT/VIP table. **Do not assume the VIP object must be the policy destination.**
-  VIP/DNAT objects ⚠️ (per-rule `nat_enabled` only; Central NAT table ❌ [LIMITATION]).
+  ✅ `config firewall vip` is parsed as a destination-NAT object: its normalized
+  `value` is the **external IP** (extip — the original/pre-NAT destination the
+  policy matches), and `mappedip`/`extport`/`mappedport` are kept in `raw_data`.
+  A policy whose destination is a VIP therefore resolves to a concrete address
+  (no "unknown" destination), and public-exposure analysis reports the **mapped
+  internal host** while keeping the **policy's own service** as the restriction
+  (a VIP never invents an "any service" exposure). Inline (per-policy) VIPs only;
+  the separate **Central SNAT** table is still ❌ [LIMITATION].
 - **Application Control**: an AV/IPS/App-Control **profile** attached to a policy,
   **not** a service constraint. Presence of an app-control profile must not by
   itself downgrade "Any service". ❌ profile data not parsed [LIMITATION].

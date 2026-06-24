@@ -43,6 +43,7 @@ const FINDING_TYPES: Record<string, string> = {
   rule_without_app_controls: 'No App Controls',
   palo_alto_port_based_rule_candidate: 'Port-Based Rule',
   risky_application_allowed: 'Risky Application',
+  fortigate_security_profile_gap: 'No Security Profiles',
   application_analysis_not_supported_for_vendor: 'App Analysis N/A',
   application_data_unavailable: 'App Data Unavailable',
   disabled_rule: 'Disabled Rule',

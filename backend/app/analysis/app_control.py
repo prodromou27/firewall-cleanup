@@ -47,7 +47,13 @@ _REC = {
     "risky_application_allowed":
         "Confirm the high-risk application is a sanctioned business requirement. If "
         "not, raise a change request to remove it from the rule or block it.",
+    "fortigate_security_profile_gap":
+        "Attach the appropriate security profiles (Application Control, IPS, "
+        "AntiVirus, Web Filter) and an SSL inspection profile to this broad allow "
+        "policy so traffic is inspected at Layer 7, via change management.",
     "application_analysis_not_supported_for_vendor":
+        "Read-only data-availability note; no action implied.",
+    "application_data_unavailable":
         "Read-only data-availability note; no action implied.",
 }
 
@@ -73,6 +79,11 @@ def _service_is_any(rule: dict) -> bool:
 def _service_app_default(rule: dict) -> bool:
     s = _services(rule)
     return bool(s) and all(x in ("application-default", "app-default") for x in s)
+
+
+def _addr_is_any(rule: dict, field: str) -> bool:
+    vals = [str(x).strip().lower() for x in (rule.get(field) or [])]
+    return (not vals) or any(x in ("any", "all", "0.0.0.0/0", "0.0.0.0/0.0.0.0") for x in vals)
 
 
 def _risky_match(name: str) -> bool:
@@ -106,6 +117,8 @@ def analyze(rules: List[dict], vendor: str, obj_map: dict | None = None) -> List
 
     if "palo" in v:
         findings.extend(_palo_alto(rules))
+    elif "forti" in v:
+        findings.extend(_fortigate(rules))
     elif "cisco" in v or "asa" in v:
         findings.append({
             "finding_type": "application_analysis_not_supported_for_vendor",
@@ -153,6 +166,61 @@ def _palo_alto(rules: List[dict]) -> List[dict]:
                 "Optimizer would flag this as a port-based rule that can be "
                 "converted to an application-based rule to tighten control.",
                 r, {"application": "any"}))
+    return out
+
+
+def _fortigate(rules: List[dict]) -> List[dict]:
+    """FortiGate Application Control is a security *profile* attached to a policy,
+    not an App-ID match field. Flag a broad allow policy that has no inspection
+    profile at all. Conservative: only evaluated on policies whose profile fields
+    were actually parsed (`_cli_parsed`); if none were, emit a single
+    `application_data_unavailable` note instead of guessing."""
+    out: List[dict] = []
+    any_cli = False
+    # Profiles that mean traffic is inspected (utm-status / protocol-options alone
+    # do not constitute L7 inspection).
+    inspect_keys = ("application-list", "ips-sensor", "av-profile",
+                    "webfilter-profile", "dnsfilter-profile", "file-filter-profile")
+    for r in rules:
+        if not r.get("_cli_parsed"):
+            continue
+        any_cli = True
+        if not r.get("enabled", True) or not _is_allow(r):
+            continue
+        profiles = r.get("security_profiles") or {}
+        utm = str(profiles.get("utm-status", "")).lower()
+        inspected = utm == "enable" or any(profiles.get(k) for k in inspect_keys)
+        if inspected:
+            continue
+        broad = (_service_is_any(r) or _addr_is_any(r, "sources")
+                 or _addr_is_any(r, "destinations"))
+        if not broad:
+            continue
+        rid = r.get("rule_id") or r.get("rule_number", "?")
+        rname = r.get("rule_name") or f"Rule {rid}"
+        out.append(_finding(
+            "fortigate_security_profile_gap", "Medium", "Medium",
+            f"{rname}: broad allow with no security profiles",
+            f"{rname} is a broad allow but has no Application Control / IPS / "
+            "AntiVirus / Web Filter profile, so its traffic is not inspected at "
+            "Layer 7. On FortiGate these controls are profiles attached to the "
+            "policy, not match fields.",
+            r, {"utm_status": utm or "disable", "profiles_present": sorted(profiles)}))
+    if rules and not any_cli:
+        out.append({
+            "finding_type": "application_data_unavailable",
+            "severity": "Informational", "confidence": "High",
+            "title": "FortiGate security-profile data unavailable",
+            "description": (
+                "Security-profile fields (application-list, ips-sensor, av-profile, "
+                "ssl-ssh-profile) were not captured for this policy, so Application "
+                "Control gap analysis was not performed. Re-import a full "
+                "configuration export to enable it."
+            ),
+            "affected_rules": [],
+            "evidence": {"vendor": "FortiGate", "rule_count": len(rules)},
+            "recommendation": _REC["application_data_unavailable"],
+        })
     return out
 
 

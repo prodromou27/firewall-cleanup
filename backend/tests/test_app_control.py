@@ -68,13 +68,49 @@ def test_risky_application_variant_suffix_matches_but_substring_does_not():
     assert AC._risky_match("storage") is False
 
 
+# ── FortiGate security-profile gap ──────────────────────────────────────────
+def _fgt_rule(profiles=None, services=None, sources=None, destinations=None,
+              cli=True, enabled=True, action="accept"):
+    return {
+        "id": "fgt1", "rule_id": "1", "rule_number": 1, "rule_name": "fgt1",
+        "action": action, "enabled": enabled, "applications": [],
+        "services": services if services is not None else ["any"],
+        "sources": sources if sources is not None else ["any"],
+        "destinations": destinations if destinations is not None else ["any"],
+        "security_profiles": profiles or {}, "_cli_parsed": cli,
+    }
+
+
+def test_fortigate_broad_allow_without_profiles_is_a_gap():
+    f = AC.analyze([_fgt_rule(profiles={})], "FortiGate")
+    assert "fortigate_security_profile_gap" in _types(f)
+
+
+def test_fortigate_profile_present_is_not_a_gap():
+    with_app = AC.analyze([_fgt_rule(profiles={"application-list": "block-p2p"})], "FortiGate")
+    with_utm = AC.analyze([_fgt_rule(profiles={"utm-status": "enable"})], "FortiGate")
+    assert "fortigate_security_profile_gap" not in _types(with_app)
+    assert "fortigate_security_profile_gap" not in _types(with_utm)
+
+
+def test_fortigate_narrow_allow_without_profiles_is_not_flagged():
+    narrow = _fgt_rule(profiles={}, services=["HTTPS"],
+                       sources=["10.0.0.0/24"], destinations=["10.1.0.0/24"])
+    assert "fortigate_security_profile_gap" not in _types(AC.analyze([narrow], "FortiGate"))
+
+
+def test_fortigate_without_cli_profile_data_reports_unavailable():
+    f = AC.analyze([_fgt_rule(cli=False)], "FortiGate")
+    assert _types(f) == ["application_data_unavailable"]
+
+
 # ── Vendor support gating ────────────────────────────────────────────────────
 def test_cisco_asa_reports_not_supported():
     f = AC.analyze([_rule()], "CiscoASA")
     assert "application_analysis_not_supported_for_vendor" in _types(f)
 
 
-def test_checkpoint_fortigate_emit_nothing_here():
-    """CP/FortiGate app-control is handled in their own slices — no premature notes."""
+def test_checkpoint_emits_nothing_here():
+    """Check Point App-Control layer awareness is handled in its own slice — no
+    premature notes from this module."""
     assert AC.analyze([_rule(apps=[], services=["any"])], "CheckPoint") == []
-    assert AC.analyze([_rule(apps=[], services=["any"])], "FortiGate") == []

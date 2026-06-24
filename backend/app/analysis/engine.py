@@ -376,7 +376,20 @@ def run_analysis(policy_id: str, db: Session) -> str:
         raise
 
 
+# FortiGate security-profile fields (App Control / IPS / AV / web / SSL inspection).
+# These are profiles attached to a policy, not L7 match fields. Surfaced slim so
+# the app-control detector can reason about inspection without the heavy raw_data.
+_FGT_PROFILE_KEYS = (
+    "application-list", "ips-sensor", "av-profile", "webfilter-profile",
+    "dnsfilter-profile", "file-filter-profile", "emailfilter-profile",
+    "ssl-ssh-profile", "profile-protocol-options", "utm-status",
+)
+
+
 def _rule_to_dict(r: FirewallRule) -> dict:
+    raw = getattr(r, "raw_data", None)
+    raw = raw if isinstance(raw, dict) else {}
+    profiles = {k: raw.get(k) for k in _FGT_PROFILE_KEYS if raw.get(k)}
     return {
         "id": r.id,
         "rule_id": r.rule_id,
@@ -400,6 +413,10 @@ def _rule_to_dict(r: FirewallRule) -> dict:
         "hit_count": r.hit_count,
         "last_hit": r.last_hit,
         "first_hit": r.first_hit,
+        "security_profiles": profiles,
+        # True only when raw_data looks like a parsed FortiGate CLI policy, so the
+        # profile-gap detector never fires on a rule whose profiles weren't captured.
+        "_cli_parsed": bool(raw) and any(k in raw for k in ("_raw_lines", "srcintf", "dstintf")),
     }
 
 

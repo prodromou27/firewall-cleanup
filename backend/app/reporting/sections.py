@@ -84,6 +84,8 @@ FINDING_CATEGORIES = [
     ("rule_without_app_controls", "Rules Without App Controls"),
     ("palo_alto_port_based_rule_candidate", "Port-Based Rule Candidates"),
     ("risky_application_allowed", "Risky Applications Allowed"),
+    ("fortigate_security_profile_gap", "FortiGate Security-Profile Gaps"),
+    ("application_data_unavailable", "Application Data Unavailable"),
     ("application_analysis_not_supported_for_vendor", "Application Analysis Not Supported"),
     ("risky_service", "Risky Services"),
     ("cleartext_service", "Cleartext Protocols"),

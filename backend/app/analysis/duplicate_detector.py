@@ -66,15 +66,18 @@ def _expansion_complete(entry: dict) -> bool:
 
 def detect_duplicates(
     rules: List[dict],
-    obj_map: Dict[str, dict]
+    obj_map: Dict[str, dict],
+    vendor: str = "",
 ) -> List[Dict]:
     """
     Detect duplicate rules. Returns list of finding dicts.
 
     Rules that share identical effective (expanded) source, destination,
-    service and action are grouped together. A group of 3+ duplicate rules
-    produces a single finding rather than one finding per pair.
+    service and action AND the same vendor evaluation context (layer / zone /
+    interface binding) are grouped together. Rules in different contexts are
+    never compared. A group of 3+ duplicates produces a single finding.
     """
+    from app.analysis.vendor_semantics import context_key
     findings = []
 
     # Pre-expand all rules
@@ -84,6 +87,7 @@ def detect_duplicates(
             continue
         expanded.append({
             "rule": rule,
+            "context": context_key(rule, vendor),
             "sources": expand_rule_sources(rule, obj_map),
             "destinations": expand_rule_destinations(rule, obj_map),
             "services": expand_rule_services(rule, obj_map),
@@ -107,6 +111,9 @@ def detect_duplicates(
                 continue
             r1 = expanded[i]
             r2 = expanded[j]
+            # Only compare rules in the same vendor evaluation context.
+            if r1["context"] != r2["context"]:
+                continue
             action1 = (r1["rule"].get("action") or "").lower()
             action2 = (r2["rule"].get("action") or "").lower()
             if action1 != action2:

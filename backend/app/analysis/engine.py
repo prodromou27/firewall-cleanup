@@ -129,10 +129,10 @@ def run_analysis(policy_id: str, db: Session) -> str:
         findings.extend(_analyze_inbound_exposure(rules, obj_map))
 
         # 5. Duplicate rules
-        findings.extend(detect_duplicates(rules, obj_map))
+        findings.extend(detect_duplicates(rules, obj_map, policy.vendor))
 
         # 6. Shadowed rules
-        findings.extend(detect_shadows(rules, obj_map))
+        findings.extend(detect_shadows(rules, obj_map, policy.vendor))
 
         # 6b. Consolidation candidates (same src/dst/action, differing services)
         findings.extend(_analyze_mergeable_rules(rules))
@@ -366,6 +366,7 @@ def _rule_to_dict(r: FirewallRule) -> dict:
         "section": r.section,
         "source_interfaces": _json_list(r.source_interfaces),
         "destination_interfaces": _json_list(r.destination_interfaces),
+        "install_on": _json_list(r.install_on),
         "sources": _json_list(r.sources),
         "destinations": _json_list(r.destinations),
         "services": _json_list(r.services),

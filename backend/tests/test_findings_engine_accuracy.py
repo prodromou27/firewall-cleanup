@@ -133,7 +133,7 @@ def test_shadowed_rule_reports_first_enabled_shadowing_rule():
     findings = detect_shadows(rules, {})
 
     assert len(findings) == 1
-    assert findings[0]["finding_type"] == "shadowed_rule"
+    assert findings[0]["finding_type"] == "same_action_shadowed_rule"
     assert findings[0]["evidence"]["shadowed_rule"].startswith("Rule 2")
     _assert_quality(findings)
 
@@ -248,6 +248,7 @@ def test_legacy_json_string_rule_refs_still_mark_group_members_used():
         section = ""
         source_interfaces = "[]"
         destination_interfaces = "[]"
+        install_on = "[]"
         sources = '["CP-Group"]'
         destinations = '["any"]'
         services = '["Any"]'

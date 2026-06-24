@@ -159,8 +159,8 @@ def run_analysis(policy_id: str, db: Session) -> str:
         # 8. Temporary rules
         findings.extend(_analyze_temp_rules(rules, obj_map))
 
-        # 9. Unused objects
-        findings.extend(_analyze_unused_objects(rules, objects, obj_map))
+        # 9. Unused / unattached objects (reference graph includes NAT references)
+        findings.extend(_analyze_unused_objects(rules, objects, obj_map, policy.nat_rules))
 
         # 10. Duplicate objects
         findings.extend(_analyze_duplicate_objects(objects))
@@ -269,7 +269,7 @@ def run_analysis(policy_id: str, db: Session) -> str:
         shadow_count   = sum(1 for f in findings if f["finding_type"] == "shadowed_rule")
         dup_count      = sum(1 for f in findings if f["finding_type"] == "duplicate_rule")
         disabled_count = sum(1 for r in rules if not r.get("enabled", True))
-        unused_obj_cnt = sum(1 for f in findings if f["finding_type"] == "unused_object")
+        unused_obj_cnt = sum(1 for f in findings if f["finding_type"] in ("unattached_object", "unused_object"))
         broad_net_cnt  = sum(1 for f in findings if f["finding_type"] == "broad_network")
         large_svc_cnt  = sum(1 for f in findings if f["finding_type"] == "service_range")
         doc_miss       = sum(1 for f in findings if f["finding_type"] == "no_documentation")
@@ -1436,19 +1436,123 @@ def _analyze_temp_rules(rules: List[dict], obj_map: dict) -> List[dict]:
     return findings
 
 
-def _analyze_unused_objects(
-    rules: List[dict], objects: List[dict], obj_map: dict
-) -> List[dict]:
-    findings = []
+def _nat_referenced_names(nat_rules) -> set:
+    """All object names referenced by normalized NAT rules (original/translated
+    source/destination/service). An object used only by NAT must not be flagged
+    unattached. See docs/analysis-accuracy-model.md §3."""
+    names: set = set()
+    for n in (nat_rules or []):
+        if not isinstance(n, dict):
+            continue
+        for field in ("original_src", "original_dst", "original_service",
+                      "translated_src", "translated_dst", "translated_service",
+                      "sources", "destinations", "services"):
+            value = n.get(field)
+            items = value if isinstance(value, (list, tuple)) else ([value] if value else [])
+            for x in items:
+                nm = _ref_name(x)
+                if nm:
+                    names.add(nm)
+    return names
 
-    # Object usage is defined by rule references. With no rules we cannot
-    # determine usage at all — flagging every object as "unused" would be wrong
-    # and floods the results (e.g. thousands of false findings when a rulebase
-    # fetch failed). Skip the check until rules are present.
+
+def _detect_circular_groups(objects: List[dict], obj_map: dict) -> List[str]:
+    """Return names of groups that (transitively) contain themselves. Expansion is
+    cycle-safe regardless; a detected cycle is surfaced as an informational
+    diagnostic and its members are never reported as 'unused'."""
+    circular: List[str] = []
+    for obj in objects:
+        if not _is_group_object(obj):
+            continue
+        root = obj.get("object_name", "")
+        if not root:
+            continue
+        stack = [(root, frozenset([root]))]
+        found = False
+        seen = set()
+        while stack and not found:
+            name, path = stack.pop()
+            cur = obj_map.get(name)
+            if not cur or not _is_group_object(cur):
+                continue
+            for m in _member_refs(cur):
+                mn = _ref_name(m)
+                if not mn:
+                    continue
+                if mn == root or mn in path:
+                    found = True
+                    break
+                if mn not in seen:
+                    seen.add(mn)
+                    stack.append((mn, path | {mn}))
+        if found:
+            circular.append(root)
+    return circular
+
+
+def _analyze_unused_objects(
+    rules: List[dict], objects: List[dict], obj_map: dict, nat_rules=None
+) -> List[dict]:
+    """Config-derived **unattached** object detection (AlgoSec semantics): an object
+    is unattached only if it is referenced nowhere (rules or NAT) AND is not a
+    member of any used group. Requires a complete object reference graph; when the
+    object import looks incomplete the detector is suppressed and an
+    `object_usage_unknown` diagnostic is emitted instead. See
+    docs/analysis-accuracy-model.md §3-4, §10."""
+    findings: List[dict] = []
+
+    # Object usage is defined by references. With no rules we cannot determine
+    # usage at all — flagging every object as "unused" would be wrong and floods
+    # the results (thousands of false findings when a rulebase fetch failed).
     if not rules:
         return findings
 
-    # Collect all object names referenced by rules
+    from app.analysis.ip_utils import parse_ip_network
+
+    # ── Import-completeness gate ──────────────────────────────────────────────
+    # If the majority of *named* address references in rules cannot be resolved to
+    # an object (and are not IP literals), the object database is partial — we
+    # cannot trust "not referenced", so suppress unattached findings.
+    referenced_addr = set()
+    for rule in rules:
+        for field in ("sources", "destinations"):
+            for ref in rule.get(field, []) or []:
+                nm = _ref_name(ref)
+                if nm and nm.lower() not in ("any", "all", "any4", "any6"):
+                    referenced_addr.add(nm)
+
+    def _is_literal(nm: str) -> bool:
+        return parse_ip_network(nm) is not None or (
+            "-" in nm and all(parse_ip_network(p.strip()) is not None
+                              for p in nm.split("-", 1) if p.strip()))
+
+    unresolved = [n for n in referenced_addr
+                  if obj_map.get(n) is None and not _is_literal(n)]
+    incomplete = bool(referenced_addr) and (len(unresolved) / len(referenced_addr) > 0.5)
+    if incomplete:
+        findings.append({
+            "finding_type": "object_usage_unknown",
+            "severity": "Informational",
+            "confidence": "High",
+            "title": "Object usage analysis suppressed — incomplete object import",
+            "description": (
+                f"{len(unresolved)} of {len(referenced_addr)} address references in the "
+                "rulebase could not be resolved to an object, indicating the object "
+                "database was only partially imported. Unattached-object cleanup was "
+                "suppressed to avoid false positives; re-import or re-sync the object "
+                "database to enable it."
+            ),
+            "affected_rules": [],
+            "affected_objects": [],
+            "evidence": {"referenced_addresses": len(referenced_addr),
+                         "unresolved": len(unresolved),
+                         "unresolved_sample": sorted(unresolved)[:25],
+                         "reason": "object reference graph incomplete"},
+            "recommendation": "Read-only data-completeness note; no action implied.",
+        })
+        return findings
+
+    # ── Reference graph: rule + NAT references, then recursive group expansion ──
     used_names = set()
     reference_fields = (
         "sources", "destinations", "services", "applications", "users", "vpn",
@@ -1465,12 +1569,15 @@ def _analyze_unused_objects(
                 if obj:
                     used_names.update(_object_aliases(obj))
 
-    # Also include members of used groups
+    for nm in _nat_referenced_names(nat_rules):
+        used_names.add(nm)
+        obj = obj_map.get(nm)
+        if obj:
+            used_names.update(_object_aliases(obj))
+
     def collect_members(ref, visited: set):
         name = _ref_name(ref)
-        if not name:
-            return
-        if name in visited:
+        if not name or name in visited:
             return
         visited.add(name)
         obj = obj_map.get(name)
@@ -1490,41 +1597,75 @@ def _analyze_unused_objects(
     for name in list(used_names):
         collect_members(name, set())
 
+    # Members of any circular group are treated as used (never "unused"); the cycle
+    # itself is reported as a diagnostic so it can be cleaned up deliberately.
+    circular = _detect_circular_groups(objects, obj_map)
+    if circular:
+        for cname in circular:
+            cobj = obj_map.get(cname)
+            if cobj and _is_group_object(cobj):
+                for m in _member_refs(cobj):
+                    used_names.update({_ref_name(m)})
+        findings.append({
+            "finding_type": "object_usage_unknown",
+            "severity": "Low",
+            "confidence": "High",
+            "title": f"{len(circular)} circular group reference{'s' if len(circular) != 1 else ''} detected",
+            "description": (
+                "One or more address/service groups reference themselves through "
+                "nested membership. Circular groups are evaluated safely here but "
+                "should be reviewed and untangled."
+            ),
+            "affected_rules": [],
+            "affected_objects": [o.get("id") for o in objects
+                                 if o.get("object_name") in circular and o.get("id")],
+            "evidence": {"circular_groups": circular[:50], "count": len(circular)},
+            "recommendation": "Read-only observation; review nested group membership.",
+        })
+
+    # ── Unattached objects (config-derived) ───────────────────────────────────
     unused: List[dict] = []
     for obj in objects:
         name = obj.get("object_name", "")
         if name.lower() in ("any", "all"):
             continue
-        # Skip all service/port objects — type-based, vendor-agnostic filter.
         if _is_service_object(obj):
             continue
-        # Skip vendor built-in / predefined objects; customers cannot remove them.
+        # Built-in / predefined vendor objects are system objects (not cleanup).
         if _is_vendor_builtin_object(obj):
             continue
         if not (_object_aliases(obj) & used_names):
             unused.append(obj)
 
-    # Aggregate unused objects into ONE finding (instead of one per object, which
-    # floods the Findings list with thousands of low-value rows on large policies).
-    # The Objects page "Unused" filter unions affected_objects across findings, so
-    # every unused object is still listed there — this only de-noises Findings.
+    # Aggregate into ONE finding (per-object rows would flood large policies). The
+    # Objects page "Unused" filter unions affected_objects across findings.
     if unused:
-        names = [o.get("object_name", "") for o in unused]
+        sample = [{"name": o.get("object_name", ""), "type": o.get("object_type", "")}
+                  for o in unused][:50]
         findings.append({
-            "finding_type": "unused_object",
+            "finding_type": "unattached_object",
             "severity": "Informational",
-            "confidence": "Medium",
-            "title": f"{len(unused)} unused object{'s' if len(unused) != 1 else ''} in the object database",
+            "confidence": "High",
+            "title": f"{len(unused)} unattached object{'s' if len(unused) != 1 else ''} in the object database",
             "description": (
-                f"{len(unused)} objects are not referenced by any firewall rule in this "
-                "policy (directly or through a group). Unused objects add clutter to the "
-                "object database. Review the full list on the Objects page using the "
-                "'Unused' filter."
+                f"{len(unused)} objects are referenced by no firewall rule or NAT rule in "
+                "this policy — directly or through any used group — and are not vendor "
+                "built-ins. Unattached objects add clutter to the object database. Review "
+                "the full list on the Objects page using the 'Unused' filter."
             ),
             "affected_rules": [],
             "affected_objects": [o.get("id") for o in unused if o.get("id")],
-            "evidence": {"count": len(unused), "sample": names[:50]},
-            "recommendation": _RL.get("unused_object"),
+            "evidence": {
+                "count": len(unused),
+                "sample": [s["name"] for s in sample],
+                "sample_detail": sample,
+                "reference_graph_complete": True,
+                "classification": "unattached (config-derived): not in any rule/NAT, "
+                                   "not a member of any used group",
+                "objects_total": len(objects),
+                "referenced_addresses": len(referenced_addr),
+            },
+            "recommendation": _RL.get("unattached_object") or _RL.get("unused_object"),
         })
 
     return findings

@@ -35,7 +35,8 @@ CATEGORY_OF = {
     # Enable logging
     "no_logging": "enable_logging", "no_cleanup_rule": "enable_logging",
     # Object cleanup
-    "unused_object": "remove_object", "duplicate_object": "remove_object",
+    "unused_object": "remove_object", "unattached_object": "remove_object",
+    "duplicate_object": "remove_object",
     "empty_group": "remove_object", "large_group": "remove_object",
     # Documentation / naming
     "no_documentation": "documentation", "naming_quality": "documentation",

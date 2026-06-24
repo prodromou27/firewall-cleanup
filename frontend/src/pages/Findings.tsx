@@ -65,6 +65,8 @@ const FINDING_TYPES: Record<string, string> = {
   rule_order_optimization: 'Rule Order Optimization',
   large_rule_section: 'Oversized Section',
   // Object analysis
+  unattached_object: 'Unattached Object',
+  object_usage_unknown: 'Object Usage Unknown',
   unused_object: 'Unused Object',
   duplicate_object: 'Duplicate Object',
   empty_group: 'Empty Group',

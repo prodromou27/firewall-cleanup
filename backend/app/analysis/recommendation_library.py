@@ -92,6 +92,16 @@ LIBRARY: dict[str, str] = {
         "If the object is confirmed unused, raise a change request to remove it from the "
         "object database to reduce policy complexity."
     ),
+    "unattached_object": (
+        "These objects are referenced by no rule or NAT rule and are not members of any "
+        "used group. Verify against any policies outside the current view, then raise a "
+        "change request to remove confirmed-unattached objects to reduce clutter."
+    ),
+    "object_usage_unknown": (
+        "Object usage could not be determined because the object import is incomplete or "
+        "contains a circular reference. Re-import / re-sync the object database (and review "
+        "any circular groups) before relying on unattached-object cleanup."
+    ),
     "duplicate_object": (
         "Consolidate duplicate objects to a single canonical definition. Update any rules "
         "that reference the redundant object to use the canonical one, then remove the "

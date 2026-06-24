@@ -36,7 +36,8 @@ WAVES = [
         "rollback": "Re-create or re-enable the rule/object from the captured configuration baseline (revision snapshot) if needed.",
         "types": {
             "disabled_rule", "zero_hit_rule", "duplicate_rule", "shadowed_rule",
-            "unused_object", "duplicate_object", "empty_group",
+            "same_action_shadowed_rule", "conflicting_shadowed_rule",
+            "unattached_object", "unused_object", "duplicate_object", "empty_group",
         },
     },
     {
@@ -95,6 +96,11 @@ _TYPE_ACTION: dict[str, tuple[str, str, str]] = {
     "unused_object": (
         "Confirm the object is not referenced by active rules, NAT, VPN, groups, or pending changes.",
         "Remove the unused object or archive it according to customer standards.",
+        "Recreate the object from the baseline if a hidden dependency is discovered.",
+    ),
+    "unattached_object": (
+        "Confirm the object is not referenced by active rules, NAT, VPN, groups, or pending changes.",
+        "Remove the unattached object or archive it according to customer standards.",
         "Recreate the object from the baseline if a hidden dependency is discovered.",
     ),
     "duplicate_object": (

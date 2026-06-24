@@ -149,9 +149,61 @@ def test_unused_objects_follow_nested_vendor_group_usage_and_skip_builtins():
     obj_map = build_object_map(objects)
     findings = _analyze_unused_objects([_rule(1, sources=["Parent"])], objects, obj_map)
 
+    assert findings[0]["finding_type"] == "unattached_object"
     names = _unused_names(findings)
     assert names == {"Orphan"}
     _assert_quality(findings)
+
+
+def test_object_used_only_through_nat_is_not_unattached():
+    """An object referenced solely by a NAT rule must not be flagged unattached."""
+    objects = [
+        _object("NAT-Host", value="10.0.0.50/32"),
+        _object("RealOrphan", value="10.0.0.99/32"),
+    ]
+    obj_map = build_object_map(objects)
+    nat_rules = [{"nat_type": "destination", "original_dst": ["203.0.113.1"],
+                  "translated_dst": ["NAT-Host"]}]
+    findings = _analyze_unused_objects(
+        [_rule(1, sources=["10.0.0.1/32"])], objects, obj_map, nat_rules)
+
+    names = _unused_names(findings)
+    assert names == {"RealOrphan"}            # NAT-Host is used via NAT
+
+
+def test_incomplete_object_import_suppresses_unattached_and_diagnoses():
+    """When most named references don't resolve, suppress cleanup and emit a
+    data-availability diagnostic instead of flagging everything."""
+    objects = [_object("LonelyObj", value="10.0.0.5/32")]
+    obj_map = build_object_map(objects)
+    rules = [
+        _rule(1, sources=["Missing-A"], destinations=["Missing-B"]),
+        _rule(2, sources=["Missing-C"], destinations=["Missing-D"]),
+    ]
+    findings = _analyze_unused_objects(rules, objects, obj_map)
+
+    types = {f["finding_type"] for f in findings}
+    assert "object_usage_unknown" in types
+    assert "unattached_object" not in types
+
+
+def test_circular_group_is_diagnosed_and_members_not_unattached():
+    objects = [
+        _object("G1", "address_group", "", ["G2"]),
+        _object("G2", "address_group", "", ["G1", "MemberHost"]),
+        _object("MemberHost", value="10.0.0.7/32"),
+    ]
+    obj_map = build_object_map(objects)
+    # G1 is used by a rule; the cycle G1->G2->G1 must be diagnosed, not crash,
+    # and MemberHost (inside the circular group) must not be unattached.
+    findings = _analyze_unused_objects([_rule(1, sources=["G1"])], objects, obj_map)
+
+    types = {f["finding_type"] for f in findings}
+    assert "object_usage_unknown" in types     # circular diagnostic
+    circ = [f for f in findings if f["finding_type"] == "object_usage_unknown"][0]
+    assert "G1" in circ["evidence"].get("circular_groups", [])
+    unattached = [f for f in findings if f["finding_type"] == "unattached_object"]
+    assert not unattached or "MemberHost" not in unattached[0]["evidence"]["sample"]
 
 
 def test_empty_groups_include_customer_groups_and_suppress_vendor_builtins():

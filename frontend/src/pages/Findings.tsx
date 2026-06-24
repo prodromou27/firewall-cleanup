@@ -39,6 +39,12 @@ const FINDING_TYPES: Record<string, string> = {
   partial_shadowed_rule: 'Partially Shadowed Rule',
   inoperative_rule: 'Inoperative Rule',
   shadowing_not_evaluated: 'Shadowing Not Evaluated',
+  // Application control
+  rule_without_app_controls: 'No App Controls',
+  palo_alto_port_based_rule_candidate: 'Port-Based Rule',
+  risky_application_allowed: 'Risky Application',
+  application_analysis_not_supported_for_vendor: 'App Analysis N/A',
+  application_data_unavailable: 'App Data Unavailable',
   disabled_rule: 'Disabled Rule',
   zero_hit_rule: 'Zero Hits',
   low_usage_rule: 'Low Usage',

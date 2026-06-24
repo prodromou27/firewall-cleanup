@@ -147,6 +147,10 @@ def run_analysis(policy_id: str, db: Session) -> str:
         # 6b. Consolidation candidates (same src/dst/action, differing services)
         findings.extend(_analyze_mergeable_rules(rules))
 
+        # 6c. Application control (vendor-aware: Palo App-ID, risky apps, gating)
+        from app.analysis import app_control
+        findings.extend(app_control.analyze(rules, policy.vendor, obj_map))
+
         # 6c. Missing explicit logged cleanup (deny-all) rule (policy-level)
         findings.extend(_analyze_cleanup_rule(rules, obj_map))
 

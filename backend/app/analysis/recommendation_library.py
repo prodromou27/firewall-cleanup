@@ -70,6 +70,11 @@ LIBRARY: dict[str, str] = {
         "intended active period. If the schedule has expired or no longer reflects the "
         "business requirement, raise a change request to disable or remove the rule."
     ),
+    "inoperative_rule": (
+        "This rule references an empty group on its source or destination, so it can never "
+        "match traffic. Confirm whether the group should be populated (a missed change) or "
+        "the rule removed, then raise the appropriate change request."
+    ),
     "nat_complexity": (
         "Review this NAT rule to confirm the address translation is accurate, necessary, "
         "and documented. Verify the associated security rule permits only the intended "

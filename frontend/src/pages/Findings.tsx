@@ -37,6 +37,7 @@ const FINDING_TYPES: Record<string, string> = {
   same_action_shadowed_rule: 'Redundant Rule',
   conflicting_shadowed_rule: 'Conflicting Shadowed Rule',
   partial_shadowed_rule: 'Partially Shadowed Rule',
+  inoperative_rule: 'Inoperative Rule',
   shadowing_not_evaluated: 'Shadowing Not Evaluated',
   disabled_rule: 'Disabled Rule',
   zero_hit_rule: 'Zero Hits',

@@ -141,6 +141,9 @@ def run_analysis(policy_id: str, db: Session) -> str:
         # 6. Shadowed rules
         findings.extend(detect_shadows(rules, obj_map, policy.vendor))
 
+        # 6a. Inoperative rules (can never match — empty match field)
+        findings.extend(_analyze_inoperative_rules(rules, obj_map))
+
         # 6b. Consolidation candidates (same src/dst/action, differing services)
         findings.extend(_analyze_mergeable_rules(rules))
 
@@ -1925,6 +1928,57 @@ def _analyze_vpn_rules(rules: List[dict], obj_map: dict) -> List[dict]:
                 "any_service": any_svc,
             },
             "recommendation": _RL.get("vpn_access"),
+        })
+    return findings
+
+
+def _analyze_inoperative_rules(rules: List[dict], obj_map: dict) -> List[dict]:
+    """FireMon-style **inoperative** rule: an enabled rule that can never match
+    because a match field resolves to an empty group (zero members). Distinct from
+    shadow/redundant — the rule is *structurally* unable to match. Only source and
+    destination are evaluated: address expansion marks empty groups explicitly,
+    whereas an empty service group is ambiguous (vendors fall back to Any), so it
+    is intentionally excluded to avoid false positives. Unknown/unresolved objects
+    never trigger this (High confidence only). See docs/analysis-accuracy-model.md."""
+    findings: List[dict] = []
+    for rule in rules:
+        if not rule.get("enabled", True):
+            continue
+        empty_fields = []
+        for label, entries in (
+            ("source", expand_rule_sources(rule, obj_map)),
+            ("destination", expand_rule_destinations(rule, obj_map)),
+        ):
+            if entries and all(e.get("type") == "empty_group" for e in entries):
+                empty_fields.append((label, [e.get("name") for e in entries if e.get("name")]))
+        if not empty_fields:
+            continue
+        rid = rule.get("rule_id") or rule.get("rule_number", "?")
+        rname = rule.get("rule_name") or f"Rule {rid}"
+        fields_desc = "; ".join(
+            f"{lbl} group{'s' if len(names) != 1 else ''} {', '.join(names) or '(unnamed)'}"
+            for lbl, names in empty_fields)
+        findings.append({
+            "finding_type": "inoperative_rule",
+            "severity": "Medium",
+            "confidence": "High",
+            "title": f"Rule {rid} is inoperative (empty {empty_fields[0][0]} group)",
+            "description": (
+                f"{rname} can never match traffic: its {fields_desc} resolve to a group with "
+                "no members, so no packet can satisfy the rule. This is structurally "
+                "inoperative — distinct from being shadowed by an earlier rule."
+            ),
+            "affected_rules": [rule.get("id")],
+            "evidence": {
+                "empty_fields": [{"field": lbl, "groups": names} for lbl, names in empty_fields],
+                "rule": f"Rule {rid} ({rname})",
+                "why": "match field expands to an empty group (zero members)",
+            },
+            "recommendation": (
+                _RL.get("inoperative_rule")
+                or "Read-only observation. Review whether the empty group should be "
+                "populated or the rule removed, via change management."
+            ),
         })
     return findings
 

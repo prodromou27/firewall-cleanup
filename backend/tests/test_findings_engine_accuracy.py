@@ -4,6 +4,7 @@ from app.analysis.duplicate_detector import detect_duplicates
 from app.analysis.engine import (
     _analyze_empty_groups,
     _analyze_exposed_services,
+    _analyze_inoperative_rules,
     _analyze_permissive,
     _analyze_risky_services,
     _analyze_service_ranges,
@@ -153,6 +154,31 @@ def test_unused_objects_follow_nested_vendor_group_usage_and_skip_builtins():
     names = _unused_names(findings)
     assert names == {"Orphan"}
     _assert_quality(findings)
+
+
+def test_inoperative_rule_when_source_is_empty_group():
+    """An enabled rule whose source resolves to an empty group can never match —
+    distinct from shadowing. Disabled rules, populated groups, and unknown
+    (unresolved) objects must not trigger it."""
+    objects = [
+        _object("EmptyGrp", "address_group", "", []),
+        _object("FullGrp", "address_group", "", ["RealHost"]),
+        _object("RealHost", value="10.0.0.3/32"),
+    ]
+    obj_map = build_object_map(objects)
+
+    inert = _analyze_inoperative_rules([_rule(1, sources=["EmptyGrp"])], obj_map)
+    assert len(inert) == 1
+    assert inert[0]["finding_type"] == "inoperative_rule"
+    assert inert[0]["confidence"] == "High"
+    assert inert[0]["evidence"]["empty_fields"][0]["field"] == "source"
+
+    # Disabled → not inoperative; populated group → not inoperative.
+    assert _analyze_inoperative_rules([_rule(2, sources=["EmptyGrp"], enabled=False)], obj_map) == []
+    assert _analyze_inoperative_rules([_rule(3, sources=["FullGrp"])], obj_map) == []
+
+    # Unknown / unresolved object is NOT empty — must not be flagged inoperative.
+    assert _analyze_inoperative_rules([_rule(4, sources=["DoesNotExist"])], obj_map) == []
 
 
 def test_object_used_only_through_nat_is_not_unattached():

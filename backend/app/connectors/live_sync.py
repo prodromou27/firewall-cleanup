@@ -701,6 +701,27 @@ def _cp_translate(raw: dict) -> dict:
         }
         rules.append(rule)
 
+    # ── Diagnostics: group membership health (pinpoints empty-group / false
+    #    unused-object issues without needing access to the management DB) ──────
+    groups = [(n, o) for n, o in obj_map.items()
+              if isinstance(o, dict) and "group" in str(o.get("type", "")).lower()]
+    empty = [n for n, o in groups if not o.get("members")]
+    logger.info("CP object map: %d total, %d groups (%d populated, %d EMPTY)",
+                len(obj_map), len(groups), len(groups) - len(empty), len(empty))
+    if empty:
+        logger.warning("CP empty groups after resolution (first 10 of %d): %s",
+                       len(empty), empty[:10])
+    # Sanity-check resolution: members that don't resolve to a known object name/uid.
+    obj_keys = set(obj_map.keys())
+    unresolved = 0
+    for _, o in groups:
+        for m in (o.get("members") or []):
+            if str(m) not in obj_keys:
+                unresolved += 1
+    if unresolved:
+        logger.warning("CP: %d group member references do not match any object name/uid "
+                       "(possible name/uid mismatch causing false 'unused' findings)", unresolved)
+
     return {"rules": rules, "objects": obj_map, "warnings": vpn_warnings, "nat_rules": nat_rules_norm}
 
 

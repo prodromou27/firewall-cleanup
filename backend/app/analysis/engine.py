@@ -104,6 +104,13 @@ def run_analysis(policy_id: str, db: Session) -> str:
                 ),
             })
 
+        # ── Import-quality / data-availability gates (Informational only) ──────
+        # Surface what data was/wasn't available so reviewers can judge finding
+        # completeness, and so detectors that depend on missing data degrade
+        # transparently rather than silently.
+        if rules:
+            findings.extend(_import_quality_notes(rules, objects, policy))
+
         # 1. Disabled rules
         findings.extend(_analyze_disabled(rules, obj_map))
 
@@ -528,6 +535,42 @@ def _consolidate_findings(findings: List[dict]) -> List[dict]:
 
     return consolidated
 
+
+
+def _import_quality_notes(rules: List[dict], objects: List[dict], policy) -> List[dict]:
+    """Informational data-availability notes — never inflate severity.
+
+    Detectors that depend on this data already gate themselves; these notes make
+    the gaps visible to reviewers so they can judge how complete the analysis is.
+    """
+    notes: List[dict] = []
+
+    def note(ftype, title, desc):
+        notes.append({
+            "finding_type": ftype, "severity": "Informational", "confidence": "High",
+            "title": title, "description": desc, "affected_rules": [],
+            "evidence": {"vendor": getattr(policy, "vendor", ""), "rule_count": len(rules),
+                         "object_count": len(objects)},
+            "recommendation": "Read-only data-completeness note; no action implied.",
+        })
+
+    enabled = [r for r in rules if r.get("enabled", True)]
+    if enabled and not any(r.get("hit_count") is not None for r in enabled):
+        note("import_quality", "Hit-count data unavailable",
+             "No hit counts were available for this policy, so zero-hit and low-usage "
+             "rule findings were not generated. Enable hit-count collection / re-sync to "
+             "include usage analysis.")
+    if not (policy.nat_rules or []):
+        note("import_quality", "NAT data unavailable",
+             "No NAT rules were captured, so NAT-to-policy mapping and NAT-based public "
+             "exposure analysis were limited. Public exposure was derived from the security "
+             "policy only.")
+    if not any((r.get("source_interfaces") or r.get("destination_interfaces")) for r in rules):
+        note("import_quality", "Interface/zone context unavailable",
+             "Rules carried no interface/zone context, so shadowing and duplicate analysis "
+             "treated the policy as a single evaluation context. Where the firewall uses "
+             "interfaces/zones/layers, results may be broader than the device's real scope.")
+    return notes
 
 
 def _analyze_disabled(rules: List[dict], obj_map: dict) -> List[dict]:

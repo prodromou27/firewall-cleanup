@@ -341,3 +341,29 @@ def test_debug_keyword_flags_temp_rule_and_cleanup_removed():
     from app.config import settings
     assert "debug" in settings.temp_keywords
     assert "cleanup" not in settings.temp_keywords
+
+
+def test_import_quality_notes_flag_missing_data():
+    from app.analysis.engine import _import_quality_notes
+
+    class P:
+        vendor = "FortiGate"
+        nat_rules = None
+
+    rules = [{"id": "r1", "enabled": True, "hit_count": None,
+              "source_interfaces": [], "destination_interfaces": []}]
+    notes = _import_quality_notes(rules, [], P())
+    titles = {n["title"] for n in notes}
+    assert "Hit-count data unavailable" in titles
+    assert "NAT data unavailable" in titles
+    assert "Interface/zone context unavailable" in titles
+    assert all(n["severity"] == "Informational" for n in notes)
+
+    # With hit data + interfaces + NAT, the corresponding notes disappear.
+    class P2:
+        vendor = "FortiGate"
+        nat_rules = [{"nat_type": "destination"}]
+
+    rules2 = [{"id": "r1", "enabled": True, "hit_count": 5,
+               "source_interfaces": ["wan1"], "destination_interfaces": ["lan"]}]
+    assert _import_quality_notes(rules2, [], P2()) == []

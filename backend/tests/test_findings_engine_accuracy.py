@@ -367,3 +367,29 @@ def test_import_quality_notes_flag_missing_data():
     rules2 = [{"id": "r1", "enabled": True, "hit_count": 5,
                "source_interfaces": ["wan1"], "destination_interfaces": ["lan"]}]
     assert _import_quality_notes(rules2, [], P2()) == []
+
+
+def test_evaluation_context_stamped_on_rule_scoped_findings():
+    from app.analysis.engine import _enrich_evaluation_context
+
+    rules = [
+        {"id": "r1", "source_interfaces": ["wan1"], "destination_interfaces": ["lan"]},
+        {"id": "r2", "source_interfaces": ["wan2"], "destination_interfaces": ["dmz"]},
+    ]
+
+    # Single-rule finding → context attached.
+    single = {"finding_type": "risky_service", "affected_rules": ["r1"], "evidence": {}}
+    # Finding spanning two different contexts → left unstamped (ambiguous).
+    spanning = {"finding_type": "duplicate_rule", "affected_rules": ["r1", "r2"], "evidence": {}}
+    # Finding that already carries context → not overwritten.
+    preset = {"finding_type": "same_action_shadowed_rule", "affected_rules": ["r1"],
+              "evidence": {"evaluation_context": "preset"}}
+    # Object-only finding (no rules) → untouched.
+    object_only = {"finding_type": "unused_object", "affected_rules": [], "evidence": {}}
+
+    _enrich_evaluation_context([single, spanning, preset, object_only], rules, "FortiGate")
+
+    assert single["evidence"]["evaluation_context"] == "interfaces wan1 → lan"
+    assert "evaluation_context" not in spanning["evidence"]
+    assert preset["evidence"]["evaluation_context"] == "preset"
+    assert "evaluation_context" not in object_only["evidence"]

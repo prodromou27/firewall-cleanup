@@ -218,6 +218,12 @@ def run_analysis(policy_id: str, db: Session) -> str:
 
         findings = _consolidate_findings(findings)
 
+        # Phase 12: stamp every rule-scoped finding with the vendor evaluation
+        # context (interface pair / layer / zone) it applies to, so findings are
+        # explainable about *where* in the rulebase they hold. Done centrally so
+        # all detectors benefit without each needing the vendor passed in.
+        _enrich_evaluation_context(findings, rules, policy.vendor)
+
         # Save findings
         finding_count = 0
         high_count = 0
@@ -535,6 +541,27 @@ def _consolidate_findings(findings: List[dict]) -> List[dict]:
 
     return consolidated
 
+
+
+def _enrich_evaluation_context(findings: List[dict], rules: List[dict], vendor: str) -> None:
+    """Stamp each rule-scoped finding with its vendor evaluation-context label.
+
+    Mutates findings in place. The label (FortiGate interface pair, Check Point
+    layer + install-on target, Palo Alto rulebase + zones, Cisco ACL/interface,
+    Huawei zone pair) tells a reviewer *where* the finding applies. Only set when
+    every affected rule shares a single context, and never overwritten — shadow
+    and duplicate findings already carry their own context evidence.
+    """
+    from app.analysis.vendor_semantics import context_label
+
+    rule_ctx = {r.get("id"): context_label(r, vendor) for r in rules if r.get("id")}
+    for f in findings:
+        ev = f.get("evidence")
+        if not isinstance(ev, dict) or ev.get("evaluation_context"):
+            continue
+        labels = {rule_ctx[rid] for rid in (f.get("affected_rules") or []) if rid in rule_ctx}
+        if len(labels) == 1:
+            ev["evaluation_context"] = next(iter(labels))
 
 
 def _import_quality_notes(rules: List[dict], objects: List[dict], policy) -> List[dict]:

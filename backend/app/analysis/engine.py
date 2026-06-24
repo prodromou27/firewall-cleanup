@@ -80,6 +80,30 @@ def run_analysis(policy_id: str, db: Session) -> str:
 
         findings = []
 
+        # Safety net: a policy with objects but no rules almost always means the
+        # rulebase could not be fetched/parsed. Surface one clear diagnostic
+        # instead of running checks that would flood with false positives.
+        if not rules and objects:
+            findings.append({
+                "finding_type": "import_quality",
+                "severity": "High",
+                "confidence": "High",
+                "title": "No firewall rules were imported for this policy",
+                "description": (
+                    "This policy has objects but no access rules — usually the rulebase "
+                    "could not be fetched or parsed during import/sync. Rule and object "
+                    "usage checks are skipped to avoid false findings until the rulebase "
+                    "is available."
+                ),
+                "affected_rules": [],
+                "evidence": {"rule_count": 0, "object_count": len(objects)},
+                "recommendation": (
+                    _RL.get("import_quality")
+                    or "Re-import the configuration or re-sync the device and confirm the "
+                    "rulebase was fetched successfully (check the sync log)."
+                ),
+            })
+
         # 1. Disabled rules
         findings.extend(_analyze_disabled(rules, obj_map))
 
@@ -1344,6 +1368,13 @@ def _analyze_unused_objects(
     rules: List[dict], objects: List[dict], obj_map: dict
 ) -> List[dict]:
     findings = []
+
+    # Object usage is defined by rule references. With no rules we cannot
+    # determine usage at all — flagging every object as "unused" would be wrong
+    # and floods the results (e.g. thousands of false findings when a rulebase
+    # fetch failed). Skip the check until rules are present.
+    if not rules:
+        return findings
 
     # Collect all object names referenced by rules
     used_names = set()

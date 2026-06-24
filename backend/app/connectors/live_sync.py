@@ -823,11 +823,17 @@ def _write_to_db(parsed: dict, policy: FirewallPolicy, db: Session):
     # inventing findings).
     policy.nat_rules = parsed.get("nat_rules") or None
 
-    # Write objects
+    # Write objects. Assign the id in Python (the model uses a uuid default) so
+    # member rows can reference it without a per-object db.flush() — that avoids
+    # one DB round-trip per object (thousands on a large Check Point management)
+    # and is the dominant sync-write cost.
+    member_rows: list[ObjectMember] = []
     for name, obj in parsed["objects"].items():
         members = obj.get("members", [])
         raw_data = obj.get("raw_data") if isinstance(obj.get("raw_data"), dict) else {}
-        db_obj = FirewallObject(
+        oid = str(uuid.uuid4())
+        db.add(FirewallObject(
+            id=oid,
             policy_id=policy.id,
             vendor=vendor,
             object_uid=obj.get("uid") or raw_data.get("uid"),
@@ -840,11 +846,14 @@ def _write_to_db(parsed: dict, policy: FirewallPolicy, db: Session):
             members=members,
             comment=str(obj.get("comment", "") or ""),
             raw_data=redact_secrets(raw_data),
-        )
-        db.add(db_obj)
-        db.flush()
+        ))
         for m in members:
-            db.add(ObjectMember(parent_id=db_obj.id, member_name=m))
+            member_rows.append(ObjectMember(parent_id=oid, member_name=m))
+    # One flush inserts all objects so member FK references resolve, then bulk
+    # insert members (single round-trip each instead of per-object).
+    db.flush()
+    if member_rows:
+        db.bulk_save_objects(member_rows)
 
     # Write rules
     for seq, r in enumerate(parsed["rules"]):

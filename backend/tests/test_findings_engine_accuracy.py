@@ -320,3 +320,17 @@ def test_consolidation_suppresses_generic_risky_service_when_specific_exposure_e
     assert "risky_service" not in types
     rdp = [f for f in consolidated if f["finding_type"] == "rdp_exposed"][0]
     assert rdp["evidence"]["consolidated_related_findings"][0]["finding_type"] == "risky_service"
+
+
+def test_no_unused_findings_when_no_rules():
+    """With objects but no rules, usage is unknown — never flag all objects unused."""
+    from app.analysis.engine import _analyze_unused_objects
+    objects = [{"object_name": f"host{i}", "object_type": "host", "value": f"10.0.0.{i}", "members": []} for i in range(50)]
+    obj_map = {o["object_name"]: o for o in objects}
+    assert _analyze_unused_objects([], objects, obj_map) == []
+
+
+def test_debug_keyword_flags_temp_rule_and_cleanup_removed():
+    from app.config import settings
+    assert "debug" in settings.temp_keywords
+    assert "cleanup" not in settings.temp_keywords

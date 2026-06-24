@@ -1418,6 +1418,7 @@ def _analyze_unused_objects(
     for name in list(used_names):
         collect_members(name, set())
 
+    unused: List[dict] = []
     for obj in objects:
         name = obj.get("object_name", "")
         if name.lower() in ("any", "all"):
@@ -1429,26 +1430,30 @@ def _analyze_unused_objects(
         if _is_vendor_builtin_object(obj):
             continue
         if not (_object_aliases(obj) & used_names):
-            findings.append({
-                "finding_type": "unused_object",
-                "severity": "Informational",
-                "confidence": "Medium",
-                "title": f"Object '{name}' appears unused",
-                "description": (
-                    f"The object '{name}' ({obj.get('object_type', 'unknown')}: "
-                    f"{obj.get('value', 'N/A')}) is not referenced by any firewall rule "
-                    "in this policy. Unused objects add clutter to the object database."
-                ),
-                "affected_rules": [],
-                "affected_objects": [obj.get("id")],
-                "evidence": {
-                    "object_name": name,
-                    "object_type": obj.get("object_type"),
-                    "value": obj.get("value"),
-                    "members": obj.get("members"),
-                },
-                "recommendation": _RL.get("unused_object"),
-            })
+            unused.append(obj)
+
+    # Aggregate unused objects into ONE finding (instead of one per object, which
+    # floods the Findings list with thousands of low-value rows on large policies).
+    # The Objects page "Unused" filter unions affected_objects across findings, so
+    # every unused object is still listed there — this only de-noises Findings.
+    if unused:
+        names = [o.get("object_name", "") for o in unused]
+        findings.append({
+            "finding_type": "unused_object",
+            "severity": "Informational",
+            "confidence": "Medium",
+            "title": f"{len(unused)} unused object{'s' if len(unused) != 1 else ''} in the object database",
+            "description": (
+                f"{len(unused)} objects are not referenced by any firewall rule in this "
+                "policy (directly or through a group). Unused objects add clutter to the "
+                "object database. Review the full list on the Objects page using the "
+                "'Unused' filter."
+            ),
+            "affected_rules": [],
+            "affected_objects": [o.get("id") for o in unused if o.get("id")],
+            "evidence": {"count": len(unused), "sample": names[:50]},
+            "recommendation": _RL.get("unused_object"),
+        })
 
     return findings
 

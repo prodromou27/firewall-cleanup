@@ -17,6 +17,12 @@ from app.analysis.normalizer import build_object_map
 from app.analysis.shadow_detector import detect_shadows
 
 
+def _unused_names(findings):
+    """Unused objects are now reported as a single aggregate finding whose
+    evidence['sample'] lists the object names."""
+    return set(findings[0]["evidence"]["sample"]) if findings else set()
+
+
 def _rule(n, sources=None, destinations=None, services=None, **overrides):
     rule = {
         "id": f"rule-{n}",
@@ -143,7 +149,7 @@ def test_unused_objects_follow_nested_vendor_group_usage_and_skip_builtins():
     obj_map = build_object_map(objects)
     findings = _analyze_unused_objects([_rule(1, sources=["Parent"])], objects, obj_map)
 
-    names = {f["evidence"]["object_name"] for f in findings}
+    names = _unused_names(findings)
     assert names == {"Orphan"}
     _assert_quality(findings)
 
@@ -172,7 +178,7 @@ def test_checkpoint_group_uid_members_prevent_unused_member_false_positive():
 
     findings = _analyze_unused_objects([_rule(1, sources=["CP-Group"])], objects, obj_map)
 
-    names = {f["evidence"]["object_name"] for f in findings}
+    names = _unused_names(findings)
     assert names == {"Orphan"}
 
 
@@ -228,7 +234,7 @@ def test_db_object_member_entries_prevent_unused_member_false_positive():
 
     findings = _analyze_unused_objects([_rule(1, sources=["DB-Group"])], objects, obj_map)
 
-    names = {f["evidence"]["object_name"] for f in findings}
+    names = _unused_names(findings)
     assert names == {"Orphan"}
 
 
@@ -264,7 +270,7 @@ def test_legacy_json_string_rule_refs_still_mark_group_members_used():
 
     findings = _analyze_unused_objects([_rule_to_dict(DbRule())], objects, build_object_map(objects))
 
-    names = {f["evidence"]["object_name"] for f in findings}
+    names = _unused_names(findings)
     assert names == {"Orphan"}
 
 

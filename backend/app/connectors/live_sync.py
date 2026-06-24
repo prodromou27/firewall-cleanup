@@ -546,12 +546,15 @@ def _cp_translate(raw: dict) -> dict:
                     rname = m
                 if rname:
                     members.append(rname)
-            if raw_members and not members:
-                logger.warning("CP group '%s': %d raw members but none resolved (shape=%s)",
-                               name, len(raw_members), type(raw_members[0]).__name__)
-            elif not raw_members:
-                logger.info("CP group '%s' returned no members from the API (details-level/membership)", name)
-            obj_map[name] = {"type": "group", "value": None, "members": members, "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
+            # Groups appear in BOTH show-groups (with members) and the rulebase
+            # inline object-dictionary (summary, no members). The summary copy
+            # must NOT overwrite an already-populated group, or members are lost.
+            existing = obj_map.get(name)
+            if not members and isinstance(existing, dict) and existing.get("members"):
+                pass  # keep the populated version from the other source
+            else:
+                obj_map[name] = {"type": "group", "value": None, "members": members,
+                                 "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
 
         elif t == "wildcard":
             obj_map[name] = {"type": "wildcard", "value": obj.get("ipv4-address", ""), "members": [], "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
@@ -579,7 +582,13 @@ def _cp_translate(raw: dict) -> dict:
 
         elif t == "service-group":
             members = [resolve(m) for m in obj.get("members", [])]
-            obj_map[name] = {"type": "service-group", "value": None, "members": members, "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
+            members = [m for m in members if m]
+            existing = obj_map.get(name)
+            if not members and isinstance(existing, dict) and existing.get("members"):
+                pass  # keep populated version; don't let an inline summary blank it
+            else:
+                obj_map[name] = {"type": "service-group", "value": None, "members": members,
+                                 "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
 
         else:
             # Unknown type — store as generic host for completeness

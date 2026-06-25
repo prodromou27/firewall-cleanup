@@ -46,6 +46,7 @@ const FINDING_TYPES: Record<string, string> = {
   fortigate_security_profile_gap: 'No Security Profiles',
   application_analysis_not_supported_for_vendor: 'App Analysis N/A',
   application_data_unavailable: 'App Data Unavailable',
+  detector_prerequisites_unmet: 'Limited by Missing Data',
   disabled_rule: 'Disabled Rule',
   zero_hit_rule: 'Zero Hits',
   low_usage_rule: 'Low Usage',

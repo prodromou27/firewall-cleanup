@@ -110,6 +110,13 @@ def run_analysis(policy_id: str, db: Session) -> str:
         # transparently rather than silently.
         if rules:
             findings.extend(_import_quality_notes(rules, objects, policy))
+            # Detector prerequisite matrix: assess data availability once and
+            # surface which detectors were suppressed/downgraded (transparency).
+            from app.analysis import prerequisites
+            _avail = prerequisites.assess(rules, objects, obj_map, policy.nat_rules, policy.vendor)
+            _prereq = prerequisites.summary_finding(_avail, policy.vendor)
+            if _prereq:
+                findings.append(_prereq)
 
         # 1. Disabled rules
         findings.extend(_analyze_disabled(rules, obj_map))

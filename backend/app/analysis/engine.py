@@ -358,6 +358,15 @@ def run_analysis(policy_id: str, db: Session) -> str:
         policy.health_score = health_score
         policy.top_risk_drivers = top_risk_drivers
 
+        # Consolidated import-quality score (Phase 10): how complete the imported
+        # data was, so findings can be judged against it. Read-only metadata.
+        from app.analysis import prerequisites as _prereq_mod
+        _warns = len(getattr(policy, "parse_warnings", None) or [])
+        _iq = _prereq_mod.import_quality(
+            rules, objects, obj_map, policy.nat_rules, policy.vendor, parser_warnings=_warns)
+        policy.import_quality_score = _iq["score"]
+        policy.import_quality = _iq
+
         run.status = "completed"
         run.completed_at = datetime.utcnow()
         run.findings_created = finding_count
@@ -366,6 +375,7 @@ def run_analysis(policy_id: str, db: Session) -> str:
         run.severity_snapshot = json.dumps(dict(_sev_snapshot))
         _type_snapshot = Counter(f.get("finding_type", "unknown") for f in findings)
         run.finding_type_snapshot = json.dumps(dict(_type_snapshot))
+        run.import_quality = json.dumps(_iq)
 
         db.commit()
         logger.info(f"Analysis complete for policy {policy_id}: {finding_count} findings")

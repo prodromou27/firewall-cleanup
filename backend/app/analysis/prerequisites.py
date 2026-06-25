@@ -138,6 +138,40 @@ def assess(rules: List[dict], objects: List[dict], obj_map: dict,
     }
 
 
+# Relative importance of each capability for the 0-100 import-quality score
+# (weights sum to 100, so earned weight == score).
+_QUALITY_WEIGHTS = {
+    "rules": 20, "objects": 15, "group_graph": 15, "hit_counts": 12,
+    "nat": 10, "interfaces": 8, "applications": 8, "last_hit": 6, "layer_context": 6,
+}
+
+
+def _grade(score: int) -> str:
+    return "A" if score >= 85 else "B" if score >= 70 else "C" if score >= 50 else "D"
+
+
+def import_quality(rules: List[dict], objects: List[dict], obj_map: dict,
+                   nat_rules, vendor: str, device_interfaces=None,
+                   parser_warnings: int = 0) -> dict:
+    """Consolidated 0-100 data-import-quality score + breakdown for a policy.
+
+    The score is the weighted share of data capabilities actually present, lightly
+    penalised by parser warnings. It is read-only metadata so the UI/report can
+    state how complete the import was — it never changes severities."""
+    avail = assess(rules, objects, obj_map, nat_rules, vendor, device_interfaces)
+    earned = sum(w for cap, w in _QUALITY_WEIGHTS.items() if avail.get(cap))
+    score = earned - min(10, max(0, int(parser_warnings)) * 2)  # cap penalty at 10
+    score = max(0, min(100, score))
+    return {
+        "score": score,
+        "grade": _grade(score),
+        "capabilities": avail,
+        "weights": _QUALITY_WEIGHTS,
+        "missing": [c for c in _QUALITY_WEIGHTS if not avail.get(c)],
+        "parser_warnings": int(parser_warnings or 0),
+    }
+
+
 def evaluate(availability: Dict[str, bool], vendor: str) -> List[dict]:
     """Return one entry per detector whose prerequisites are not fully met (and
     that applies to this vendor): {detector, label, decision, unmet}."""

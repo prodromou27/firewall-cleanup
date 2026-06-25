@@ -196,6 +196,25 @@ async def lifespan(app: FastAPI):
                 ))
                 _conn.commit()
                 logger.info("Schema migration: added finding_type_snapshot column to analysis_runs.")
+            if "import_quality" not in _rcols:
+                _conn.execute(_text(
+                    "ALTER TABLE analysis_runs ADD COLUMN import_quality TEXT"
+                ))
+                _conn.commit()
+                logger.info("Schema migration: added import_quality column to analysis_runs.")
+            # Import-quality score + breakdown on firewall_policies.
+            if "import_quality_score" not in _cols:
+                _conn.execute(_text(
+                    "ALTER TABLE firewall_policies ADD COLUMN import_quality_score REAL"
+                ))
+                _conn.commit()
+                logger.info("Schema migration: added import_quality_score column to firewall_policies.")
+            if "import_quality" not in _cols:
+                _conn.execute(_text(
+                    "ALTER TABLE firewall_policies ADD COLUMN import_quality TEXT"
+                ))
+                _conn.commit()
+                logger.info("Schema migration: added import_quality column to firewall_policies.")
       except Exception as _mig_exc:
         logger.error("Schema migration failed: %s", _mig_exc)
 

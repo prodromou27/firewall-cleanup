@@ -1173,6 +1173,7 @@ def _policy_summary(p: FirewallPolicy) -> dict:
         "complexity_score": p.complexity_score,
         "cleanup_readiness_score": p.cleanup_readiness_score,
         "health_score": p.health_score,
+        "import_quality_score": p.import_quality_score,
     }
 
 
@@ -1196,6 +1197,8 @@ def _policy_detail(p: FirewallPolicy, db: Session) -> dict:
         "complexity_breakdown": p.complexity_breakdown or {},
         "cleanup_readiness_score": p.cleanup_readiness_score,
         "health_score": p.health_score,
+        "import_quality_score": p.import_quality_score,
+        "import_quality": p.import_quality or {},
         "top_risk_drivers": p.top_risk_drivers or [],
     }
 

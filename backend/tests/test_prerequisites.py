@@ -89,6 +89,33 @@ def test_summary_finding_none_when_everything_available():
     assert P.summary_finding(avail, "PaloAlto") is None
 
 
+def test_import_quality_score_full_data_is_high():
+    rules = [_rule(hit_count=3, last_hit="2026-01-01T00:00:00Z",
+                   source_interfaces=["wan1"], section="L1", applications=["ssl"])]
+    objects = [{"object_name": "10.1.0.0/24", "object_type": "network"}]
+    iq = P.import_quality(rules, objects, {"10.1.0.0/24": {}},
+                          nat_rules=[{"nat_type": "destination"}], vendor="PaloAlto")
+    assert iq["score"] >= 85 and iq["grade"] == "A"
+    assert iq["missing"] == []
+    assert iq["capabilities"]["hit_counts"] is True
+
+
+def test_import_quality_score_sparse_data_is_low():
+    iq = P.import_quality([_rule()], [], {}, nat_rules=None, vendor="CiscoASA")
+    # rules present but no objects/nat/hits/interfaces/apps → well below half.
+    assert iq["score"] < 50 and iq["grade"] == "D"
+    assert "hit_counts" in iq["missing"] and "objects" in iq["missing"]
+
+
+def test_import_quality_parser_warnings_penalise_but_floor_at_zero():
+    base = P.import_quality([_rule(hit_count=1)], [{"object_name": "h"}], {"h": {}},
+                            nat_rules=None, vendor="PaloAlto", parser_warnings=0)
+    penalised = P.import_quality([_rule(hit_count=1)], [{"object_name": "h"}], {"h": {}},
+                                 nat_rules=None, vendor="PaloAlto", parser_warnings=10)
+    assert penalised["score"] == max(0, base["score"] - 10)
+    assert penalised["parser_warnings"] == 10
+
+
 def test_summary_finding_lists_suppressed_and_downgraded():
     avail = P.assess([_rule()], [], {}, nat_rules=None, vendor="PaloAlto")
     f = P.summary_finding(avail, "PaloAlto")

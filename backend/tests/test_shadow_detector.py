@@ -157,3 +157,26 @@ def test_shadowing_not_evaluated_for_unknown_objects(obj_map):
     ]
     findings = detect_shadows(rules, obj_map)
     assert any(f["finding_type"] == "shadowing_not_evaluated" for f in findings)
+
+
+def test_negated_rule_excluded_from_shadow_comparison(obj_map):
+    """A rule with a negated cell ('Any except X') must not be called shadowed —
+    its containment is inverted, so comparing it as an ordinary set is wrong."""
+    rules = [
+        make_rule(1, ["Net-16"], ["Server"], ["any-svc"]),
+        make_rule(2, ["Host-5"], ["Server"], ["HTTPS-SVC"]),
+    ]
+    rules[1]["negated"] = True   # later rule negates a cell
+    findings = detect_shadows(rules, obj_map)
+    assert not any(f["finding_type"] in ("redundant_rule", "shadowed_rule") for f in findings)
+    assert any(f["finding_type"] == "shadowing_not_evaluated" for f in findings)
+
+
+def test_negated_earlier_rule_does_not_shadow(obj_map):
+    rules = [
+        make_rule(1, ["Net-16"], ["Server"], ["any-svc"]),
+        make_rule(2, ["Host-5"], ["Server"], ["HTTPS-SVC"]),
+    ]
+    rules[0]["negated"] = True   # the broad earlier rule is negated → can't shadow
+    findings = detect_shadows(rules, obj_map)
+    assert not any(f["finding_type"] in ("redundant_rule", "shadowed_rule") for f in findings)

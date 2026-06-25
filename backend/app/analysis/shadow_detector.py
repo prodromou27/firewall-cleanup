@@ -146,6 +146,11 @@ def _detect_within_context(expanded: List[dict], vendor: str, not_evaluated: lis
         if _has_unknown(later):
             not_evaluated.append(later_rule.get("id"))
             continue
+        # Negated cells ("Any except X") invert containment — comparing them as
+        # ordinary sets produces false shadows, so they are not evaluated.
+        if later_rule.get("negated"):
+            not_evaluated.append(later_rule.get("id"))
+            continue
 
         reported = False
         for i in range(j):
@@ -157,6 +162,8 @@ def _detect_within_context(expanded: List[dict], vendor: str, not_evaluated: lis
             if not earlier_rule.get("enabled", True):
                 continue
             if _has_unknown(earlier):
+                continue
+            if earlier_rule.get("negated"):
                 continue
 
             src_ok, src_rel = _sources_contained(earlier["sources"], later["sources"])

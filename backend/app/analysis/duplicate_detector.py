@@ -85,6 +85,9 @@ def detect_duplicates(
     for rule in rules:
         if not rule.get("enabled", True):
             continue
+        # Negated cells invert set semantics — exclude from duplicate comparison.
+        if rule.get("negated"):
+            continue
         expanded.append({
             "rule": rule,
             "context": context_key(rule, vendor),

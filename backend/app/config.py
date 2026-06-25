@@ -93,6 +93,14 @@ class Settings(BaseSettings):
     inactivity_threshold_medium: int = 180
     inactivity_threshold_high: int = 365
 
+    # Usage-analysis settings (Phase 8). Usage findings require usage/log data and
+    # a meaningful observation window; these knobs keep them conservative.
+    usage_observation_days: int = 90            # window the hit/last-hit data is assumed to cover
+    min_rule_age_days: int = 30                 # don't classify usage until the policy has been observed this long
+    low_hit_threshold: int = 0                  # 0 disables; >0 flags rules with 0 < hits <= threshold as low-usage
+    application_usage_threshold: int = 0        # min app hits before unused-app-in-rule (needs app-usage data; 0 = off)
+    suppress_usage_findings_when_incomplete: bool = True  # skip usage findings when the observation window is too short
+
     # Internal networks (for risk scoring)
     internal_networks: List[str] = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
     sensitive_networks: List[str] = []

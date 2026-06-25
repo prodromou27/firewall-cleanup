@@ -121,8 +121,15 @@ def run_analysis(policy_id: str, db: Session) -> str:
         # 1. Disabled rules
         findings.extend(_analyze_disabled(rules, obj_map))
 
-        # 2. Zero/low hit rules
-        findings.extend(_analyze_usage(rules, obj_map))
+        # 2. Zero/low hit rules (suppressed if the policy is younger than the
+        #    minimum observation window — recently imported rules aren't "unused").
+        _policy_age_days = None
+        if getattr(policy, "created_at", None):
+            try:
+                _policy_age_days = (datetime.utcnow() - policy.created_at).days
+            except (TypeError, ValueError):
+                _policy_age_days = None
+        findings.extend(_analyze_usage(rules, obj_map, _policy_age_days))
 
         # 3. Any source/dest/service
         findings.extend(_analyze_permissive(rules, obj_map))
@@ -672,9 +679,21 @@ def _analyze_disabled(rules: List[dict], obj_map: dict) -> List[dict]:
     return findings
 
 
-def _analyze_usage(rules: List[dict], obj_map: dict) -> List[dict]:
+def _analyze_usage(rules: List[dict], obj_map: dict, policy_age_days: int = None) -> List[dict]:
     findings = []
     now = datetime.utcnow()
+
+    # Phase 8: usage findings require a meaningful observation window. If the
+    # policy has been observed for less than the minimum age, hit/last-hit data
+    # cannot yet show a rule is unused — suppress usage findings rather than flag
+    # recently-imported rules as dead.
+    obs_days = settings.usage_observation_days
+    if (settings.suppress_usage_findings_when_incomplete
+            and policy_age_days is not None
+            and policy_age_days < settings.min_rule_age_days):
+        return findings
+
+    low_thr = settings.low_hit_threshold
 
     for rule in rules:
         if not rule.get("enabled", True):
@@ -696,8 +715,25 @@ def _analyze_usage(rules: List[dict], obj_map: dict) -> List[dict]:
                     "matched any traffic, which may indicate it is redundant or incorrectly configured."
                 ),
                 "affected_rules": [rule.get("id")],
-                "evidence": {"rule_id": rule_id, "hit_count": 0},
+                "evidence": {"rule_id": rule_id, "hit_count": 0, "observation_days": obs_days},
                 "recommendation": _RL.get("zero_hit_rule"),
+            })
+        elif low_thr and isinstance(hit_count, int) and 0 < hit_count <= low_thr:
+            # Count-based low usage (opt-in via low_hit_threshold > 0).
+            findings.append({
+                "finding_type": "low_usage_rule",
+                "severity": "Low",
+                "confidence": "High",
+                "title": f"Rule {rule_id} has very few hits ({hit_count})",
+                "description": (
+                    f"{rule_name} has only {hit_count} recorded hit(s) "
+                    f"(threshold {low_thr}). Rules with very low usage over the observation "
+                    f"window (~{obs_days} days) may be candidates for review."
+                ),
+                "affected_rules": [rule.get("id")],
+                "evidence": {"rule_id": rule_id, "hit_count": hit_count,
+                             "low_hit_threshold": low_thr, "observation_days": obs_days},
+                "recommendation": _RL.get("low_usage_rule"),
             })
         elif last_hit:
             try:

@@ -76,6 +76,32 @@ def test_zero_hit_requires_hit_count_data():
     _assert_quality(findings)
 
 
+def test_usage_observation_window_recorded_in_evidence():
+    findings = _analyze_usage([_rule(2, hit_count=0)], {})
+    assert findings[0]["evidence"]["observation_days"]  # window surfaced
+
+
+def test_min_age_suppresses_usage_findings_for_new_policy():
+    # A policy observed for fewer days than the minimum age → usage suppressed.
+    assert _analyze_usage([_rule(1, hit_count=0)], {}, policy_age_days=1) == []
+    # An old-enough policy still produces the zero-hit finding.
+    assert _analyze_usage([_rule(1, hit_count=0)], {}, policy_age_days=400)
+
+
+def test_low_hit_threshold_is_opt_in(monkeypatch):
+    from app.config import settings
+    # Disabled by default → a 3-hit rule is not flagged.
+    assert _analyze_usage([_rule(1, hit_count=3)], {}) == []
+    # Enable the threshold → 0 < hits <= threshold is a low-usage finding.
+    monkeypatch.setattr(settings, "low_hit_threshold", 5)
+    findings = _analyze_usage([_rule(1, hit_count=3)], {})
+    assert len(findings) == 1
+    assert findings[0]["finding_type"] == "low_usage_rule"
+    assert findings[0]["evidence"]["hit_count"] == 3
+    # Above the threshold → not flagged.
+    assert _analyze_usage([_rule(2, hit_count=9)], {}) == []
+
+
 def test_overly_permissive_rule_reports_evidence_and_recommendation():
     findings = _analyze_permissive([_rule(1)], {})
 

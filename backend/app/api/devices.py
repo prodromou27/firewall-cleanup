@@ -26,13 +26,16 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from pydantic import BaseModel, field_validator
-from sqlalchemy import or_
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.device import FirewallDevice
 from app.models.customer import Customer
-from app.models.policy import FirewallPolicy
+from app.models.device_cve import DeviceCVECache
+from app.models.finding import Finding, FindingComment
+from app.models.policy import AnalysisRun, FirewallObject, FirewallPolicy, FirewallRule, ObjectMember
+from app.models.report import GeneratedReport
 from app.models.revision import PolicyRevision
 from app.security.crypto import encrypt_credential, decrypt_credential
 from app.security.audit import audit_log
@@ -547,8 +550,17 @@ def delete_device(
     user: User = Depends(require_capability(CAP_DELETE_DATA)),
 ):
     d = _get_device_authz(device_id, db, user)
+    deleted_device_id = d.id
+    deleted_device_name = d.name
+    deleted_customer_id = d.customer_id
 
-    audit_log("device.delete", user_id=user.id, device_id=d.id, name=d.name, customer_id=d.customer_id)
+    audit_log(
+        "device.delete",
+        user_id=user.id,
+        device_id=deleted_device_id,
+        name=deleted_device_name,
+        customer_id=deleted_customer_id,
+    )
 
     # ── Cascade-delete all policies created by this device ───────────────────
     # This covers rules, objects, findings, finding comments, analysis runs,
@@ -561,7 +573,7 @@ def delete_device(
     # 1. All policies stamped with this device_id
     stamped = (
         db.query(FirewallPolicy.id)
-        .filter(FirewallPolicy.device_id == d.id)
+        .filter(FirewallPolicy.device_id == deleted_device_id)
         .all()
     )
     policy_ids_to_delete.update(row[0] for row in stamped)
@@ -571,29 +583,64 @@ def delete_device(
         policy_ids_to_delete.add(d.last_policy_id)
 
     deleted_policy_count = 0
-    for pid in policy_ids_to_delete:
-        policy = db.query(FirewallPolicy).filter(FirewallPolicy.id == pid).first()
-        if policy:
-            db.delete(policy)   # ORM cascade: rules, objects, findings, comments, analysis_runs
-            deleted_policy_count += 1
+    if policy_ids_to_delete:
+        object_ids = select(FirewallObject.id).where(FirewallObject.policy_id.in_(policy_ids_to_delete))
+        finding_ids = select(Finding.id).where(Finding.policy_id.in_(policy_ids_to_delete))
+        analysis_run_ids = select(AnalysisRun.id).where(AnalysisRun.policy_id.in_(policy_ids_to_delete))
 
-    if deleted_policy_count:
-        db.flush()  # apply policy deletes before device delete to respect FK order
+        db.query(FindingComment).filter(
+            FindingComment.finding_id.in_(finding_ids)
+        ).delete(synchronize_session=False)
+        db.query(Finding).filter(
+            Finding.policy_id.in_(policy_ids_to_delete)
+        ).delete(synchronize_session=False)
+
+        db.query(ObjectMember).filter(or_(
+            ObjectMember.parent_id.in_(object_ids),
+            ObjectMember.member_id.in_(object_ids),
+        )).delete(synchronize_session=False)
+        db.query(FirewallRule).filter(
+            FirewallRule.policy_id.in_(policy_ids_to_delete)
+        ).delete(synchronize_session=False)
+        db.query(FirewallObject).filter(
+            FirewallObject.policy_id.in_(policy_ids_to_delete)
+        ).delete(synchronize_session=False)
+
+        db.query(GeneratedReport).filter(
+            GeneratedReport.analysis_run_id.in_(analysis_run_ids)
+        ).update({GeneratedReport.analysis_run_id: None}, synchronize_session=False)
+        db.query(GeneratedReport).filter(
+            GeneratedReport.policy_id.in_(policy_ids_to_delete)
+        ).update({GeneratedReport.policy_id: None}, synchronize_session=False)
+
+        db.query(AnalysisRun).filter(
+            AnalysisRun.policy_id.in_(policy_ids_to_delete)
+        ).delete(synchronize_session=False)
+        db.query(PolicyRevision).filter(
+            PolicyRevision.policy_id.in_(policy_ids_to_delete)
+        ).delete(synchronize_session=False)
+        deleted_policy_count = db.query(FirewallPolicy).filter(
+            FirewallPolicy.id.in_(policy_ids_to_delete)
+        ).delete(synchronize_session=False)
 
     # ── Orphan revisions: device_id is a plain string (no FK) ─────────────────
     # Policy-cascade deletes most revisions via policy_id FK, but any revision
     # whose policy was already deleted separately will remain. Clean them up.
     db.query(PolicyRevision).filter(
-        PolicyRevision.device_id == d.id
+        PolicyRevision.device_id == deleted_device_id
     ).delete(synchronize_session=False)
 
     # ── Delete the device (DeviceCVE deleted by DB-level CASCADE) ─────────────
+    db.query(DeviceCVECache).filter(
+        DeviceCVECache.device_id == deleted_device_id
+    ).delete(synchronize_session=False)
+
     db.delete(d)
     db.commit()
 
     logger.info(
         "Device %s (%s) deleted — %d associated polic%s cleaned up.",
-        d.id, d.name, deleted_policy_count, "ies" if deleted_policy_count != 1 else "y",
+        deleted_device_id, deleted_device_name, deleted_policy_count, "ies" if deleted_policy_count != 1 else "y",
     )
     return {"message": "Device deleted", "policies_removed": deleted_policy_count}
 

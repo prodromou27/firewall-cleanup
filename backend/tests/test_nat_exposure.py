@@ -166,6 +166,14 @@ def test_nat_confidence_medium_without_policy_corroboration():
     assert nat_exp and nat_exp[0]["confidence"] == "Medium"
 
 
+def test_nat_only_does_not_create_public_exposure_finding():
+    res = NE.analyze([], [_nat(tdst=["10.0.0.5"], tsvc=["tcp/3389"])], {})
+
+    assert "nat_public_to_internal" in _types(res)
+    assert "rdp_public_exposure" not in _types(res)
+    assert not any(f["severity"] == "Critical" for f in res["findings"])
+
+
 def test_nat_confidence_high_when_policy_corroborates():
     # DNAT to 10.0.0.5 and a security rule allows public->10.0.0.5
     res = NE.analyze([_sec(dst=["10.0.0.5"], svc=["tcp/3389"])], [_nat(tdst=["10.0.0.5"])], {})

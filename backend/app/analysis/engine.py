@@ -8,13 +8,13 @@ from app.models.finding import Finding, FindingComment
 from app.analysis.normalizer import (
     build_object_map, expand_rule_sources, expand_rule_destinations,
     expand_rule_services, has_any_source, has_any_destination, has_any_service,
-    _ref_name,
+    expand_service_object, _ref_name,
 )
 from app.analysis.duplicate_detector import detect_duplicates
 from app.analysis.shadow_detector import detect_shadows
 from app.analysis.risk_scorer import score_rule, score_to_severity
 from app.analysis.service_utils import identify_risky_service, normalize_service
-from app.analysis.ip_utils import is_public_network, is_broad_network
+from app.analysis.ip_utils import is_public_network, is_broad_network, parse_ip_network
 from app.analysis import recommendation_library as _RL
 from app.config import settings
 from app.security.redaction import redact_secrets
@@ -260,7 +260,7 @@ def run_analysis(policy_id: str, db: Session) -> str:
         # Each factor contributes 0–N raw points; we normalise to 0–100.
         # Higher score = more complex / harder to maintain.
         perm_count     = sum(1 for f in findings if f["finding_type"] == "overly_permissive")
-        shadow_count   = sum(1 for f in findings if f["finding_type"] == "shadowed_rule")
+        shadow_count   = sum(1 for f in findings if f["finding_type"] in _SHADOW_FINDING_TYPES)
         dup_count      = sum(1 for f in findings if f["finding_type"] == "duplicate_rule")
         disabled_count = sum(1 for r in rules if not r.get("enabled", True))
         unused_obj_cnt = sum(1 for f in findings if f["finding_type"] == "unused_object")
@@ -442,6 +442,12 @@ def _obj_to_dict(o: FirewallObject) -> dict:
 
 
 _SEVERITY_RANK = {"Informational": 0, "Low": 1, "Medium": 2, "High": 3, "Critical": 4}
+_SHADOW_FINDING_TYPES = {
+    "shadowed_rule",
+    "same_action_shadowed_rule",
+    "conflicting_shadowed_rule",
+    "partial_shadowed_rule",
+}
 
 
 def _finding_scope_key(finding: dict) -> tuple:
@@ -484,7 +490,7 @@ def _consolidate_findings(findings: List[dict]) -> List[dict]:
             "database_exposed",
             "cleartext_service",
             "any_to_any_allow",
-            "shadowed_rule",
+            *_SHADOW_FINDING_TYPES,
             "duplicate_rule",
         }:
             for rid in _rule_ids(finding):
@@ -507,7 +513,7 @@ def _consolidate_findings(findings: List[dict]) -> List[dict]:
                 suppress = True
                 reason = "covered_by_specific_inbound_exposure"
                 break
-            if ftype in {"zero_hit_rule", "low_usage_rule"} and "shadowed_rule" in specifics:
+            if ftype in {"zero_hit_rule", "low_usage_rule"} and specifics.intersection(_SHADOW_FINDING_TYPES):
                 suppress = True
                 reason = "covered_by_shadowed_rule"
                 break
@@ -570,7 +576,42 @@ def _import_quality_notes(rules: List[dict], objects: List[dict], policy) -> Lis
              "Rules carried no interface/zone context, so shadowing and duplicate analysis "
              "treated the policy as a single evaluation context. Where the firewall uses "
              "interfaces/zones/layers, results may be broader than the device's real scope.")
+    if _has_unresolved_rule_object_refs(rules, build_object_map(objects)):
+        note("import_quality", "Object graph incomplete",
+             "Some rule references could not be resolved to imported address or service "
+             "objects. Object-usage cleanup findings are suppressed until the object "
+             "database imports completely.")
     return notes
+
+
+def _has_unresolved_rule_object_refs(rules: List[dict], obj_map: dict) -> bool:
+    """True when rule address/service references cannot be resolved safely.
+
+    Unused-object cleanup depends on a complete rule-to-object graph. If a rule
+    references a named object that is missing from the import, reporting other
+    objects as unused is not defensible. Literal IP/CIDR address values and
+    recognizable inline/built-in services are allowed.
+    """
+    for rule in rules or []:
+        for field in ("sources", "destinations"):
+            for ref in rule.get(field, []) or []:
+                name = _ref_name(ref)
+                if not name or name.lower() in ("any", "all", "any4", "any6"):
+                    continue
+                if obj_map.get(name) is not None:
+                    continue
+                if parse_ip_network(name) is not None:
+                    continue
+                return True
+
+        for ref in rule.get("services", []) or []:
+            name = _ref_name(ref)
+            if not name or name.lower() in ("any", "all"):
+                continue
+            if any(s.get("unknown") for s in expand_service_object(name, obj_map)):
+                return True
+
+    return False
 
 
 def _analyze_disabled(rules: List[dict], obj_map: dict) -> List[dict]:
@@ -1419,6 +1460,8 @@ def _analyze_unused_objects(
     # fetch failed). Skip the check until rules are present.
     if not rules:
         return findings
+    if _has_unresolved_rule_object_refs(rules, obj_map):
+        return findings
 
     # Collect all object names referenced by rules
     used_names = set()
@@ -1552,7 +1595,7 @@ def _analyze_no_documentation(rules: List[dict]) -> List[dict]:
         "workaround", "vendor", "emergency", "troubleshoot", "to be removed",
         "tbd", "todo", "fixme",
     }
-    findings = []
+    undocumented = []
     for rule in rules:
         if not rule.get("enabled", True):
             continue
@@ -1570,26 +1613,38 @@ def _analyze_no_documentation(rules: List[dict]) -> List[dict]:
             if any(c.isalpha() for c in comments):
                 continue
 
-        findings.append({
-            "finding_type": "no_documentation",
-            "severity": "Informational",
-            "confidence": "High",
-            "title": f"Rule {rule_id} has no documentation",
-            "description": (
-                f"{rule_name} is an enabled allow rule with no comment, owner reference, "
-                "or business justification. Undocumented rules make it difficult to determine "
-                "whether access is still required or approved."
-            ),
-            "affected_rules": [rule.get("id")],
+        undocumented.append({
+            "rule_db_id": rule.get("id"),
             "evidence": {
                 "rule_id": rule_id,
                 "rule_name": rule_name,
                 "comments": comments or None,
                 "action": rule.get("action"),
             },
-            "recommendation": _RL.get("no_documentation"),
         })
-    return findings
+
+    if not undocumented:
+        return []
+
+    return [{
+        "finding_type": "no_documentation",
+        "severity": "Informational",
+        "confidence": "High",
+        "title": f"{len(undocumented)} enabled allow rule(s) lack documentation",
+        "description": (
+            f"{len(undocumented)} enabled allow rule(s) have no comment, owner reference, "
+            "or business justification. Undocumented rules make it difficult to determine "
+            "whether access is still required or approved. Review the sampled rules and "
+            "use the Rulebase filters for the full list."
+        ),
+        "affected_rules": [r["rule_db_id"] for r in undocumented if r.get("rule_db_id")],
+        "evidence": {
+            "count": len(undocumented),
+            "sample_rules": [r["evidence"] for r in undocumented[:50]],
+            "confidence_reason": "Detector only considers enabled allow rules with no meaningful comment text.",
+        },
+        "recommendation": _RL.get("no_documentation"),
+    }]
 
 
 # ─── New analyzers (12-20) ───────────────────────────────────────────────────
@@ -1603,40 +1658,47 @@ _VAGUE_NAME_KEYWORDS = {
 
 def _analyze_naming_quality(rules: List[dict]) -> List[dict]:
     """Detect rules with vague, generic, or missing names."""
-    findings = []
+    weak_names = []
     for rule in rules:
         rule_id = rule.get("rule_id") or rule.get("rule_number", "?")
         name = (rule.get("rule_name") or "").strip()
 
         if not name:
-            findings.append({
-                "finding_type": "naming_quality",
-                "severity": "Informational",
-                "confidence": "High",
-                "title": f"Rule {rule_id} has no name",
-                "description": (
-                    f"Rule {rule_id} has no descriptive name. Unnamed rules are difficult "
-                    "to identify during audits and change reviews."
-                ),
-                "affected_rules": [rule.get("id")],
-                "evidence": {"rule_id": rule_id, "rule_name": None},
-                "recommendation": _RL.get("naming_quality"),
+            weak_names.append({
+                "rule_db_id": rule.get("id"),
+                "rule_id": rule_id,
+                "rule_name": None,
+                "reason": "missing_name",
             })
         elif name.lower() in _VAGUE_NAME_KEYWORDS or len(name) < 4:
-            findings.append({
-                "finding_type": "naming_quality",
-                "severity": "Informational",
-                "confidence": "Medium",
-                "title": f"Rule {rule_id} has a vague name: '{name}'",
-                "description": (
-                    f"Rule {rule_id} has a generic or vague name ('{name}'). "
-                    "Non-descriptive names make policy review and audit significantly harder."
-                ),
-                "affected_rules": [rule.get("id")],
-                "evidence": {"rule_id": rule_id, "rule_name": name},
-                "recommendation": _RL.get("naming_quality"),
+            weak_names.append({
+                "rule_db_id": rule.get("id"),
+                "rule_id": rule_id,
+                "rule_name": name,
+                "reason": "vague_or_short_name",
             })
-    return findings
+
+    if not weak_names:
+        return []
+
+    return [{
+        "finding_type": "naming_quality",
+        "severity": "Informational",
+        "confidence": "Medium",
+        "title": f"{len(weak_names)} rule(s) have weak or missing names",
+        "description": (
+            f"{len(weak_names)} rule(s) have missing, very short, or generic names. "
+            "Non-descriptive names make policy review and audit significantly harder. "
+            "Review the sampled rules and use the Rulebase filters for the full list."
+        ),
+        "affected_rules": [r["rule_db_id"] for r in weak_names if r.get("rule_db_id")],
+        "evidence": {
+            "count": len(weak_names),
+            "sample_rules": weak_names[:50],
+            "confidence_reason": "Names are matched against a conservative generic-keyword list or are shorter than four characters.",
+        },
+        "recommendation": _RL.get("naming_quality"),
+    }]
 
 
 _SCHEDULE_EXPIRED_KEYWORDS = {

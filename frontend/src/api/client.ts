@@ -275,7 +275,28 @@ export interface PaginatedDevices {
 }
 
 export const getDevicesPage = (params?: Record<string, string | number>) =>
-  api.get('/devices', { params }).then(r => r.data as PaginatedDevices)
+  api.get('/devices', { params }).then(r => {
+    const requestedPage = Number(params?.page ?? 1)
+    const requestedPageSize = Number(params?.page_size ?? 50)
+    if (Array.isArray(r.data)) {
+      return {
+        total: r.data.length,
+        page: Number.isFinite(requestedPage) ? requestedPage : 1,
+        page_size: Number.isFinite(requestedPageSize) ? requestedPageSize : r.data.length,
+        devices: r.data as AppFirewallDevice[],
+      }
+    }
+    const devices = Array.isArray(r.data?.devices) ? r.data.devices : []
+    const total = Number(r.data?.total)
+    const page = Number(r.data?.page)
+    const pageSize = Number(r.data?.page_size)
+    return {
+      total: Number.isFinite(total) ? total : devices.length,
+      page: Number.isFinite(page) && page > 0 ? page : (Number.isFinite(requestedPage) ? requestedPage : 1),
+      page_size: Number.isFinite(pageSize) && pageSize > 0 ? pageSize : (Number.isFinite(requestedPageSize) ? requestedPageSize : devices.length),
+      devices,
+    } satisfies PaginatedDevices
+  })
 
 export const createDevice = (data: Record<string, unknown>) =>
   api.post('/devices', data).then(r => r.data)

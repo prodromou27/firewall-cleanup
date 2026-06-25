@@ -403,6 +403,11 @@ def _exposure_risk(exposures: List[dict]) -> int:
 def _exposure_findings(exposure: dict) -> List[dict]:
     out = []
     for e in exposure["exposures"]:
+        # A NAT mapping alone is not proof of reachable public exposure. Keep it
+        # in the inventory/NAT findings, but only create public-exposure findings
+        # when an enabled allow policy corroborates the translated target.
+        if e["source"] == "nat" and not e.get("security_rules"):
+            continue
         attribution = "NAT-published" if e["source"] == "nat" else "security policy"
         conf = e.get("confidence", "Medium")
         ev = {"public_ip": e["public_ip"], "internal_target": e["internal_target"],

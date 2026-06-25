@@ -9,9 +9,10 @@ import app.models  # noqa: F401 - register all SQLAlchemy models before create_a
 from app.api import devices, findings, objects, policies, reporting_v2, revisions, upload
 from app.database import Base
 from app.models.customer import Customer
+from app.models.device_cve import DeviceCVECache
 from app.models.device import FirewallDevice
-from app.models.finding import Finding
-from app.models.policy import FirewallObject, FirewallPolicy, FirewallRule
+from app.models.finding import Finding, FindingComment
+from app.models.policy import AnalysisRun, FirewallObject, FirewallPolicy, FirewallRule, ObjectMember
 from app.models.report import GeneratedReport, ReportTemplate
 from app.models.revision import PolicyRevision
 from app.models.user import ROLE_ENGINEER, User, UserCustomerAccess
@@ -177,6 +178,111 @@ def test_collection_endpoints_only_return_assigned_customer_data(db, tenant_data
 
     revision_ids = {r["id"] for r in revisions.list_revisions(limit=50, db=db, user=user)}
     assert revision_ids == {"revision-1"}
+
+
+def test_delete_device_bulk_cleans_imported_policy_data(db, tenant_data):
+    user = tenant_data
+    device = FirewallDevice(
+        id="delete-device",
+        customer_id="cust-1",
+        name="Delete Device",
+        vendor="CheckPoint",
+        host="10.10.10.10",
+        last_policy_id="delete-policy",
+    )
+    policy = FirewallPolicy(
+        id="delete-policy",
+        customer_id="cust-1",
+        device_id=device.id,
+        firewall_name="Delete Device",
+        vendor="CheckPoint",
+    )
+    rule = FirewallRule(
+        id="delete-rule",
+        policy_id=policy.id,
+        vendor="CheckPoint",
+        rule_number=1,
+        action="accept",
+    )
+    group = FirewallObject(
+        id="delete-group",
+        policy_id=policy.id,
+        vendor="CheckPoint",
+        object_name="group-a",
+        object_type="group",
+    )
+    host = FirewallObject(
+        id="delete-host",
+        policy_id=policy.id,
+        vendor="CheckPoint",
+        object_name="host-a",
+        object_type="host",
+        value="10.0.0.10",
+    )
+    member = ObjectMember(
+        id="delete-member",
+        parent_id=group.id,
+        member_id=host.id,
+        member_name=host.object_name,
+    )
+    run = AnalysisRun(id="delete-run", policy_id=policy.id, status="completed")
+    finding = Finding(
+        id="delete-finding",
+        policy_id=policy.id,
+        analysis_run_id=run.id,
+        vendor="CheckPoint",
+        finding_type="unused_object",
+        severity="Low",
+        confidence="High",
+        title="Delete finding",
+        description="Delete finding",
+    )
+    comment = FindingComment(id="delete-comment", finding_id=finding.id, comment="reviewed")
+    revision = PolicyRevision(id="delete-revision", policy_id=policy.id, device_id=device.id, revision_number=1)
+    report = GeneratedReport(
+        id="delete-report",
+        customer_id="cust-1",
+        policy_id=policy.id,
+        analysis_run_id=run.id,
+        export_format="pdf",
+        file_name="delete.pdf",
+        file_path="missing.pdf",
+    )
+    cve_cache = DeviceCVECache(id="delete-cve", device_id=device.id, cve_data="[]")
+    ids = {
+        "device": device.id,
+        "policy": policy.id,
+        "rule": rule.id,
+        "group": group.id,
+        "host": host.id,
+        "member": member.id,
+        "run": run.id,
+        "finding": finding.id,
+        "comment": comment.id,
+        "revision": revision.id,
+        "report": report.id,
+        "cve_cache": cve_cache.id,
+    }
+
+    db.add_all([device, policy, rule, group, host, member, run, finding, comment, revision, report, cve_cache])
+    db.commit()
+
+    result = devices.delete_device(ids["device"], db=db, user=user)
+
+    assert result == {"message": "Device deleted", "policies_removed": 1}
+    assert db.query(FirewallDevice).filter(FirewallDevice.id == ids["device"]).count() == 0
+    assert db.query(FirewallPolicy).filter(FirewallPolicy.id == ids["policy"]).count() == 0
+    assert db.query(FirewallRule).filter(FirewallRule.id == ids["rule"]).count() == 0
+    assert db.query(FirewallObject).filter(FirewallObject.id.in_([ids["group"], ids["host"]])).count() == 0
+    assert db.query(ObjectMember).filter(ObjectMember.id == ids["member"]).count() == 0
+    assert db.query(Finding).filter(Finding.id == ids["finding"]).count() == 0
+    assert db.query(FindingComment).filter(FindingComment.id == ids["comment"]).count() == 0
+    assert db.query(AnalysisRun).filter(AnalysisRun.id == ids["run"]).count() == 0
+    assert db.query(PolicyRevision).filter(PolicyRevision.id == ids["revision"]).count() == 0
+    assert db.query(DeviceCVECache).filter(DeviceCVECache.id == ids["cve_cache"]).count() == 0
+    retained_report = db.query(GeneratedReport).filter(GeneratedReport.id == ids["report"]).one()
+    assert retained_report.policy_id is None
+    assert retained_report.analysis_run_id is None
 
 
 @pytest.mark.asyncio

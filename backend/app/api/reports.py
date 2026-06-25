@@ -841,6 +841,10 @@ CATEGORY_META: dict = {
     "low_usage_rule":     "Low-Usage Rules",
     "duplicate_rule":     "Duplicate Rules",
     "shadowed_rule":      "Shadowed Rules",
+    "same_action_shadowed_rule": "Redundant Shadowed Rules",
+    "conflicting_shadowed_rule": "Conflicting Shadowed Rules",
+    "partial_shadowed_rule": "Partially Shadowed Rules",
+    "shadowing_not_evaluated": "Shadowing Not Evaluated",
     "risky_service":      "Risky Service Rules",
     "no_logging":         "Rules Without Logging",
     "temporary_rule":     "Temporary Rules",
@@ -1432,6 +1436,10 @@ CATEGORY_SHEET_NAMES: dict = {
     "low_usage_rule":     "Low-Usage Rules",
     "duplicate_rule":     "Duplicate Rules",
     "shadowed_rule":      "Shadowed Rules",
+    "same_action_shadowed_rule": "Redundant Shadows",
+    "conflicting_shadowed_rule": "Conflicting Shadows",
+    "partial_shadowed_rule": "Partial Shadows",
+    "shadowing_not_evaluated": "Shadowing Skipped",
     "risky_service":      "Risky Services",
     "no_logging":         "No Logging",
     "temporary_rule":     "Temp Rules",
@@ -1459,7 +1467,11 @@ CATEGORY_SHEET_NAMES: dict = {
     "service_range":      "Service Ranges",
 }
 
-CLEANUP_TYPES = {"disabled_rule","zero_hit_rule","low_usage_rule","duplicate_rule","shadowed_rule","temporary_rule"}
+CLEANUP_TYPES = {
+    "disabled_rule", "zero_hit_rule", "low_usage_rule", "duplicate_rule",
+    "shadowed_rule", "same_action_shadowed_rule", "conflicting_shadowed_rule",
+    "partial_shadowed_rule", "temporary_rule",
+}
 
 
 def _build_excel_full(policy, rules, findings, config: ReportBuildConfig, customer_name: str):

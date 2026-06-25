@@ -22,6 +22,13 @@ from sqlalchemy.orm import Session
 from app.models.policy import FirewallPolicy, FirewallRule, FirewallObject
 from app.models.finding import Finding
 
+SHADOW_FINDING_TYPES = (
+    "shadowed_rule",
+    "same_action_shadowed_rule",
+    "conflicting_shadowed_rule",
+    "partial_shadowed_rule",
+)
+
 PASS    = "pass"
 WARN    = "warn"
 FAIL    = "fail"
@@ -238,7 +245,7 @@ def _pci_dss_checks(
     ))
 
     # ── 1.4.3 — Shadow/duplicate rules ──────────────────────────────────────
-    shadow = _count_by_type(findings, "shadowed_rule")
+    shadow = _count_by_type(findings, *SHADOW_FINDING_TYPES)
     dup    = _count_by_type(findings, "duplicate_rule")
     checks.append(_check(
         check_id="PCI-1.4.3",
@@ -330,7 +337,7 @@ def _cis_checks(
     enabled_rules = [r for r in rules if r.enabled]
 
     # ── CIS 4.1 — No shadow rules ────────────────────────────────────────────
-    shadow = _count_by_type(findings, "shadowed_rule")
+    shadow = _count_by_type(findings, *SHADOW_FINDING_TYPES)
     checks.append(_check(
         check_id="CIS-4.1",
         control_ref="CIS Control 4.4",
@@ -642,7 +649,7 @@ def _nist_checks(
     ))
 
     # RESPOND — Baseline / change tracking
-    shadow = _count_by_type(findings, "shadowed_rule")
+    shadow = _count_by_type(findings, *SHADOW_FINDING_TYPES)
     dup    = _count_by_type(findings, "duplicate_rule")
     checks.append(_check(
         check_id="NIST-RS.MA-01",
@@ -713,7 +720,7 @@ def _iso27001_checks(
     no_log  = _count_by_type(findings, "no_logging")
     no_doc  = _count_by_type(findings, "no_documentation")
     risky   = _count_by_type(findings, "risky_service")
-    shadow  = _count_by_type(findings, "shadowed_rule")
+    shadow  = _count_by_type(findings, *SHADOW_FINDING_TYPES)
     dup     = _count_by_type(findings, "duplicate_rule")
     zero_hit= _count_by_type(findings, "zero_hit_rule")
     last    = _last_rule(rules)
@@ -902,7 +909,7 @@ def _gdpr_checks(
     ))
 
     # ── Art. 32(1)(b) — Integrity: eliminate policy inconsistencies ──────────
-    shadow = _count_by_type(findings, "shadowed_rule")
+    shadow = _count_by_type(findings, *SHADOW_FINDING_TYPES)
     dup    = _count_by_type(findings, "duplicate_rule")
     integrity_issues = shadow + dup
     checks.append(_check(

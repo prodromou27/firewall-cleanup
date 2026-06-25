@@ -981,6 +981,7 @@ function DeviceCard({
   onResetSync,
   onClick,
   syncing,
+  deleting,
 }: {
   device: FirewallDeviceT
   customerId: string
@@ -990,6 +991,7 @@ function DeviceCard({
   onResetSync: () => void
   onClick: () => void
   syncing: boolean
+  deleting: boolean
 }) {
   const vc = VENDOR_COLOR_MAP[device.vendor] ?? { chip: 'bg-gray-100 text-gray-700 border-gray-200', accent: 'from-slate-500 to-slate-700', bar: 'bg-slate-500' }
   const connection = deviceConnectionInfo(device)
@@ -1177,9 +1179,13 @@ function DeviceCard({
             <Settings className="w-4 h-4" />
           </button>
           <button onClick={onDelete}
-            className="p-1.5 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-600"
-            title="Delete">
-            <Trash2 className="w-4 h-4" />
+            disabled={deleting}
+            className={clsx(
+              'p-1.5 rounded-lg text-gray-400 transition-colors',
+              deleting ? 'bg-gray-100 cursor-not-allowed' : 'hover:bg-red-50 hover:text-red-600'
+            )}
+            title={deleting ? 'Deleting...' : 'Delete'}>
+            {deleting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
           </button>
         </div>
       </div>
@@ -1197,6 +1203,7 @@ export function Devices() {
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<FirewallDeviceT | undefined>()
   const [syncingId, setSyncingId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const [detailDevice, setDetailDevice] = useState<FirewallDeviceT | null>(null)
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -1222,7 +1229,12 @@ export function Devices() {
     if (vendorFilter) p.vendor = vendorFilter
     if (syncStatus) p.sync_status = syncStatus
     getDevicesPage(p)
-      .then(r => { setDevices(r.devices); setTotal(r.total) })
+      .then(r => {
+        const rows = Array.isArray(r.devices) ? r.devices : []
+        const nextTotal = Number(r.total)
+        setDevices(rows)
+        setTotal(Number.isFinite(nextTotal) ? nextTotal : rows.length)
+      })
       .catch(e => {
         setDevices([])
         setTotal(0)
@@ -1274,11 +1286,18 @@ export function Devices() {
 
   const handleDelete = async (d: FirewallDeviceT) => {
     if (!confirm(`Delete "${d.name}"? This will permanently delete all associated policies, rules, findings, and objects.`)) return
+    setDeletingId(d.id)
+    setActionError('')
     try {
       await deleteDevice(d.id)
+      setDevices(ds => ds.filter(device => device.id !== d.id))
+      setTotal(t => Math.max(0, t - 1))
+      if (detailDevice?.id === d.id) setDetailDevice(null)
       load()
     } catch (e) {
       setActionError(friendlyErrorMessage(e, 'Device could not be deleted. Please try again.'))
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -1385,6 +1404,7 @@ export function Devices() {
               device={d}
               customerId={customerId || d.customer_id}
               syncing={syncingId === d.id}
+              deleting={deletingId === d.id}
               onEdit={() => { setEditing(d); setShowModal(true) }}
               onDelete={() => handleDelete(d)}
               onSync={() => handleSync(d.id)}

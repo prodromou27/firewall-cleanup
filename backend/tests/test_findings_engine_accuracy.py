@@ -329,12 +329,78 @@ def test_consolidation_suppresses_generic_risky_service_when_specific_exposure_e
     assert rdp["evidence"]["consolidated_related_findings"][0]["finding_type"] == "risky_service"
 
 
+def test_consolidation_suppresses_usage_when_new_shadow_types_exist():
+    zero_hit = {
+        "finding_type": "zero_hit_rule",
+        "severity": "Medium",
+        "confidence": "High",
+        "title": "Rule 2 has zero hits",
+        "description": "usage",
+        "affected_rules": ["rule-2"],
+        "evidence": {"rule_id": "2"},
+        "recommendation": "review",
+    }
+    shadow = {
+        "finding_type": "same_action_shadowed_rule",
+        "severity": "Medium",
+        "confidence": "High",
+        "title": "Rule 2 is redundant",
+        "description": "shadow",
+        "affected_rules": ["rule-2", "rule-1"],
+        "evidence": {"rule_id": "2"},
+        "recommendation": "review",
+    }
+
+    consolidated = _consolidate_findings([zero_hit, shadow])
+
+    assert {f["finding_type"] for f in consolidated} == {"same_action_shadowed_rule"}
+    assert consolidated[0]["evidence"]["consolidated_related_findings"][0]["finding_type"] == "zero_hit_rule"
+
+
 def test_no_unused_findings_when_no_rules():
     """With objects but no rules, usage is unknown — never flag all objects unused."""
     from app.analysis.engine import _analyze_unused_objects
     objects = [{"object_name": f"host{i}", "object_type": "host", "value": f"10.0.0.{i}", "members": []} for i in range(50)]
     obj_map = {o["object_name"]: o for o in objects}
     assert _analyze_unused_objects([], objects, obj_map) == []
+
+
+def test_unresolved_rule_object_suppresses_unused_object_detector():
+    objects = [
+        _object("ImportedHost", "host", "10.0.0.10/32"),
+        _object("Orphan", "host", "10.0.0.99/32"),
+    ]
+    rules = [_rule(1, sources=["MissingGroup"], destinations=["any"], services=["https"])]
+
+    assert _analyze_unused_objects(rules, objects, build_object_map(objects)) == []
+
+
+def test_service_object_used_through_service_group_is_not_reported_as_service_range():
+    objects = [
+        _object("SvcGroup", "service-group", "", ["WideSvc"]),
+        _object(
+            "WideSvc",
+            "service",
+            "tcp/2000-4000",
+            [],
+            protocol="tcp",
+            port_start=2000,
+            port_end=4000,
+        ),
+        _object(
+            "UnusedWideSvc",
+            "service",
+            "tcp/10000-20000",
+            [],
+            protocol="tcp",
+            port_start=10000,
+            port_end=20000,
+        ),
+    ]
+
+    findings = _analyze_service_ranges(objects, [_rule(1, services=["SvcGroup"])], build_object_map(objects))
+
+    assert {f["evidence"]["object_name"] for f in findings} == {"WideSvc"}
 
 
 def test_debug_keyword_flags_temp_rule_and_cleanup_removed():
@@ -357,7 +423,16 @@ def test_import_quality_notes_flag_missing_data():
     assert "Hit-count data unavailable" in titles
     assert "NAT data unavailable" in titles
     assert "Interface/zone context unavailable" in titles
+    assert "Object graph incomplete" not in titles
     assert all(n["severity"] == "Informational" for n in notes)
+
+    rules_missing_object = [{
+        "id": "r2", "enabled": True, "hit_count": 1,
+        "sources": ["MissingGroup"], "destinations": ["any"], "services": ["https"],
+        "source_interfaces": ["wan"], "destination_interfaces": ["lan"],
+    }]
+    notes_missing_object = _import_quality_notes(rules_missing_object, [], P())
+    assert "Object graph incomplete" in {n["title"] for n in notes_missing_object}
 
     # With hit data + interfaces + NAT, the corresponding notes disappear.
     class P2:

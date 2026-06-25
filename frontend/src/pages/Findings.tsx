@@ -77,6 +77,10 @@ const FINDING_TYPES: Record<string, string> = {
 
 const FINDING_ICONS: Record<string, React.ReactNode> = {
   shadowed_rule: <Layers className="w-3.5 h-3.5" />,
+  same_action_shadowed_rule: <Layers className="w-3.5 h-3.5" />,
+  conflicting_shadowed_rule: <Layers className="w-3.5 h-3.5" />,
+  partial_shadowed_rule: <Layers className="w-3.5 h-3.5" />,
+  shadowing_not_evaluated: <Layers className="w-3.5 h-3.5" />,
   duplicate_rule: <Copy className="w-3.5 h-3.5" />,
   zero_hit_rule: <ZapOff className="w-3.5 h-3.5" />,
   overly_permissive: <AlertTriangle className="w-3.5 h-3.5" />,

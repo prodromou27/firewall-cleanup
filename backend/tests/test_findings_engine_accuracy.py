@@ -2,12 +2,15 @@
 
 from app.analysis.duplicate_detector import detect_duplicates
 from app.analysis.engine import (
+    _analysis_detector_enabled,
     _analyze_empty_groups,
     _analyze_exposed_services,
     _analyze_permissive,
     _analyze_risky_services,
     _analyze_service_ranges,
+    _apply_finding_volume_policy,
     _consolidate_findings,
+    _disabled_detectors_note,
     _analyze_unused_objects,
     _analyze_usage,
     _obj_to_dict,
@@ -407,6 +410,51 @@ def test_debug_keyword_flags_temp_rule_and_cleanup_removed():
     from app.config import settings
     assert "debug" in settings.temp_keywords
     assert "cleanup" not in settings.temp_keywords
+
+
+def test_analysis_detector_configuration_disables_selected_families(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "analysis_disabled_detectors", "usage, shadowing")
+
+    assert _analysis_detector_enabled("permissive") is True
+    assert _analysis_detector_enabled("usage") is False
+    assert _analysis_detector_enabled("shadowing") is False
+
+    class P:
+        vendor = "CheckPoint"
+
+    note = _disabled_detectors_note(["usage", "shadowing", "usage"], [_rule(1)], [], P())
+
+    assert note["finding_type"] == "analysis_configuration"
+    assert note["severity"] == "Informational"
+    assert note["evidence"]["disabled_detectors"] == ["shadowing", "usage"]
+    assert "write" not in note["recommendation"].lower()
+
+
+def test_finding_volume_policy_caps_repeated_types(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "analysis_max_findings_per_type", 2)
+    findings = [
+        {
+            "finding_type": "no_logging",
+            "severity": "Low",
+            "confidence": "High",
+            "title": f"No logging {idx}",
+            "description": "logging disabled",
+            "affected_rules": [f"r{idx}"],
+            "evidence": {"idx": idx},
+            "recommendation": "review",
+        }
+        for idx in range(4)
+    ]
+
+    capped = _apply_finding_volume_policy(findings)
+
+    assert [f["finding_type"] for f in capped].count("no_logging") == 2
+    note = [f for f in capped if f["finding_type"] == "analysis_configuration"][0]
+    assert note["evidence"]["suppressed_by_type"] == {"no_logging": 2}
 
 
 def test_import_quality_notes_flag_missing_data():

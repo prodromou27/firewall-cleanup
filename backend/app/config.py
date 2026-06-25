@@ -93,6 +93,11 @@ class Settings(BaseSettings):
     inactivity_threshold_medium: int = 180
     inactivity_threshold_high: int = 365
 
+    # Analysis controls. Disable detector families only when a customer's data
+    # source cannot support them reliably, e.g. "usage,unused_objects".
+    analysis_disabled_detectors: str = ""
+    analysis_max_findings_per_type: int = 100
+
     # Internal networks (for risk scoring)
     internal_networks: List[str] = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
     sensitive_networks: List[str] = []

@@ -79,6 +79,13 @@ def run_analysis(policy_id: str, db: Session) -> str:
         db.commit()
 
         findings = []
+        skipped_detectors = []
+
+        def add_detector(detector_name: str, producer):
+            if _analysis_detector_enabled(detector_name):
+                findings.extend(producer())
+            else:
+                skipped_detectors.append(detector_name)
 
         # Safety net: a policy with objects but no rules almost always means the
         # rulebase could not be fetched/parsed. Surface one clear diagnostic
@@ -112,74 +119,74 @@ def run_analysis(policy_id: str, db: Session) -> str:
             findings.extend(_import_quality_notes(rules, objects, policy))
 
         # 1. Disabled rules
-        findings.extend(_analyze_disabled(rules, obj_map))
+        add_detector("disabled_rules", lambda: _analyze_disabled(rules, obj_map))
 
         # 2. Zero/low hit rules
-        findings.extend(_analyze_usage(rules, obj_map))
+        add_detector("usage", lambda: _analyze_usage(rules, obj_map))
 
         # 3. Any source/dest/service
-        findings.extend(_analyze_permissive(rules, obj_map))
+        add_detector("permissive", lambda: _analyze_permissive(rules, obj_map))
 
         # 4. Risky services
-        findings.extend(_analyze_risky_services(rules, obj_map))
+        add_detector("risky_services", lambda: _analyze_risky_services(rules, obj_map))
 
         # 4b. Sensitive services exposed to untrusted (any / public) sources
-        findings.extend(_analyze_exposed_services(rules, obj_map))
+        add_detector("exposed_services", lambda: _analyze_exposed_services(rules, obj_map))
 
         # 4c. Cleartext / unencrypted protocols
-        findings.extend(_analyze_cleartext_services(rules, obj_map))
+        add_detector("cleartext_services", lambda: _analyze_cleartext_services(rules, obj_map))
 
         # 4d. Lateral-movement risk (broad internal segment -> broad internal segment)
-        findings.extend(_analyze_lateral_movement(rules, obj_map))
+        add_detector("lateral_movement", lambda: _analyze_lateral_movement(rules, obj_map))
 
         # 4e. Direct inbound exposure (untrusted source -> internal destination)
-        findings.extend(_analyze_inbound_exposure(rules, obj_map))
+        add_detector("inbound_exposure", lambda: _analyze_inbound_exposure(rules, obj_map))
 
         # 5. Duplicate rules
-        findings.extend(detect_duplicates(rules, obj_map, policy.vendor))
+        add_detector("duplicates", lambda: detect_duplicates(rules, obj_map, policy.vendor))
 
         # 6. Shadowed rules
-        findings.extend(detect_shadows(rules, obj_map, policy.vendor))
+        add_detector("shadowing", lambda: detect_shadows(rules, obj_map, policy.vendor))
 
         # 6b. Consolidation candidates (same src/dst/action, differing services)
-        findings.extend(_analyze_mergeable_rules(rules))
+        add_detector("mergeable_rules", lambda: _analyze_mergeable_rules(rules))
 
         # 6c. Missing explicit logged cleanup (deny-all) rule (policy-level)
-        findings.extend(_analyze_cleanup_rule(rules, obj_map))
+        add_detector("cleanup_rule", lambda: _analyze_cleanup_rule(rules, obj_map))
 
         # 6d. Rule-order optimization (busy rules sitting below unused ones)
-        findings.extend(_analyze_rule_order(rules))
+        add_detector("rule_order", lambda: _analyze_rule_order(rules))
 
         # 6e. Oversized rule sections (maintainability)
-        findings.extend(_analyze_section_size(rules))
+        add_detector("section_size", lambda: _analyze_section_size(rules))
 
         # 7. No logging
-        findings.extend(_analyze_no_logging(rules, obj_map))
+        add_detector("no_logging", lambda: _analyze_no_logging(rules, obj_map))
 
         # 8. Temporary rules
-        findings.extend(_analyze_temp_rules(rules, obj_map))
+        add_detector("temporary_rules", lambda: _analyze_temp_rules(rules, obj_map))
 
         # 9. Unused objects
-        findings.extend(_analyze_unused_objects(rules, objects, obj_map))
+        add_detector("unused_objects", lambda: _analyze_unused_objects(rules, objects, obj_map))
 
         # 10. Duplicate objects
-        findings.extend(_analyze_duplicate_objects(objects))
+        add_detector("duplicate_objects", lambda: _analyze_duplicate_objects(objects))
 
         # 11. Rules without documentation (no comments, no owner reference)
-        findings.extend(_analyze_no_documentation(rules))
+        add_detector("documentation", lambda: _analyze_no_documentation(rules))
 
         # 12. Naming quality
-        findings.extend(_analyze_naming_quality(rules))
+        add_detector("naming_quality", lambda: _analyze_naming_quality(rules))
 
         # 13. Expired / scheduled rules
-        findings.extend(_analyze_expired_rules(rules))
+        add_detector("expired_rules", lambda: _analyze_expired_rules(rules))
 
         # 14. NAT rule complexity
-        findings.extend(_analyze_nat_rules(rules))
+        add_detector("nat_rules", lambda: _analyze_nat_rules(rules))
 
         # 14b. NAT & Public Exposure review (gated on NAT data availability).
         from app.analysis import nat_exposure
-        findings.extend(nat_exposure.analyze(rules, policy.nat_rules, obj_map)["findings"])
+        add_detector("nat_exposure", lambda: nat_exposure.analyze(rules, policy.nat_rules, obj_map)["findings"])
 
         # 14c. Interface / public-IP review (gated on interface data from device sync).
         from app.analysis import interfaces as _iface
@@ -193,30 +200,33 @@ def run_analysis(policy_id: str, db: Session) -> str:
                     _dev_ifaces = _json.loads(_dev.device_interfaces) or []
                 except (ValueError, TypeError):
                     _dev_ifaces = []
-        findings.extend(_iface.analyze(_dev_ifaces, policy.nat_rules, obj_map, policy.firewall_name or "")["findings"])
+        add_detector("interface_exposure", lambda: _iface.analyze(_dev_ifaces, policy.nat_rules, obj_map, policy.firewall_name or "")["findings"])
 
         # 15. Broad VPN access
-        findings.extend(_analyze_vpn_rules(rules, obj_map))
+        add_detector("vpn_rules", lambda: _analyze_vpn_rules(rules, obj_map))
 
         # 16. Negated objects
-        findings.extend(_analyze_negated_objects(rules))
+        add_detector("negated_objects", lambda: _analyze_negated_objects(rules))
 
         # 17. Empty groups
-        findings.extend(_analyze_empty_groups(objects))
+        add_detector("empty_groups", lambda: _analyze_empty_groups(objects))
 
         # 18. Large groups
-        findings.extend(_analyze_large_groups(objects))
+        add_detector("large_groups", lambda: _analyze_large_groups(objects))
 
         # 19. Broad network objects
-        findings.extend(_analyze_broad_networks(objects))
+        add_detector("broad_networks", lambda: _analyze_broad_networks(objects))
 
         # 20. Service objects with large port ranges
-        findings.extend(_analyze_service_ranges(objects, rules, obj_map))
+        add_detector("service_ranges", lambda: _analyze_service_ranges(objects, rules, obj_map))
 
         # 21. Import quality summary (parse completeness, hit-data availability)
         findings.extend(_analyze_import_quality(rules, objects, policy))
 
-        findings = _consolidate_findings(findings)
+        if skipped_detectors:
+            findings.append(_disabled_detectors_note(skipped_detectors, rules, objects, policy))
+
+        findings = _apply_finding_volume_policy(_consolidate_findings(findings))
 
         # Save findings
         finding_count = 0
@@ -448,6 +458,106 @@ _SHADOW_FINDING_TYPES = {
     "conflicting_shadowed_rule",
     "partial_shadowed_rule",
 }
+
+
+def _configured_detector_names(value: str | None = None) -> set[str]:
+    raw = settings.analysis_disabled_detectors if value is None else value
+    return {
+        item.strip().lower().replace("-", "_")
+        for item in (raw or "").split(",")
+        if item.strip()
+    }
+
+
+def _analysis_detector_enabled(detector_name: str) -> bool:
+    disabled = _configured_detector_names()
+    normalized = detector_name.strip().lower().replace("-", "_")
+    return "all" not in disabled and normalized not in disabled
+
+
+def _disabled_detectors_note(
+    detector_names: List[str], rules: List[dict], objects: List[dict], policy
+) -> dict:
+    disabled = sorted({name for name in detector_names if name})
+    return {
+        "finding_type": "analysis_configuration",
+        "severity": "Informational",
+        "confidence": "High",
+        "title": "Some analysis detectors are disabled by configuration",
+        "description": (
+            "One or more detector families were skipped because they are listed in "
+            "ANALYSIS_DISABLED_DETECTORS. This is appropriate when a customer import "
+            "does not contain enough reliable data for those checks, but reports should "
+            "state that the analysis scope was intentionally limited."
+        ),
+        "affected_rules": [],
+        "affected_objects": [],
+        "evidence": {
+            "vendor": getattr(policy, "vendor", ""),
+            "disabled_detectors": disabled,
+            "rule_count": len(rules),
+            "object_count": len(objects),
+            "confidence_reason": "Detector output was suppressed by explicit backend configuration.",
+        },
+        "recommendation": (
+            "Keep detectors enabled by default. Disable a detector only when the source "
+            "data cannot support it reliably, and document the scope limitation in the "
+            "customer report."
+        ),
+    }
+
+
+def _max_findings_per_type() -> int:
+    try:
+        return max(0, int(settings.analysis_max_findings_per_type or 0))
+    except (TypeError, ValueError):
+        return 100
+
+
+def _apply_finding_volume_policy(findings: List[dict]) -> List[dict]:
+    """Cap per-type finding volume and record exactly what was suppressed."""
+    max_per_type = _max_findings_per_type()
+    if max_per_type <= 0:
+        return findings
+
+    kept: List[dict] = []
+    counts: Dict[str, int] = {}
+    suppressed: Dict[str, int] = {}
+    for finding in findings:
+        ftype = finding.get("finding_type", "unknown")
+        counts[ftype] = counts.get(ftype, 0) + 1
+        if counts[ftype] <= max_per_type:
+            kept.append(finding)
+        else:
+            suppressed[ftype] = suppressed.get(ftype, 0) + 1
+
+    if not suppressed:
+        return kept
+
+    kept.append({
+        "finding_type": "analysis_configuration",
+        "severity": "Informational",
+        "confidence": "High",
+        "title": "Finding volume was capped for report usability",
+        "description": (
+            "Some repeated findings were suppressed after the configured per-type limit. "
+            "This prevents one noisy detector from overwhelming the customer report while "
+            "preserving the highest-priority evidence already generated before the cap."
+        ),
+        "affected_rules": [],
+        "affected_objects": [],
+        "evidence": {
+            "max_findings_per_type": max_per_type,
+            "suppressed_by_type": suppressed,
+            "confidence_reason": "Suppression is count-based after detector execution and does not alter firewall data.",
+        },
+        "recommendation": (
+            "Use filters and source data quality improvements to reduce noisy categories. "
+            "Increase ANALYSIS_MAX_FINDINGS_PER_TYPE only when reports must include every "
+            "individual occurrence."
+        ),
+    })
+    return kept
 
 
 def _finding_scope_key(finding: dict) -> tuple:

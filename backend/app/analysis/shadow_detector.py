@@ -1,10 +1,19 @@
-"""Detect shadowed firewall rules (full and partial)."""
+"""Detect shadowed firewall rules (full and partial), context-aware.
+
+Rules are only compared within the same vendor evaluation context (Check Point
+layer/install-on, Palo Alto Pre/Local/Post + zones, Cisco ASA ACL/interface,
+FortiGate interface pair, Huawei zone pair). Emits distinct finding types:
+same_action_shadowed_rule / conflicting_shadowed_rule / partial_shadowed_rule,
+plus an aggregate shadowing_not_evaluated when objects could not be expanded.
+"""
+from collections import OrderedDict
 from typing import List, Dict, Any, Tuple
 from app.analysis.normalizer import (
     expand_rule_sources, expand_rule_destinations, expand_rule_services
 )
 from app.analysis.ip_utils import network_contains, is_any
 from app.analysis.service_utils import service_contains, service_is_any
+from app.analysis.vendor_semantics import context_key, context_label
 
 
 def _sources_contained(earlier_srcs: List[dict], later_srcs: List[dict]) -> Tuple[bool, str]:
@@ -71,34 +80,71 @@ def _has_unknown(entry: dict) -> bool:
 
 def detect_shadows(
     rules: List[dict],
-    obj_map: Dict[str, dict]
+    obj_map: Dict[str, dict],
+    vendor: str = "",
 ) -> List[Dict]:
     """
-    Detect shadowed rules in policy order.
-    Rules must be sorted by rule_number ascending.
+    Detect shadowed rules in policy order, scoped to vendor evaluation context.
 
-    Reports both full shadows (every dimension contained) and partial
-    shadows (two of three dimensions contained), and reduces confidence
-    when referenced objects could not be fully expanded.
+    Rules from different contexts (CP layers/install-on, Palo Pre/Local/Post,
+    Cisco ACL/interface, Forti interface pair, Huawei zone pair) are never
+    compared. Emits same_action / conflicting / partial shadow findings, plus an
+    aggregate shadowing_not_evaluated when expansion was incomplete.
     """
     findings = []
 
-    # Pre-expand
-    expanded = []
+    # Pre-expand, then bucket by evaluation context (rules keep policy order).
+    contexts: "OrderedDict[Any, list]" = OrderedDict()
+    not_evaluated: list = []
     for rule in rules:
-        expanded.append({
+        entry = {
             "rule": rule,
             "sources": expand_rule_sources(rule, obj_map),
             "destinations": expand_rule_destinations(rule, obj_map),
             "services": expand_rule_services(rule, obj_map),
+        }
+        contexts.setdefault(context_key(rule, vendor), []).append(entry)
+
+    for expanded in contexts.values():
+        findings.extend(_detect_within_context(expanded, vendor, not_evaluated))
+
+    # One aggregate Informational finding listing rules that could not be
+    # evaluated for shadowing because their objects did not fully expand.
+    if not_evaluated:
+        findings.append({
+            "finding_type": "shadowing_not_evaluated",
+            "severity": "Informational",
+            "confidence": "High",
+            "title": f"Shadowing not evaluated for {len(not_evaluated)} rule(s)",
+            "description": (
+                "These rules reference objects that could not be fully expanded "
+                "(e.g. unresolved members, missing object definitions), so shadowing "
+                "could not be determined for them. Re-import with complete object data "
+                "to enable shadowing analysis on these rules."
+            ),
+            "affected_rules": [r for r in not_evaluated],
+            "evidence": {"count": len(not_evaluated), "reason": "incomplete object expansion"},
+            "recommendation": (
+                "Read-only note. Confirm the object database imported completely; no "
+                "action is implied for the rules themselves."
+            ),
         })
 
+    return findings
+
+
+def _detect_within_context(expanded: List[dict], vendor: str, not_evaluated: list) -> List[Dict]:
+    findings: List[Dict] = []
     for j in range(1, len(expanded)):
         later = expanded[j]
         later_rule = later["rule"]
 
         # Skip disabled rules — they can't be shadowed in practice
         if not later_rule.get("enabled", True):
+            continue
+        # Cannot evaluate shadowing on rules whose objects didn't expand.
+        if _has_unknown(later):
+            not_evaluated.append(later_rule.get("id"))
             continue
 
         reported = False
@@ -109,6 +155,8 @@ def detect_shadows(
             earlier_rule = earlier["rule"]
 
             if not earlier_rule.get("enabled", True):
+                continue
+            if _has_unknown(earlier):
                 continue
 
             src_ok, src_rel = _sources_contained(earlier["sources"], later["sources"])
@@ -131,23 +179,41 @@ def detect_shadows(
             l_action = (later_rule.get("action") or "").lower()
             actions_differ = e_action != l_action
 
-            # Confidence reduced when expansion incomplete on either rule.
-            incomplete = _has_unknown(earlier) or _has_unknown(later)
-            if full:
-                confidence = "Medium" if incomplete else "High"
-                conflict_type = "different-action" if actions_differ else "same-action"
-                severity = "High" if not actions_differ else "Medium"
-                title = f"Rule {later_id} is fully shadowed by Rule {earlier_id}"
+            # Rules with unresolved objects are skipped above, so expansion is
+            # complete here → High confidence for full shadows.
+            incomplete = False
+            if full and actions_differ:
+                # Earlier rule fully covers later with a DIFFERENT action: the
+                # later rule can never take effect — a policy logic error.
+                finding_type = "conflicting_shadowed_rule"
+                confidence = "High"
+                conflict_type = "different-action"
+                severity = "High"
+                title = f"Rule {later_id} can never take effect (shadowed by Rule {earlier_id}, conflicting action)"
                 desc = (
-                    f"{later_name} will never be matched because {earlier_name} "
-                    f"(Rule {earlier_id}) already handles all of the same traffic. "
+                    f"{later_name} can never be matched: {earlier_name} (Rule {earlier_id}) already "
+                    f"handles all of the same traffic with a different action ('{e_action}' vs "
+                    f"'{l_action}'). This is likely a policy logic error. "
                 )
-                result = f"Rule {later_id} is fully shadowed"
+                result = f"Rule {later_id} is fully shadowed (conflicting action)"
+            elif full:
+                # Same action, fully contained → redundant rule.
+                finding_type = "same_action_shadowed_rule"
+                confidence = "High"
+                conflict_type = "same-action"
+                severity = "Medium"
+                title = f"Rule {later_id} is redundant (fully shadowed by Rule {earlier_id})"
+                desc = (
+                    f"{later_name} is redundant: {earlier_name} (Rule {earlier_id}) already handles "
+                    "all of the same traffic with the same action. "
+                )
+                result = f"Rule {later_id} is fully shadowed (redundant)"
             else:
-                # Partial shadow — lower severity/confidence by nature.
-                confidence = "Low" if incomplete else "Medium"
+                # Partial overlap on two of three dimensions.
+                finding_type = "partial_shadowed_rule"
+                confidence = "Medium"
                 conflict_type = "partial"
-                severity = "Medium" if not actions_differ else "Low"
+                severity = "Medium" if actions_differ else "Low"
                 covered = []
                 if src_ok:
                     covered.append("source")
@@ -176,7 +242,7 @@ def detect_shadows(
                 )
 
             findings.append({
-                "finding_type": "shadowed_rule",
+                "finding_type": finding_type,
                 "severity": severity,
                 "confidence": confidence,
                 "title": title,
@@ -186,6 +252,7 @@ def detect_shadows(
                     "shadowed_rule": f"Rule {later_id} ({later_name})",
                     "shadowing_rule": f"Rule {earlier_id} ({earlier_name})",
                     "conflict_type": conflict_type,
+                    "evaluation_context": context_label(later_rule, vendor),
                     "source_relation": src_rel,
                     "destination_relation": dst_rel,
                     "service_relation": svc_rel,

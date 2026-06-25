@@ -41,7 +41,8 @@ def test_full_shadow(obj_map):
     ]
     findings = detect_shadows(rules, obj_map)
     assert len(findings) == 1
-    assert findings[0]["finding_type"] == "shadowed_rule"
+    # Full containment, same action → redundant (same-action) shadow.
+    assert findings[0]["finding_type"] == "same_action_shadowed_rule"
     assert "2" in findings[0]["title"]
 
 
@@ -59,7 +60,7 @@ def test_partial_shadow_different_dest(obj_map):
     ]
     findings = detect_shadows(rules, obj_map)
     assert len(findings) == 1
-    assert findings[0]["finding_type"] == "shadowed_rule"
+    assert findings[0]["finding_type"] == "partial_shadowed_rule"
     assert findings[0]["evidence"]["conflict_type"] == "partial"
     assert "partially shadowed" in findings[0]["title"]
 
@@ -88,3 +89,71 @@ def test_first_shadowing_rule_reported(obj_map):
     # Should only report one finding per shadowed rule
     rule3_findings = [f for f in findings if "3" in f["title"]]
     assert len(rule3_findings) == 1
+
+
+# ── Vendor-aware context scoping + split finding types (slice 1) ─────────────
+def _ctx_rule(n, sources, dests, services, action="accept", enabled=True,
+              section="", src_if=None, dst_if=None, install_on=None):
+    r = make_rule(n, sources, dests, services, action, enabled)
+    r["section"] = section
+    r["source_interfaces"] = src_if or []
+    r["destination_interfaces"] = dst_if or []
+    r["install_on"] = install_on or []
+    return r
+
+
+def test_conflicting_action_full_shadow(obj_map):
+    """Earlier any/any/any allow fully covers a later deny → conflicting shadow (High)."""
+    rules = [
+        make_rule(1, ["Net-16"], ["Server"], ["any-svc"], action="accept"),
+        make_rule(2, ["Host-5"], ["Server"], ["HTTPS-SVC"], action="deny"),
+    ]
+    findings = detect_shadows(rules, obj_map)
+    assert len(findings) == 1
+    assert findings[0]["finding_type"] == "conflicting_shadowed_rule"
+    assert findings[0]["severity"] == "High"
+
+
+def test_no_shadow_across_checkpoint_layers(obj_map):
+    """Same traffic in different CP layers must NOT be compared."""
+    rules = [
+        _ctx_rule(1, ["Net-16"], ["Server"], ["any-svc"], section="Network"),
+        _ctx_rule(2, ["Host-5"], ["Server"], ["HTTPS-SVC"], section="Applications & URL Filtering"),
+    ]
+    assert detect_shadows(rules, obj_map, vendor="CheckPoint") == []
+
+
+def test_no_shadow_across_checkpoint_install_targets(obj_map):
+    rules = [
+        _ctx_rule(1, ["Net-16"], ["Server"], ["any-svc"], install_on=["GW-A"]),
+        _ctx_rule(2, ["Host-5"], ["Server"], ["HTTPS-SVC"], install_on=["GW-B"]),
+    ]
+    assert detect_shadows(rules, obj_map, vendor="CheckPoint") == []
+
+
+def test_no_shadow_across_fortigate_interface_pairs(obj_map):
+    rules = [
+        _ctx_rule(1, ["Net-16"], ["Server"], ["any-svc"], src_if=["wan1"], dst_if=["lan"]),
+        _ctx_rule(2, ["Host-5"], ["Server"], ["HTTPS-SVC"], src_if=["wan2"], dst_if=["dmz"]),
+    ]
+    assert detect_shadows(rules, obj_map, vendor="FortiGate") == []
+
+
+def test_shadow_within_same_context(obj_map):
+    """Same interface pair → shadowing IS evaluated."""
+    rules = [
+        _ctx_rule(1, ["Net-16"], ["Server"], ["any-svc"], src_if=["wan1"], dst_if=["lan"]),
+        _ctx_rule(2, ["Host-5"], ["Server"], ["HTTPS-SVC"], src_if=["wan1"], dst_if=["lan"]),
+    ]
+    findings = detect_shadows(rules, obj_map, vendor="FortiGate")
+    assert len(findings) == 1
+    assert findings[0]["finding_type"] == "same_action_shadowed_rule"
+
+
+def test_shadowing_not_evaluated_for_unknown_objects(obj_map):
+    rules = [
+        make_rule(1, ["Net-16"], ["Server"], ["any-svc"]),
+        make_rule(2, ["UNRESOLVED-OBJ"], ["Server"], ["HTTPS-SVC"]),
+    ]
+    findings = detect_shadows(rules, obj_map)
+    assert any(f["finding_type"] == "shadowing_not_evaluated" for f in findings)

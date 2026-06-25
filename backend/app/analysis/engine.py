@@ -80,6 +80,37 @@ def run_analysis(policy_id: str, db: Session) -> str:
 
         findings = []
 
+        # Safety net: a policy with objects but no rules almost always means the
+        # rulebase could not be fetched/parsed. Surface one clear diagnostic
+        # instead of running checks that would flood with false positives.
+        if not rules and objects:
+            findings.append({
+                "finding_type": "import_quality",
+                "severity": "High",
+                "confidence": "High",
+                "title": "No firewall rules were imported for this policy",
+                "description": (
+                    "This policy has objects but no access rules — usually the rulebase "
+                    "could not be fetched or parsed during import/sync. Rule and object "
+                    "usage checks are skipped to avoid false findings until the rulebase "
+                    "is available."
+                ),
+                "affected_rules": [],
+                "evidence": {"rule_count": 0, "object_count": len(objects)},
+                "recommendation": (
+                    _RL.get("import_quality")
+                    or "Re-import the configuration or re-sync the device and confirm the "
+                    "rulebase was fetched successfully (check the sync log)."
+                ),
+            })
+
+        # ── Import-quality / data-availability gates (Informational only) ──────
+        # Surface what data was/wasn't available so reviewers can judge finding
+        # completeness, and so detectors that depend on missing data degrade
+        # transparently rather than silently.
+        if rules:
+            findings.extend(_import_quality_notes(rules, objects, policy))
+
         # 1. Disabled rules
         findings.extend(_analyze_disabled(rules, obj_map))
 
@@ -105,10 +136,10 @@ def run_analysis(policy_id: str, db: Session) -> str:
         findings.extend(_analyze_inbound_exposure(rules, obj_map))
 
         # 5. Duplicate rules
-        findings.extend(detect_duplicates(rules, obj_map))
+        findings.extend(detect_duplicates(rules, obj_map, policy.vendor))
 
         # 6. Shadowed rules
-        findings.extend(detect_shadows(rules, obj_map))
+        findings.extend(detect_shadows(rules, obj_map, policy.vendor))
 
         # 6b. Consolidation candidates (same src/dst/action, differing services)
         findings.extend(_analyze_mergeable_rules(rules))
@@ -342,6 +373,7 @@ def _rule_to_dict(r: FirewallRule) -> dict:
         "section": r.section,
         "source_interfaces": _json_list(r.source_interfaces),
         "destination_interfaces": _json_list(r.destination_interfaces),
+        "install_on": _json_list(r.install_on),
         "sources": _json_list(r.sources),
         "destinations": _json_list(r.destinations),
         "services": _json_list(r.services),
@@ -503,6 +535,42 @@ def _consolidate_findings(findings: List[dict]) -> List[dict]:
 
     return consolidated
 
+
+
+def _import_quality_notes(rules: List[dict], objects: List[dict], policy) -> List[dict]:
+    """Informational data-availability notes — never inflate severity.
+
+    Detectors that depend on this data already gate themselves; these notes make
+    the gaps visible to reviewers so they can judge how complete the analysis is.
+    """
+    notes: List[dict] = []
+
+    def note(ftype, title, desc):
+        notes.append({
+            "finding_type": ftype, "severity": "Informational", "confidence": "High",
+            "title": title, "description": desc, "affected_rules": [],
+            "evidence": {"vendor": getattr(policy, "vendor", ""), "rule_count": len(rules),
+                         "object_count": len(objects)},
+            "recommendation": "Read-only data-completeness note; no action implied.",
+        })
+
+    enabled = [r for r in rules if r.get("enabled", True)]
+    if enabled and not any(r.get("hit_count") is not None for r in enabled):
+        note("import_quality", "Hit-count data unavailable",
+             "No hit counts were available for this policy, so zero-hit and low-usage "
+             "rule findings were not generated. Enable hit-count collection / re-sync to "
+             "include usage analysis.")
+    if not (policy.nat_rules or []):
+        note("import_quality", "NAT data unavailable",
+             "No NAT rules were captured, so NAT-to-policy mapping and NAT-based public "
+             "exposure analysis were limited. Public exposure was derived from the security "
+             "policy only.")
+    if not any((r.get("source_interfaces") or r.get("destination_interfaces")) for r in rules):
+        note("import_quality", "Interface/zone context unavailable",
+             "Rules carried no interface/zone context, so shadowing and duplicate analysis "
+             "treated the policy as a single evaluation context. Where the firewall uses "
+             "interfaces/zones/layers, results may be broader than the device's real scope.")
+    return notes
 
 
 def _analyze_disabled(rules: List[dict], obj_map: dict) -> List[dict]:
@@ -1345,6 +1413,13 @@ def _analyze_unused_objects(
 ) -> List[dict]:
     findings = []
 
+    # Object usage is defined by rule references. With no rules we cannot
+    # determine usage at all — flagging every object as "unused" would be wrong
+    # and floods the results (e.g. thousands of false findings when a rulebase
+    # fetch failed). Skip the check until rules are present.
+    if not rules:
+        return findings
+
     # Collect all object names referenced by rules
     used_names = set()
     reference_fields = (
@@ -1387,6 +1462,7 @@ def _analyze_unused_objects(
     for name in list(used_names):
         collect_members(name, set())
 
+    unused: List[dict] = []
     for obj in objects:
         name = obj.get("object_name", "")
         if name.lower() in ("any", "all"):
@@ -1398,26 +1474,30 @@ def _analyze_unused_objects(
         if _is_vendor_builtin_object(obj):
             continue
         if not (_object_aliases(obj) & used_names):
-            findings.append({
-                "finding_type": "unused_object",
-                "severity": "Informational",
-                "confidence": "Medium",
-                "title": f"Object '{name}' appears unused",
-                "description": (
-                    f"The object '{name}' ({obj.get('object_type', 'unknown')}: "
-                    f"{obj.get('value', 'N/A')}) is not referenced by any firewall rule "
-                    "in this policy. Unused objects add clutter to the object database."
-                ),
-                "affected_rules": [],
-                "affected_objects": [obj.get("id")],
-                "evidence": {
-                    "object_name": name,
-                    "object_type": obj.get("object_type"),
-                    "value": obj.get("value"),
-                    "members": obj.get("members"),
-                },
-                "recommendation": _RL.get("unused_object"),
-            })
+            unused.append(obj)
+
+    # Aggregate unused objects into ONE finding (instead of one per object, which
+    # floods the Findings list with thousands of low-value rows on large policies).
+    # The Objects page "Unused" filter unions affected_objects across findings, so
+    # every unused object is still listed there — this only de-noises Findings.
+    if unused:
+        names = [o.get("object_name", "") for o in unused]
+        findings.append({
+            "finding_type": "unused_object",
+            "severity": "Informational",
+            "confidence": "Medium",
+            "title": f"{len(unused)} unused object{'s' if len(unused) != 1 else ''} in the object database",
+            "description": (
+                f"{len(unused)} objects are not referenced by any firewall rule in this "
+                "policy (directly or through a group). Unused objects add clutter to the "
+                "object database. Review the full list on the Objects page using the "
+                "'Unused' filter."
+            ),
+            "affected_rules": [],
+            "affected_objects": [o.get("id") for o in unused if o.get("id")],
+            "evidence": {"count": len(unused), "sample": names[:50]},
+            "recommendation": _RL.get("unused_object"),
+        })
 
     return findings
 

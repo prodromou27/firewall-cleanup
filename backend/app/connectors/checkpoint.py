@@ -486,7 +486,12 @@ class CheckPointConnector:
             hits_settings: dict = {"from-date": from_date, "to-date": today}
             if gateway_target:
                 hits_settings["target"] = gateway_target
+            # full + hits, then standard + hits. Many management servers 500 on
+            # details-level "full" entirely (with or without hits) but accept
+            # "standard" — so we must offer hits WITH standard detail, otherwise
+            # hit counts are lost whenever full detail is rejected.
             payload_variants.append({"show-hits": True, "hits-settings": hits_settings})
+            payload_variants.append({"details-level": "standard", "show-hits": True, "hits-settings": hits_settings})
         payload_variants.append({})                              # full detail, no hits
         payload_variants.append({"details-level": "standard"})   # standard detail, no hits
 
@@ -831,6 +836,20 @@ class CheckPointConnector:
 
         # ── Object database ────────────────────────────────────────────────
         objects = self.get_network_objects()
+        # Group members frequently reference gateway/server objects (e.g. a
+        # "CNP-FW" group) and domain (FQDN) objects, which the per-type network
+        # fetches above don't return. Add them so those members resolve instead
+        # of showing as unmatched / their groups looking smaller than they are.
+        for gw in gateways:
+            if isinstance(gw, dict) and gw.get("name"):
+                objects.append({
+                    "type": "host", "name": gw["name"], "uid": gw.get("uid"),
+                    "ipv4-address": gw.get("ipv4-address") or gw.get("ip-address") or "",
+                })
+        domains = self._fetch_typed("show-dns-domains")   # no-op if unsupported
+        if domains:
+            objects += domains
+            logger.info("CP: %d domain (FQDN) objects", len(domains))
         logger.info("CP: %d network/service objects", len(objects))
 
         # ── Time objects ───────────────────────────────────────────────────

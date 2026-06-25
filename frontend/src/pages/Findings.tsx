@@ -34,6 +34,10 @@ const FINDING_TYPES: Record<string, string> = {
   // Core rule analysis
   duplicate_rule: 'Duplicate Rule',
   shadowed_rule: 'Shadowed Rule',
+  same_action_shadowed_rule: 'Redundant Rule',
+  conflicting_shadowed_rule: 'Conflicting Shadowed Rule',
+  partial_shadowed_rule: 'Partially Shadowed Rule',
+  shadowing_not_evaluated: 'Shadowing Not Evaluated',
   disabled_rule: 'Disabled Rule',
   zero_hit_rule: 'Zero Hits',
   low_usage_rule: 'Low Usage',

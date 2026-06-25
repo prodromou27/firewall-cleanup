@@ -121,7 +121,7 @@ class Settings(BaseSettings):
     temp_keywords: List[str] = [
         "temp", "temporary", "test", "testing", "migration",
         "change", "old", "legacy", "backup", "delete", "remove",
-        "cleanup", "tmp", "bak"
+        "debug", "tmp", "bak"
     ]
 
     # Risky services

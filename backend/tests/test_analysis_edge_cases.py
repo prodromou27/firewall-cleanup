@@ -124,7 +124,7 @@ def test_unused_object_detection_counts_direct_and_indirect_group_references_onl
         build_object_map(objects),
     )
 
-    assert {f["evidence"]["object_name"] for f in findings} == {"Unused-Host"}
+    assert set(findings[0]["evidence"]["sample"]) == {"Unused-Host"}
 
 
 def test_risky_permissive_and_zero_hit_detections_avoid_common_false_positives():

@@ -62,6 +62,16 @@ def expand_address_object(
 
     obj = obj_map.get(name)
     if obj is None:
+        # A literal IP / CIDR / range written directly in the rule is a concrete,
+        # usable value — not an unresolved object. Only truly unknown names
+        # (no object, not an address literal) are 'unknown'.
+        from app.analysis.ip_utils import parse_ip_network
+        literal = name.strip()
+        if parse_ip_network(literal) is not None:
+            return [{"type": "network", "value": literal, "name": name}]
+        if "-" in literal and all(parse_ip_network(p.strip()) is not None
+                                  for p in literal.split("-", 1) if p.strip()):
+            return [{"type": "range", "value": literal, "name": name}]
         return [{"type": "unknown", "value": name, "name": name}]
 
     obj_type = (obj.get("object_type") or "").lower()

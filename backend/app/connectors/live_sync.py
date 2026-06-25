@@ -546,12 +546,15 @@ def _cp_translate(raw: dict) -> dict:
                     rname = m
                 if rname:
                     members.append(rname)
-            if raw_members and not members:
-                logger.warning("CP group '%s': %d raw members but none resolved (shape=%s)",
-                               name, len(raw_members), type(raw_members[0]).__name__)
-            elif not raw_members:
-                logger.info("CP group '%s' returned no members from the API (details-level/membership)", name)
-            obj_map[name] = {"type": "group", "value": None, "members": members, "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
+            # Groups appear in BOTH show-groups (with members) and the rulebase
+            # inline object-dictionary (summary, no members). The summary copy
+            # must NOT overwrite an already-populated group, or members are lost.
+            existing = obj_map.get(name)
+            if not members and isinstance(existing, dict) and existing.get("members"):
+                pass  # keep the populated version from the other source
+            else:
+                obj_map[name] = {"type": "group", "value": None, "members": members,
+                                 "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
 
         elif t == "wildcard":
             obj_map[name] = {"type": "wildcard", "value": obj.get("ipv4-address", ""), "members": [], "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
@@ -579,7 +582,13 @@ def _cp_translate(raw: dict) -> dict:
 
         elif t == "service-group":
             members = [resolve(m) for m in obj.get("members", [])]
-            obj_map[name] = {"type": "service-group", "value": None, "members": members, "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
+            members = [m for m in members if m]
+            existing = obj_map.get(name)
+            if not members and isinstance(existing, dict) and existing.get("members"):
+                pass  # keep populated version; don't let an inline summary blank it
+            else:
+                obj_map[name] = {"type": "service-group", "value": None, "members": members,
+                                 "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
 
         else:
             # Unknown type — store as generic host for completeness
@@ -700,6 +709,27 @@ def _cp_translate(raw: dict) -> dict:
             "_time_restricted":      time_restricted,
         }
         rules.append(rule)
+
+    # ── Diagnostics: group membership health (pinpoints empty-group / false
+    #    unused-object issues without needing access to the management DB) ──────
+    groups = [(n, o) for n, o in obj_map.items()
+              if isinstance(o, dict) and "group" in str(o.get("type", "")).lower()]
+    empty = [n for n, o in groups if not o.get("members")]
+    logger.info("CP object map: %d total, %d groups (%d populated, %d EMPTY)",
+                len(obj_map), len(groups), len(groups) - len(empty), len(empty))
+    if empty:
+        logger.warning("CP empty groups after resolution (first 10 of %d): %s",
+                       len(empty), empty[:10])
+    # Sanity-check resolution: members that don't resolve to a known object name/uid.
+    obj_keys = set(obj_map.keys())
+    unresolved = 0
+    for _, o in groups:
+        for m in (o.get("members") or []):
+            if str(m) not in obj_keys:
+                unresolved += 1
+    if unresolved:
+        logger.warning("CP: %d group member references do not match any object name/uid "
+                       "(possible name/uid mismatch causing false 'unused' findings)", unresolved)
 
     return {"rules": rules, "objects": obj_map, "warnings": vpn_warnings, "nat_rules": nat_rules_norm}
 
@@ -823,11 +853,17 @@ def _write_to_db(parsed: dict, policy: FirewallPolicy, db: Session):
     # inventing findings).
     policy.nat_rules = parsed.get("nat_rules") or None
 
-    # Write objects
+    # Write objects. Assign the id in Python (the model uses a uuid default) so
+    # member rows can reference it without a per-object db.flush() — that avoids
+    # one DB round-trip per object (thousands on a large Check Point management)
+    # and is the dominant sync-write cost.
+    member_rows: list[ObjectMember] = []
     for name, obj in parsed["objects"].items():
         members = obj.get("members", [])
         raw_data = obj.get("raw_data") if isinstance(obj.get("raw_data"), dict) else {}
-        db_obj = FirewallObject(
+        oid = str(uuid.uuid4())
+        db.add(FirewallObject(
+            id=oid,
             policy_id=policy.id,
             vendor=vendor,
             object_uid=obj.get("uid") or raw_data.get("uid"),
@@ -840,11 +876,14 @@ def _write_to_db(parsed: dict, policy: FirewallPolicy, db: Session):
             members=members,
             comment=str(obj.get("comment", "") or ""),
             raw_data=redact_secrets(raw_data),
-        )
-        db.add(db_obj)
-        db.flush()
+        ))
         for m in members:
-            db.add(ObjectMember(parent_id=db_obj.id, member_name=m))
+            member_rows.append(ObjectMember(parent_id=oid, member_name=m))
+    # One flush inserts all objects so member FK references resolve, then bulk
+    # insert members (single round-trip each instead of per-object).
+    db.flush()
+    if member_rows:
+        db.bulk_save_objects(member_rows)
 
     # Write rules
     for seq, r in enumerate(parsed["rules"]):

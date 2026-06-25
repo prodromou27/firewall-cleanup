@@ -23,7 +23,7 @@ import json
 import logging
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Optional, List
 
 logger = logging.getLogger(__name__)
@@ -34,6 +34,10 @@ MAX_RESULTS   = 20   # cap CVEs returned per device
 
 # Human-readable reason for the most recent _query_nvd failure (None on success).
 _query_nvd_error: Optional[str] = None
+
+
+def _utcnow_naive() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 # ── CPE helpers ──────────────────────────────────────────────────────────────
@@ -405,7 +409,7 @@ def get_device_cves(
     if model_available and not force_refresh:
         cached = db.query(DeviceCVECache).filter(DeviceCVECache.device_id == device_id).first()
         if cached:
-            age = datetime.utcnow() - (cached.last_checked or datetime.min)
+            age = _utcnow_naive() - (cached.last_checked or datetime.min)
             if age < timedelta(hours=CACHE_TTL_HRS):
                 import json
                 cves = json.loads(cached.cve_data or "[]")
@@ -475,7 +479,7 @@ def get_device_cves(
         if cached_row:
             cached_row.cve_data    = json.dumps(cves)
             cached_row.cpe_string  = cpe
-            cached_row.last_checked = datetime.utcnow()
+            cached_row.last_checked = _utcnow_naive()
         else:
             import uuid
             db.add(DeviceCVECache(
@@ -483,7 +487,7 @@ def get_device_cves(
                 device_id=device_id,
                 cpe_string=cpe,
                 cve_data=json.dumps(cves),
-                last_checked=datetime.utcnow(),
+                last_checked=_utcnow_naive(),
             ))
         try:
             db.commit()
@@ -496,7 +500,7 @@ def get_device_cves(
         "cpe":         cpe,
         "cves":        cves,
         "cached":      False,
-        "last_checked": datetime.utcnow().isoformat(),
+        "last_checked": _utcnow_naive().isoformat(),
         "error":       error,
         "lookup_method": "+".join(dict.fromkeys(lookup_methods)) if lookup_methods else None,
     }

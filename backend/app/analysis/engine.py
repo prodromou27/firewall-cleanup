@@ -1,6 +1,6 @@
 """Main analysis engine — orchestrates all analyzers."""
 from typing import List, Dict, Any
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.policy import FirewallPolicy, FirewallRule, FirewallObject, ObjectMember, AnalysisRun
@@ -23,6 +23,10 @@ import json
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _utcnow_naive() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def run_analysis(policy_id: str, db: Session) -> str:
@@ -349,7 +353,7 @@ def run_analysis(policy_id: str, db: Session) -> str:
         policy.top_risk_drivers = top_risk_drivers
 
         run.status = "completed"
-        run.completed_at = datetime.utcnow()
+        run.completed_at = _utcnow_naive()
         run.findings_created = finding_count
         # Severity snapshot for trend charting (counts at this run's completion).
         _sev_snapshot = Counter(f.get("severity", "Informational") for f in findings)
@@ -756,7 +760,7 @@ def _analyze_disabled(rules: List[dict], obj_map: dict) -> List[dict]:
 
 def _analyze_usage(rules: List[dict], obj_map: dict) -> List[dict]:
     findings = []
-    now = datetime.utcnow()
+    now = _utcnow_naive()
 
     for rule in rules:
         if not rule.get("enabled", True):

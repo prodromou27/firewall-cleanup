@@ -186,6 +186,9 @@ def run_analysis(policy_id: str, db: Session) -> str:
         # 10. Duplicate objects
         findings.extend(_analyze_duplicate_objects(objects))
 
+        # 10b. Overlapping network objects (one network contains another)
+        findings.extend(_analyze_overlapping_objects(objects))
+
         # 11. Rules without documentation (no comments, no owner reference)
         findings.extend(_analyze_no_documentation(rules))
 
@@ -1746,6 +1749,70 @@ def _analyze_unused_objects(
         })
 
     return findings
+
+
+def _analyze_overlapping_objects(objects: List[dict]) -> List[dict]:
+    """Network objects whose address space overlaps another — one network
+    strictly contains another, without being identical. Distinct from
+    `duplicate_object` (identical value) and `broad_network` (a single over-broad
+    object). Conservative: only network↔network containment (a host inside a
+    subnet is normal and excluded), built-ins skipped, aggregated into one
+    finding. See docs/analysis-accuracy-model.md §2."""
+    from app.analysis.ip_utils import parse_ip_network, network_contains
+
+    nets = []
+    for obj in objects:
+        if _is_group_object(obj) or _is_vendor_builtin_object(obj):
+            continue
+        val = (obj.get("value") or "").strip()
+        if not val:
+            continue
+        net = parse_ip_network(val)
+        if net is None or net.prefixlen >= 32:   # skip hosts / non-networks
+            continue
+        nets.append((obj, val, net))
+
+    # Pairwise; guard against quadratic blow-up on very large object databases.
+    if len(nets) < 2 or len(nets) > 1500:
+        return []
+
+    seen = set()
+    affected_ids = set()
+    samples = []
+    for oa, va, na in nets:
+        for ob, vb, nb in nets:
+            if na.prefixlen >= nb.prefixlen:      # only broader-contains-narrower, once
+                continue
+            if not network_contains(va, vb):
+                continue
+            key = (oa.get("id"), ob.get("id"))
+            if key in seen:
+                continue
+            seen.add(key)
+            affected_ids.update(x for x in (oa.get("id"), ob.get("id")) if x)
+            samples.append(f"{ob.get('object_name')} ({vb}) ⊂ {oa.get('object_name')} ({va})")
+
+    if not seen:
+        return []
+
+    n = len(seen)
+    return [{
+        "finding_type": "overlapping_object",
+        "severity": "Low",
+        "confidence": "High",
+        "title": f"{n} overlapping network object pair{'s' if n != 1 else ''}",
+        "description": (
+            f"{n} network object pair(s) overlap — one object's address range is fully "
+            "contained within another's, without being identical. Overlapping definitions "
+            "make the object database ambiguous and can mask which object a rule really "
+            "matches. Review whether the narrower object is needed or should reference the "
+            "broader one."
+        ),
+        "affected_rules": [],
+        "affected_objects": sorted(affected_ids),
+        "evidence": {"count": n, "sample": samples[:50]},
+        "recommendation": _RL.get("overlapping_object"),
+    }]
 
 
 def _analyze_duplicate_objects(objects: List[dict]) -> List[dict]:

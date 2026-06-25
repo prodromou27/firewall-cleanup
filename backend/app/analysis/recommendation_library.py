@@ -107,6 +107,11 @@ LIBRARY: dict[str, str] = {
         "contains a circular reference. Re-import / re-sync the object database (and review "
         "any circular groups) before relying on unattached-object cleanup."
     ),
+    "overlapping_object": (
+        "Review the overlapping network objects: confirm whether the narrower object is "
+        "still required, or whether rules should reference the broader object. Consolidate "
+        "to remove ambiguity, via change management."
+    ),
     "duplicate_object": (
         "Consolidate duplicate objects to a single canonical definition. Update any rules "
         "that reference the redundant object to use the canonical one, then remove the "

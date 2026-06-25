@@ -79,6 +79,7 @@ const FINDING_TYPES: Record<string, string> = {
   object_usage_unknown: 'Object Usage Unknown',
   unused_object: 'Unused Object',
   duplicate_object: 'Duplicate Object',
+  overlapping_object: 'Overlapping Object',
   empty_group: 'Empty Group',
   large_group: 'Large Group',
   broad_network: 'Broad Network',

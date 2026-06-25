@@ -182,6 +182,29 @@ def test_unused_objects_follow_nested_vendor_group_usage_and_skip_builtins():
     _assert_quality(findings)
 
 
+def test_overlapping_objects_flags_network_containment_not_duplicates_or_hosts():
+    from app.analysis.engine import _analyze_overlapping_objects
+    objects = [
+        _object("Net-16", "network", "10.10.0.0/16"),
+        _object("Net-24", "network", "10.10.5.0/24"),     # contained in Net-16 → overlap
+        _object("Other-16", "network", "192.168.0.0/16"),  # disjoint → no overlap
+        _object("Host", "host", "10.10.5.20/32"),          # host inside Net-16 → excluded (noise)
+        _object("Dup-A", "network", "172.16.0.0/24"),
+        _object("Dup-B", "network", "172.16.0.0/24"),      # identical → duplicate, not overlap
+        _object("Builtin", "network", "10.10.7.0/24", raw_data={"predefined": True}),
+    ]
+    findings = _analyze_overlapping_objects(objects)
+
+    assert len(findings) == 1
+    f = findings[0]
+    assert f["finding_type"] == "overlapping_object"
+    assert f["evidence"]["count"] == 1                     # only Net-24 ⊂ Net-16
+    sample = " ".join(f["evidence"]["sample"])
+    assert "Net-24" in sample and "Net-16" in sample
+    assert "Host" not in sample and "Dup-" not in sample and "Builtin" not in sample
+    _assert_quality(findings)
+
+
 def test_inoperative_rule_when_source_is_empty_group():
     """An enabled rule whose source resolves to an empty group can never match —
     distinct from shadowing. Disabled rules, populated groups, and unknown

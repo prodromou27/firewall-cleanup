@@ -11,6 +11,7 @@ import { EmptyState, ErrorState, LoadingState } from '../components/ui/page-stat
 import type { Rule, Policy } from '../types'
 import { clsx } from 'clsx'
 import { fetchFailureMessage, friendlyErrorMessage } from '../utils/errors'
+import { shortFindingTypeLabel } from '../lib/findingLabels'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -56,14 +57,9 @@ function ValueCell({ values, isAny }: { values: unknown; isAny?: boolean }) {
 }
 
 function FindingTypeBadge({ type }: { type: string }) {
-  const labels: Record<string, string> = {
-    shadowed_rule: 'Shadow', duplicate_rule: 'Dup', zero_hit_rule: 'Zero Hit',
-    overly_permissive: 'Permissive', disabled_rule: 'Disabled',
-    no_logging: 'No Log', risky_service: 'Risky Svc', temporary_rule: 'Temp',
-  }
   return (
     <span className="text-[10px] px-1 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-700 font-medium">
-      {labels[type] || type}
+      {shortFindingTypeLabel(type)}
     </span>
   )
 }

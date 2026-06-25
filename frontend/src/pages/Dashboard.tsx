@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { ElementType } from 'react'
 import { Link } from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, CartesianGrid } from 'recharts'
 import {
@@ -13,16 +14,24 @@ import { EmptyState, ErrorState, LoadingState } from '../components/ui/page-stat
 import { VendorBadge } from '../components/ui/vendor-badge'
 import { friendlyErrorMessage } from '../utils/errors'
 import type { DashboardStats, Customer, RiskHeatmapEntry } from '../types'
+import { findingTypeLabel } from '../lib/findingLabels'
 
 /* ── Helpers ─────────────────────────────────────────────── */
 
 const TYPE_LABELS: Record<string, string> = {
   duplicate_rule: 'Duplicate Rules', shadowed_rule: 'Shadowed Rules',
+  same_action_shadowed_rule: 'Redundant Rules',
+  conflicting_shadowed_rule: 'Conflicting Shadowed Rules',
+  partial_shadowed_rule: 'Partially Shadowed Rules',
+  shadowing_not_evaluated: 'Shadowing Not Evaluated',
   disabled_rule: 'Disabled Rules',   zero_hit_rule: 'Zero-Hit Rules',
   low_usage_rule: 'Low Usage',       overly_permissive: 'Overly Permissive',
   risky_service: 'Risky Services',   no_logging: 'No Logging',
   temporary_rule: 'Temporary Rules', unused_object: 'Unused Objects',
   duplicate_object: 'Duplicate Objects',
+  any_to_any_allow: 'Any-to-Any Allow',
+  import_quality: 'Import Quality',
+  analysis_configuration: 'Analysis Configuration',
 }
 
 function riskColor(score: number) {
@@ -222,19 +231,21 @@ export function Dashboard() {
   const typeMap = Object.fromEntries(stats.findings_by_type.map(t => [t.type, t.count]))
   const sevMap  = Object.fromEntries(stats.findings_by_severity.map(s => [s.severity, s.count]))
 
-  const cleanupTypes = [
+  const countTypes = (keys: string[]) => keys.reduce((sum, key) => sum + (typeMap[key] || 0), 0)
+  const cleanupTypes: Array<{ key: string; label: string; icon: ElementType; keys?: string[] }> = [
     { key: 'disabled_rule',    label: 'Disabled Rules',   icon: Ban },
     { key: 'zero_hit_rule',    label: 'Zero-Hit Rules',   icon: Activity },
-    { key: 'shadowed_rule',    label: 'Shadowed Rules',   icon: Layers },
+    { key: 'same_action_shadowed_rule', label: 'Redundant Rules', icon: Layers, keys: ['shadowed_rule', 'same_action_shadowed_rule'] },
+    { key: 'conflicting_shadowed_rule', label: 'Conflicting Shadows', icon: AlertTriangle, keys: ['conflicting_shadowed_rule', 'partial_shadowed_rule'] },
     { key: 'overly_permissive',label: 'Overly Permissive',icon: Eye },
     { key: 'no_logging',       label: 'No Logging',       icon: FileText },
     { key: 'temporary_rule',   label: 'Temporary Rules',  icon: RefreshCw },
   ]
-  const totalCleanup = cleanupTypes.reduce((s, t) => s + (typeMap[t.key] || 0), 0)
+  const totalCleanup = cleanupTypes.reduce((s, t) => s + countTypes(t.keys || [t.key]), 0)
 
   const topTypeData = stats.findings_by_type
     .sort((a, b) => b.count - a.count).slice(0, 8)
-    .map(t => ({ name: TYPE_LABELS[t.type] || t.type.replace(/_/g, ' '), count: t.count }))
+    .map(t => ({ name: TYPE_LABELS[t.type] || findingTypeLabel(t.type), count: t.count }))
 
   const disabledPct = stats.total_rules > 0
     ? ((stats.disabled_rules / stats.total_rules) * 100).toFixed(0) + '%' : '—'
@@ -346,9 +357,9 @@ export function Dashboard() {
               <span className="text-xs text-gray-400">{totalCleanup} items</span>
             </div>
             <div className="space-y-0.5">
-              {cleanupTypes.map(({ key, label, icon }) => (
+              {cleanupTypes.map(({ key, label, icon, keys }) => (
                 <CleanupRow key={key} icon={icon} label={label}
-                  count={typeMap[key] || 0} max={Math.max(totalCleanup, 1)}
+                  count={countTypes(keys || [key])} max={Math.max(totalCleanup, 1)}
                   to={findingsLink(`finding_type=${key}`)} />
               ))}
             </div>

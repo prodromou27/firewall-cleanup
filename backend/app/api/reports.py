@@ -835,6 +835,7 @@ FULL_DISCLAIMER = (
 )
 
 CATEGORY_META: dict = {
+    "any_to_any_allow":   "Any-to-Any Allow Rules",
     "overly_permissive":  "Overly Permissive Rules",
     "disabled_rule":      "Disabled Rules",
     "zero_hit_rule":      "Zero-Hit Rules",
@@ -870,6 +871,8 @@ CATEGORY_META: dict = {
     "large_group":        "Large Groups",
     "broad_network":      "Broad Network Objects",
     "service_range":      "Wide Service Ranges",
+    "import_quality":     "Import Quality Notes",
+    "analysis_configuration": "Analysis Configuration Notes",
 }
 
 REPORT_TYPE_TITLES: dict = {
@@ -1430,6 +1433,7 @@ tbody tr:last-child td{{border-bottom:none}}
 # ── Excel builder (full) ───────────────────────────────────────────────────────
 
 CATEGORY_SHEET_NAMES: dict = {
+    "any_to_any_allow":   "Any-to-Any",
     "overly_permissive":  "Permissive Rules",
     "disabled_rule":      "Disabled Rules",
     "zero_hit_rule":      "Zero-Hit Rules",
@@ -1465,6 +1469,8 @@ CATEGORY_SHEET_NAMES: dict = {
     "large_group":        "Large Groups",
     "broad_network":      "Broad Networks",
     "service_range":      "Service Ranges",
+    "import_quality":     "Import Quality",
+    "analysis_configuration": "Analysis Config",
 }
 
 CLEANUP_TYPES = {

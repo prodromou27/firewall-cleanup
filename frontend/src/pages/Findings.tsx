@@ -17,6 +17,7 @@ import { DetailDrawer } from '../components/ui/DetailDrawer'
 import { useAuth } from '../contexts/AuthContext'
 import type { Finding, Policy, AffectedRuleData, FindingComment } from '../types'
 import { fetchFailureMessage, friendlyErrorMessage } from '../utils/errors'
+import { FINDING_TYPE_LABELS, SHADOW_FINDING_TYPES, findingTypeLabel } from '../lib/findingLabels'
 
 /** Backend stores array fields as JSON strings in SQLite — handle both formats. */
 function parseArr(v: unknown): string[] {
@@ -31,6 +32,7 @@ function parseArr(v: unknown): string[] {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const FINDING_TYPES: Record<string, string> = {
+  ...FINDING_TYPE_LABELS,
   // Core rule analysis
   duplicate_rule: 'Duplicate Rule',
   shadowed_rule: 'Shadowed Rule',
@@ -73,6 +75,7 @@ const FINDING_TYPES: Record<string, string> = {
   service_range: 'Large Port Range',
   // Import / data quality
   import_quality: 'Import Quality',
+  analysis_configuration: 'Analysis Configuration',
 }
 
 const FINDING_ICONS: Record<string, React.ReactNode> = {
@@ -89,6 +92,8 @@ const FINDING_ICONS: Record<string, React.ReactNode> = {
   risky_service: <Wifi className="w-3.5 h-3.5" />,
   low_usage_rule: <Activity className="w-3.5 h-3.5" />,
   import_quality: <FileText className="w-3.5 h-3.5" />,
+  analysis_configuration: <FileText className="w-3.5 h-3.5" />,
+  any_to_any_allow: <AlertTriangle className="w-3.5 h-3.5" />,
   rdp_exposed: <Shield className="w-3.5 h-3.5" />,
   ssh_exposed: <Shield className="w-3.5 h-3.5" />,
   database_exposed: <Shield className="w-3.5 h-3.5" />,
@@ -138,18 +143,16 @@ const SEVERITY_COLORS: Record<string, string> = {
 
 // Quick preset filters
 const PRESETS = [
-  { label: '🛑 Critical Severity', params: { severity: 'Critical' } },
-  { label: '🔴 High Severity', params: { severity: 'High' } },
-  { label: '⚡ Zero-Hit Rules', params: { finding_type: 'zero_hit_rule' } },
-  { label: '🔓 Overly Permissive', params: { finding_type: 'overly_permissive' } },
-  { label: '👥 Shadowed Rules', params: { finding_type: 'shadowed_rule' } },
-  { label: '📋 Needs Review', params: { status: 'Review Required' } },
-  { label: '✅ Cleanup Candidates', params: { status: 'Confirmed Cleanup Candidate' } },
-  { label: '📝 No Documentation', params: { finding_type: 'no_documentation' } },
-  { label: '🌐 Broad VPN Access', params: { finding_type: 'vpn_access' } },
-  { label: '📦 Empty Groups', params: { finding_type: 'empty_group' } },
-  { label: '🌍 Broad Networks', params: { finding_type: 'broad_network' } },
-  { label: '🏷️ Poor Names', params: { finding_type: 'naming_quality' } },
+  { label: 'Critical Severity', params: { severity: 'Critical' } },
+  { label: 'High Severity', params: { severity: 'High' } },
+  { label: 'Any-to-Any Allow', params: { finding_type: 'any_to_any_allow' } },
+  { label: 'Zero-Hit Rules', params: { finding_type: 'zero_hit_rule' } },
+  { label: 'Overly Permissive', params: { finding_type: 'overly_permissive' } },
+  { label: 'Redundant Rules', params: { finding_type: 'same_action_shadowed_rule' } },
+  { label: 'Needs Review', params: { status: 'Review Required' } },
+  { label: 'Cleanup Candidates', params: { status: 'Confirmed Cleanup Candidate' } },
+  { label: 'Import Quality', params: { finding_type: 'import_quality' } },
+  { label: 'Analysis Config', params: { finding_type: 'analysis_configuration' } },
 ]
 
 // ── Rule Card ─────────────────────────────────────────────────────────────────
@@ -297,7 +300,7 @@ function AffectedRulesPanel({ finding }: { finding: Finding }) {
   if (rules.length === 0) return null
   const type = finding.finding_type
 
-  if (type === 'shadowed_rule' && rules.length >= 2) {
+  if (SHADOW_FINDING_TYPES.has(type) && rules.length >= 2) {
     const shadowed = rules[0]
     const shadowing = rules[1]
     return (
@@ -667,7 +670,7 @@ function FindingRow({ finding, onUpdate, selected, onSelect }: {
         <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">
           <span className="flex items-center gap-1">
             {FINDING_ICONS[finding.finding_type]}
-            {FINDING_TYPES[finding.finding_type] || finding.finding_type}
+            {findingTypeLabel(finding.finding_type)}
           </span>
         </td>
         <td className="px-4 py-3 text-sm font-medium text-gray-900 max-w-[280px]">
@@ -705,7 +708,7 @@ function FindingRow({ finding, onUpdate, selected, onSelect }: {
           onClose={() => setExpanded(false)}
           width="xl"
           title={finding.title}
-          subtitle={FINDING_TYPES[finding.finding_type] || finding.finding_type}
+          subtitle={findingTypeLabel(finding.finding_type)}
           badges={<><SeverityBadge severity={finding.severity} size="sm" /><StatusBadge status={finding.status} /><ConfidenceBadge confidence={finding.confidence || 'Medium'} /></>}
         >
           <div className="space-y-5">

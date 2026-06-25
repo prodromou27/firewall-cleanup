@@ -3,6 +3,8 @@ import { useParams, Link } from 'react-router-dom'
 import { Shield, Globe, AlertTriangle, ArrowLeft, Download, Network } from 'lucide-react'
 import { getPublicExposure, type PublicExposure } from '../api/client'
 import { SeverityBadge } from '../components/ui/SeverityBadge'
+import { EmptyState, ErrorState, LoadingState } from '../components/ui/page-state'
+import { friendlyErrorMessage } from '../utils/errors'
 
 export function PublicExposure() {
   const { policyId } = useParams<{ policyId: string }>()
@@ -15,7 +17,7 @@ export function PublicExposure() {
     setLoading(true)
     getPublicExposure(policyId)
       .then(setData)
-      .catch(() => setError('Failed to load public exposure analysis.'))
+      .catch(e => setError(friendlyErrorMessage(e, 'Public exposure analysis could not be loaded. Please refresh and try again.')))
       .finally(() => setLoading(false))
   }, [policyId])
 
@@ -29,8 +31,19 @@ export function PublicExposure() {
     URL.revokeObjectURL(a.href)
   }
 
-  if (loading) return <div className="page-body"><div className="animate-spin w-7 h-7 border-b-2 border-brand-600 rounded-full mx-auto mt-16" /></div>
-  if (error || !data) return <div className="page-body"><div className="rounded-lg bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-700">{error || 'No data'}</div></div>
+  if (loading) return <LoadingState label="Loading public exposure analysis..." className="m-7" />
+  if (error) return <div className="p-7"><ErrorState title="Public exposure unavailable" message={error} /></div>
+  if (!data) {
+    return (
+      <div className="p-7">
+        <EmptyState
+          icon={<Globe className="w-6 h-6" />}
+          title="No public exposure data available"
+          description="Sync or import a policy with rule, object, interface, and NAT context to populate this view."
+        />
+      </div>
+    )
+  }
 
   return (
     <div>

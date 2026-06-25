@@ -104,6 +104,8 @@ FINDING_CATEGORIES = [
     ("broad_network", "Broad Network Objects"),
     ("service_range", "Wide Service Objects"),
     ("any_to_any_allow", "Any-to-Any Allow Rules"),
+    ("import_quality", "Import Quality Notes"),
+    ("analysis_configuration", "Analysis Configuration Notes"),
     # Version intelligence
     ("version_outdated", "Outdated Firewall Versions"),
     ("version_end_of_support", "End-of-Support Versions"),

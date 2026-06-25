@@ -759,6 +759,8 @@ def get_policy_scorecard(
 
 
 _NAT_EXPOSURE_FINDING_TYPES = {
+    "rdp_exposed", "ssh_exposed", "database_exposed", "cleartext_service",
+    "inbound_from_internet",
     "nat_public_to_internal", "nat_static", "nat_source", "nat_duplicate",
     "nat_overlap", "nat_without_policy", "policy_without_nat",
     "any_service_public_exposure", "rdp_public_exposure", "ssh_public_exposure",

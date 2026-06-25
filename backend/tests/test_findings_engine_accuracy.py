@@ -160,7 +160,7 @@ def test_shadowed_rule_reports_first_enabled_shadowing_rule():
     findings = detect_shadows(rules, {})
 
     assert len(findings) == 1
-    assert findings[0]["finding_type"] == "same_action_shadowed_rule"
+    assert findings[0]["finding_type"] == "redundant_rule"
     assert findings[0]["evidence"]["shadowed_rule"].startswith("Rule 2")
     _assert_quality(findings)
 
@@ -486,7 +486,7 @@ def test_evaluation_context_stamped_on_rule_scoped_findings():
     # Finding spanning two different contexts → left unstamped (ambiguous).
     spanning = {"finding_type": "duplicate_rule", "affected_rules": ["r1", "r2"], "evidence": {}}
     # Finding that already carries context → not overwritten.
-    preset = {"finding_type": "same_action_shadowed_rule", "affected_rules": ["r1"],
+    preset = {"finding_type": "redundant_rule", "affected_rules": ["r1"],
               "evidence": {"evaluation_context": "preset"}}
     # Object-only finding (no rules) → untouched.
     object_only = {"finding_type": "unused_object", "affected_rules": [], "evidence": {}}

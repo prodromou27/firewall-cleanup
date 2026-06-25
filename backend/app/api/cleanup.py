@@ -36,7 +36,7 @@ WAVES = [
         "rollback": "Re-create or re-enable the rule/object from the captured configuration baseline (revision snapshot) if needed.",
         "types": {
             "disabled_rule", "zero_hit_rule", "duplicate_rule", "shadowed_rule",
-            "same_action_shadowed_rule", "conflicting_shadowed_rule",
+            "redundant_rule", "same_action_shadowed_rule", "conflicting_shadowed_rule",
             "unattached_object", "unused_object", "duplicate_object", "empty_group",
         },
     },

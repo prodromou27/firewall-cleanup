@@ -46,7 +46,7 @@ SECTION_CATALOG = [
     {"key": "zero_hit_rules",    "name": "Zero-Hit Rules",        "type": T_FINDINGS, "group": "Findings",      "default": False,"finding_types": ["zero_hit_rule"]},
     {"key": "low_hit_rules",     "name": "Low-Hit Rules",         "type": T_FINDINGS, "group": "Findings",      "default": False,"finding_types": ["low_usage_rule"]},
     {"key": "duplicate_rules",   "name": "Duplicate Rules",       "type": T_FINDINGS, "group": "Findings",      "default": False,"finding_types": ["duplicate_rule"]},
-    {"key": "shadowed_rules",    "name": "Shadowed & Inoperative Rules","type": T_FINDINGS, "group": "Findings",  "default": False,"finding_types": ["shadowed_rule", "same_action_shadowed_rule", "conflicting_shadowed_rule", "partial_shadowed_rule", "inoperative_rule", "shadowing_not_evaluated"]},
+    {"key": "shadowed_rules",    "name": "Shadowed, Redundant & Inoperative Rules","type": T_FINDINGS, "group": "Findings",  "default": False,"finding_types": ["redundant_rule", "shadowed_rule", "same_action_shadowed_rule", "conflicting_shadowed_rule", "partial_shadowed_rule", "inoperative_rule", "shadowing_not_evaluated"]},
     {"key": "risky_services",    "name": "Risky Services",        "type": T_FINDINGS, "group": "Findings",      "default": True, "finding_types": ["risky_service", "cleartext_service"]},
     {"key": "rules_without_logging","name": "Rules Without Logging","type": T_FINDINGS,"group": "Findings",     "default": False,"finding_types": ["no_logging"]},
     {"key": "temporary_rules",   "name": "Temporary Rules",       "type": T_FINDINGS, "group": "Findings",      "default": False,"finding_types": ["temporary_rule", "expired_rule"]},
@@ -76,9 +76,10 @@ FINDING_CATEGORIES = [
     ("zero_hit_rule", "Zero-Hit Rules"),
     ("low_usage_rule", "Low-Usage Rules"),
     ("duplicate_rule", "Duplicate Rules"),
+    ("redundant_rule", "Redundant Rules"),
     ("shadowed_rule", "Shadowed Rules"),
-    ("same_action_shadowed_rule", "Redundant (Same-Action) Shadowed Rules"),
-    ("conflicting_shadowed_rule", "Conflicting Shadowed Rules"),
+    ("same_action_shadowed_rule", "Redundant Rules"),          # legacy alias
+    ("conflicting_shadowed_rule", "Shadowed Rules"),           # legacy alias
     ("partial_shadowed_rule", "Partially Shadowed Rules"),
     ("inoperative_rule", "Inoperative Rules"),
     ("shadowing_not_evaluated", "Shadowing Not Evaluated"),

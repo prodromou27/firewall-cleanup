@@ -33,9 +33,10 @@ function parseArr(v: unknown): string[] {
 const FINDING_TYPES: Record<string, string> = {
   // Core rule analysis
   duplicate_rule: 'Duplicate Rule',
+  redundant_rule: 'Redundant Rule',
   shadowed_rule: 'Shadowed Rule',
-  same_action_shadowed_rule: 'Redundant Rule',
-  conflicting_shadowed_rule: 'Conflicting Shadowed Rule',
+  same_action_shadowed_rule: 'Redundant Rule',        // legacy alias
+  conflicting_shadowed_rule: 'Shadowed Rule',         // legacy alias
   partial_shadowed_rule: 'Partially Shadowed Rule',
   inoperative_rule: 'Inoperative Rule',
   shadowing_not_evaluated: 'Shadowing Not Evaluated',
@@ -304,7 +305,9 @@ function AffectedRulesPanel({ finding }: { finding: Finding }) {
   if (rules.length === 0) return null
   const type = finding.finding_type
 
-  if (type === 'shadowed_rule' && rules.length >= 2) {
+  const SHADOW_PAIR_TYPES = ['shadowed_rule', 'redundant_rule', 'partial_shadowed_rule',
+    'same_action_shadowed_rule', 'conflicting_shadowed_rule']
+  if (SHADOW_PAIR_TYPES.includes(type) && rules.length >= 2) {
     const shadowed = rules[0]
     const shadowing = rules[1]
     return (

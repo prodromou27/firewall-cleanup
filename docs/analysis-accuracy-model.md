@@ -23,8 +23,9 @@ and Palo Alto Policy Optimizer. It complements [analysis-vendor-semantics.md](an
     intentionally **not** emitted because PolicyInsight does not ingest per-object
     traffic logs (documented limitation, not a false negative).
   - **Deliberate divergence:** Tufin merges *shadowed* and *redundant* into one
-    category (C01). We instead **split** them (`conflicting_shadowed_rule` vs
-    `same_action_shadowed_rule`) and add `inoperative_rule`, following FireMon's
+    category (C01). We instead **split** them (`shadowed_rule` for a different
+    effective action vs `redundant_rule` for the same action) and add
+    `inoperative_rule`, following FireMon's
     finer-grained model below. Both are config-derived from rule containment.
 - **AlgoSec**: an object is **unattached** only if it is *not used in any rule* **and**
   *not a member of any group used in a rule* — matches Tufin C06 and our graph.
@@ -44,10 +45,12 @@ and Palo Alto Policy Optimizer. It complements [analysis-vendor-semantics.md](an
 | **inoperative rule** | Cannot match: empty/impossible/intersecting conditions | Full expansion |
 | **over-permissive** | Any/Any/Any or near-Any enforced allow | Enabled + enforced + effective-Any |
 
-> Implementation note: the engine emits `same_action_shadowed_rule` (= redundant),
-> `conflicting_shadowed_rule` (= shadowed, different action), `partial_shadowed_rule`,
-> `inoperative_rule`, and `shadowing_not_evaluated` (= shadow analysis not available).
-> Names are stable for the UI/report layer; the **model** matches the table above.
+> Implementation note: the engine emits `redundant_rule` (same action, fully
+> covered), `shadowed_rule` (different effective action, unreachable),
+> `partial_shadowed_rule`, `inoperative_rule`, and `shadowing_not_evaluated`
+> (= shadow analysis not available). The earlier `same_action_shadowed_rule` /
+> `conflicting_shadowed_rule` names are retained only as render aliases for
+> historical findings. The **model** matches the table above.
 
 ## 3. Object usage rules
 An object is **used** if referenced from any of:

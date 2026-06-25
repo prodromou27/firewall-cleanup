@@ -46,6 +46,11 @@ class FirewallPolicy(Base):
     complexity_breakdown = Column(JSON, nullable=True)
     cleanup_readiness_score = Column(Float, nullable=True)
     health_score = Column(Float, nullable=True)
+    # 0-100 data-import-quality score + breakdown (capabilities present/missing).
+    # Lets the UI/report state how complete the imported data was so findings can
+    # be judged against it. See app/analysis/prerequisites.py.
+    import_quality_score = Column(Float, nullable=True)
+    import_quality = Column(JSON, nullable=True)
     top_risk_drivers = Column(JSON, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
@@ -178,6 +183,8 @@ class AnalysisRun(Base):
     severity_snapshot = Column(Text, nullable=True)
     # JSON-encoded {finding_type: count} snapshot at completion time, for change watch.
     finding_type_snapshot = Column(Text, nullable=True)
+    # JSON-encoded import-quality breakdown captured at completion (score + caps).
+    import_quality = Column(Text, nullable=True)
     error = Column(Text, nullable=True)
     run_by = Column(String, nullable=False, default="engineer")
 

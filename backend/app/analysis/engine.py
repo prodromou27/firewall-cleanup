@@ -8,13 +8,13 @@ from app.models.finding import Finding, FindingComment
 from app.analysis.normalizer import (
     build_object_map, expand_rule_sources, expand_rule_destinations,
     expand_rule_services, has_any_source, has_any_destination, has_any_service,
-    expand_service_object, _ref_name,
+    _ref_name,
 )
 from app.analysis.duplicate_detector import detect_duplicates
 from app.analysis.shadow_detector import detect_shadows
 from app.analysis.risk_scorer import score_rule, score_to_severity
 from app.analysis.service_utils import identify_risky_service, normalize_service
-from app.analysis.ip_utils import is_public_network, is_broad_network, parse_ip_network
+from app.analysis.ip_utils import is_public_network, is_broad_network
 from app.analysis import recommendation_library as _RL
 from app.config import settings
 from app.security.redaction import redact_secrets
@@ -83,13 +83,6 @@ def run_analysis(policy_id: str, db: Session) -> str:
         db.commit()
 
         findings = []
-        skipped_detectors = []
-
-        def add_detector(detector_name: str, producer):
-            if _analysis_detector_enabled(detector_name):
-                findings.extend(producer())
-            else:
-                skipped_detectors.append(detector_name)
 
         # Safety net: a policy with objects but no rules almost always means the
         # rulebase could not be fetched/parsed. Surface one clear diagnostic
@@ -121,76 +114,100 @@ def run_analysis(policy_id: str, db: Session) -> str:
         # transparently rather than silently.
         if rules:
             findings.extend(_import_quality_notes(rules, objects, policy))
+            # Detector prerequisite matrix: assess data availability once and
+            # surface which detectors were suppressed/downgraded (transparency).
+            from app.analysis import prerequisites
+            _avail = prerequisites.assess(rules, objects, obj_map, policy.nat_rules, policy.vendor)
+            _prereq = prerequisites.summary_finding(_avail, policy.vendor)
+            if _prereq:
+                findings.append(_prereq)
 
         # 1. Disabled rules
-        add_detector("disabled_rules", lambda: _analyze_disabled(rules, obj_map))
+        findings.extend(_analyze_disabled(rules, obj_map))
 
-        # 2. Zero/low hit rules
-        add_detector("usage", lambda: _analyze_usage(rules, obj_map))
+        # 2. Zero/low hit rules (suppressed if the policy is younger than the
+        #    minimum observation window — recently imported rules aren't "unused").
+        _policy_age_days = None
+        if getattr(policy, "created_at", None):
+            try:
+                _policy_age_days = (_utcnow_naive() - policy.created_at).days
+            except (TypeError, ValueError):
+                _policy_age_days = None
+        findings.extend(_analyze_usage(rules, obj_map, _policy_age_days))
 
         # 3. Any source/dest/service
-        add_detector("permissive", lambda: _analyze_permissive(rules, obj_map))
+        findings.extend(_analyze_permissive(rules, obj_map))
 
         # 4. Risky services
-        add_detector("risky_services", lambda: _analyze_risky_services(rules, obj_map))
+        findings.extend(_analyze_risky_services(rules, obj_map))
 
         # 4b. Sensitive services exposed to untrusted (any / public) sources
-        add_detector("exposed_services", lambda: _analyze_exposed_services(rules, obj_map))
+        findings.extend(_analyze_exposed_services(rules, obj_map))
 
         # 4c. Cleartext / unencrypted protocols
-        add_detector("cleartext_services", lambda: _analyze_cleartext_services(rules, obj_map))
+        findings.extend(_analyze_cleartext_services(rules, obj_map))
 
         # 4d. Lateral-movement risk (broad internal segment -> broad internal segment)
-        add_detector("lateral_movement", lambda: _analyze_lateral_movement(rules, obj_map))
+        findings.extend(_analyze_lateral_movement(rules, obj_map))
 
         # 4e. Direct inbound exposure (untrusted source -> internal destination)
-        add_detector("inbound_exposure", lambda: _analyze_inbound_exposure(rules, obj_map))
+        findings.extend(_analyze_inbound_exposure(rules, obj_map))
 
         # 5. Duplicate rules
-        add_detector("duplicates", lambda: detect_duplicates(rules, obj_map, policy.vendor))
+        findings.extend(detect_duplicates(rules, obj_map, policy.vendor))
 
         # 6. Shadowed rules
-        add_detector("shadowing", lambda: detect_shadows(rules, obj_map, policy.vendor))
+        findings.extend(detect_shadows(rules, obj_map, policy.vendor))
+
+        # 6a. Inoperative rules (can never match — empty match field)
+        findings.extend(_analyze_inoperative_rules(rules, obj_map))
 
         # 6b. Consolidation candidates (same src/dst/action, differing services)
-        add_detector("mergeable_rules", lambda: _analyze_mergeable_rules(rules))
+        findings.extend(_analyze_mergeable_rules(rules))
+
+        # 6c. Application control (vendor-aware: Palo App-ID, risky apps, gating)
+        from app.analysis import app_control
+        findings.extend(app_control.analyze(rules, policy.vendor, obj_map))
 
         # 6c. Missing explicit logged cleanup (deny-all) rule (policy-level)
-        add_detector("cleanup_rule", lambda: _analyze_cleanup_rule(rules, obj_map))
+        findings.extend(_analyze_cleanup_rule(rules, obj_map))
 
         # 6d. Rule-order optimization (busy rules sitting below unused ones)
-        add_detector("rule_order", lambda: _analyze_rule_order(rules))
+        findings.extend(_analyze_rule_order(rules))
 
         # 6e. Oversized rule sections (maintainability)
-        add_detector("section_size", lambda: _analyze_section_size(rules))
+        findings.extend(_analyze_section_size(rules))
 
         # 7. No logging
-        add_detector("no_logging", lambda: _analyze_no_logging(rules, obj_map))
+        findings.extend(_analyze_no_logging(rules, obj_map))
 
         # 8. Temporary rules
-        add_detector("temporary_rules", lambda: _analyze_temp_rules(rules, obj_map))
+        findings.extend(_analyze_temp_rules(rules, obj_map))
 
-        # 9. Unused objects
-        add_detector("unused_objects", lambda: _analyze_unused_objects(rules, objects, obj_map))
+        # 9. Unused / unattached objects (reference graph includes NAT references)
+        findings.extend(_analyze_unused_objects(rules, objects, obj_map, policy.nat_rules))
 
         # 10. Duplicate objects
-        add_detector("duplicate_objects", lambda: _analyze_duplicate_objects(objects))
+        findings.extend(_analyze_duplicate_objects(objects))
+
+        # 10b. Overlapping network objects (one network contains another)
+        findings.extend(_analyze_overlapping_objects(objects))
 
         # 11. Rules without documentation (no comments, no owner reference)
-        add_detector("documentation", lambda: _analyze_no_documentation(rules))
+        findings.extend(_analyze_no_documentation(rules))
 
         # 12. Naming quality
-        add_detector("naming_quality", lambda: _analyze_naming_quality(rules))
+        findings.extend(_analyze_naming_quality(rules))
 
         # 13. Expired / scheduled rules
-        add_detector("expired_rules", lambda: _analyze_expired_rules(rules))
+        findings.extend(_analyze_expired_rules(rules))
 
         # 14. NAT rule complexity
-        add_detector("nat_rules", lambda: _analyze_nat_rules(rules))
+        findings.extend(_analyze_nat_rules(rules))
 
         # 14b. NAT & Public Exposure review (gated on NAT data availability).
         from app.analysis import nat_exposure
-        add_detector("nat_exposure", lambda: nat_exposure.analyze(rules, policy.nat_rules, obj_map)["findings"])
+        findings.extend(nat_exposure.analyze(rules, policy.nat_rules, obj_map)["findings"])
 
         # 14c. Interface / public-IP review (gated on interface data from device sync).
         from app.analysis import interfaces as _iface
@@ -204,33 +221,36 @@ def run_analysis(policy_id: str, db: Session) -> str:
                     _dev_ifaces = _json.loads(_dev.device_interfaces) or []
                 except (ValueError, TypeError):
                     _dev_ifaces = []
-        add_detector("interface_exposure", lambda: _iface.analyze(_dev_ifaces, policy.nat_rules, obj_map, policy.firewall_name or "")["findings"])
+        findings.extend(_iface.analyze(_dev_ifaces, policy.nat_rules, obj_map, policy.firewall_name or "")["findings"])
 
         # 15. Broad VPN access
-        add_detector("vpn_rules", lambda: _analyze_vpn_rules(rules, obj_map))
+        findings.extend(_analyze_vpn_rules(rules, obj_map))
 
         # 16. Negated objects
-        add_detector("negated_objects", lambda: _analyze_negated_objects(rules))
+        findings.extend(_analyze_negated_objects(rules))
 
         # 17. Empty groups
-        add_detector("empty_groups", lambda: _analyze_empty_groups(objects))
+        findings.extend(_analyze_empty_groups(objects))
 
         # 18. Large groups
-        add_detector("large_groups", lambda: _analyze_large_groups(objects))
+        findings.extend(_analyze_large_groups(objects))
 
         # 19. Broad network objects
-        add_detector("broad_networks", lambda: _analyze_broad_networks(objects))
+        findings.extend(_analyze_broad_networks(objects))
 
         # 20. Service objects with large port ranges
-        add_detector("service_ranges", lambda: _analyze_service_ranges(objects, rules, obj_map))
+        findings.extend(_analyze_service_ranges(objects, rules, obj_map))
 
         # 21. Import quality summary (parse completeness, hit-data availability)
         findings.extend(_analyze_import_quality(rules, objects, policy))
 
-        if skipped_detectors:
-            findings.append(_disabled_detectors_note(skipped_detectors, rules, objects, policy))
+        findings = _consolidate_findings(findings)
 
-        findings = _apply_finding_volume_policy(_consolidate_findings(findings))
+        # Phase 12: stamp every rule-scoped finding with the vendor evaluation
+        # context (interface pair / layer / zone) it applies to, so findings are
+        # explainable about *where* in the rulebase they hold. Done centrally so
+        # all detectors benefit without each needing the vendor passed in.
+        _enrich_evaluation_context(findings, rules, policy.vendor)
 
         # Save findings
         finding_count = 0
@@ -274,10 +294,10 @@ def run_analysis(policy_id: str, db: Session) -> str:
         # Each factor contributes 0–N raw points; we normalise to 0–100.
         # Higher score = more complex / harder to maintain.
         perm_count     = sum(1 for f in findings if f["finding_type"] == "overly_permissive")
-        shadow_count   = sum(1 for f in findings if f["finding_type"] in _SHADOW_FINDING_TYPES)
+        shadow_count   = sum(1 for f in findings if f["finding_type"] == "shadowed_rule")
         dup_count      = sum(1 for f in findings if f["finding_type"] == "duplicate_rule")
         disabled_count = sum(1 for r in rules if not r.get("enabled", True))
-        unused_obj_cnt = sum(1 for f in findings if f["finding_type"] == "unused_object")
+        unused_obj_cnt = sum(1 for f in findings if f["finding_type"] in ("unattached_object", "unused_object"))
         broad_net_cnt  = sum(1 for f in findings if f["finding_type"] == "broad_network")
         large_svc_cnt  = sum(1 for f in findings if f["finding_type"] == "service_range")
         doc_miss       = sum(1 for f in findings if f["finding_type"] == "no_documentation")
@@ -352,6 +372,15 @@ def run_analysis(policy_id: str, db: Session) -> str:
         policy.health_score = health_score
         policy.top_risk_drivers = top_risk_drivers
 
+        # Consolidated import-quality score (Phase 10): how complete the imported
+        # data was, so findings can be judged against it. Read-only metadata.
+        from app.analysis import prerequisites as _prereq_mod
+        _warns = len(getattr(policy, "parse_warnings", None) or [])
+        _iq = _prereq_mod.import_quality(
+            rules, objects, obj_map, policy.nat_rules, policy.vendor, parser_warnings=_warns)
+        policy.import_quality_score = _iq["score"]
+        policy.import_quality = _iq
+
         run.status = "completed"
         run.completed_at = _utcnow_naive()
         run.findings_created = finding_count
@@ -360,6 +389,7 @@ def run_analysis(policy_id: str, db: Session) -> str:
         run.severity_snapshot = json.dumps(dict(_sev_snapshot))
         _type_snapshot = Counter(f.get("finding_type", "unknown") for f in findings)
         run.finding_type_snapshot = json.dumps(dict(_type_snapshot))
+        run.import_quality = json.dumps(_iq)
 
         db.commit()
         logger.info(f"Analysis complete for policy {policy_id}: {finding_count} findings")
@@ -377,7 +407,20 @@ def run_analysis(policy_id: str, db: Session) -> str:
         raise
 
 
+# FortiGate security-profile fields (App Control / IPS / AV / web / SSL inspection).
+# These are profiles attached to a policy, not L7 match fields. Surfaced slim so
+# the app-control detector can reason about inspection without the heavy raw_data.
+_FGT_PROFILE_KEYS = (
+    "application-list", "ips-sensor", "av-profile", "webfilter-profile",
+    "dnsfilter-profile", "file-filter-profile", "emailfilter-profile",
+    "ssl-ssh-profile", "profile-protocol-options", "utm-status",
+)
+
+
 def _rule_to_dict(r: FirewallRule) -> dict:
+    raw = getattr(r, "raw_data", None)
+    raw = raw if isinstance(raw, dict) else {}
+    profiles = {k: raw.get(k) for k in _FGT_PROFILE_KEYS if raw.get(k)}
     return {
         "id": r.id,
         "rule_id": r.rule_id,
@@ -401,6 +444,10 @@ def _rule_to_dict(r: FirewallRule) -> dict:
         "hit_count": r.hit_count,
         "last_hit": r.last_hit,
         "first_hit": r.first_hit,
+        "security_profiles": profiles,
+        # True only when raw_data looks like a parsed FortiGate CLI policy, so the
+        # profile-gap detector never fires on a rule whose profiles weren't captured.
+        "_cli_parsed": bool(raw) and any(k in raw for k in ("_raw_lines", "srcintf", "dstintf")),
     }
 
 
@@ -456,112 +503,6 @@ def _obj_to_dict(o: FirewallObject) -> dict:
 
 
 _SEVERITY_RANK = {"Informational": 0, "Low": 1, "Medium": 2, "High": 3, "Critical": 4}
-_SHADOW_FINDING_TYPES = {
-    "shadowed_rule",
-    "same_action_shadowed_rule",
-    "conflicting_shadowed_rule",
-    "partial_shadowed_rule",
-}
-
-
-def _configured_detector_names(value: str | None = None) -> set[str]:
-    raw = settings.analysis_disabled_detectors if value is None else value
-    return {
-        item.strip().lower().replace("-", "_")
-        for item in (raw or "").split(",")
-        if item.strip()
-    }
-
-
-def _analysis_detector_enabled(detector_name: str) -> bool:
-    disabled = _configured_detector_names()
-    normalized = detector_name.strip().lower().replace("-", "_")
-    return "all" not in disabled and normalized not in disabled
-
-
-def _disabled_detectors_note(
-    detector_names: List[str], rules: List[dict], objects: List[dict], policy
-) -> dict:
-    disabled = sorted({name for name in detector_names if name})
-    return {
-        "finding_type": "analysis_configuration",
-        "severity": "Informational",
-        "confidence": "High",
-        "title": "Some analysis detectors are disabled by configuration",
-        "description": (
-            "One or more detector families were skipped because they are listed in "
-            "ANALYSIS_DISABLED_DETECTORS. This is appropriate when a customer import "
-            "does not contain enough reliable data for those checks, but reports should "
-            "state that the analysis scope was intentionally limited."
-        ),
-        "affected_rules": [],
-        "affected_objects": [],
-        "evidence": {
-            "vendor": getattr(policy, "vendor", ""),
-            "disabled_detectors": disabled,
-            "rule_count": len(rules),
-            "object_count": len(objects),
-            "confidence_reason": "Detector output was suppressed by explicit backend configuration.",
-        },
-        "recommendation": (
-            "Keep detectors enabled by default. Disable a detector only when the source "
-            "data cannot support it reliably, and document the scope limitation in the "
-            "customer report."
-        ),
-    }
-
-
-def _max_findings_per_type() -> int:
-    try:
-        return max(0, int(settings.analysis_max_findings_per_type or 0))
-    except (TypeError, ValueError):
-        return 100
-
-
-def _apply_finding_volume_policy(findings: List[dict]) -> List[dict]:
-    """Cap per-type finding volume and record exactly what was suppressed."""
-    max_per_type = _max_findings_per_type()
-    if max_per_type <= 0:
-        return findings
-
-    kept: List[dict] = []
-    counts: Dict[str, int] = {}
-    suppressed: Dict[str, int] = {}
-    for finding in findings:
-        ftype = finding.get("finding_type", "unknown")
-        counts[ftype] = counts.get(ftype, 0) + 1
-        if counts[ftype] <= max_per_type:
-            kept.append(finding)
-        else:
-            suppressed[ftype] = suppressed.get(ftype, 0) + 1
-
-    if not suppressed:
-        return kept
-
-    kept.append({
-        "finding_type": "analysis_configuration",
-        "severity": "Informational",
-        "confidence": "High",
-        "title": "Finding volume was capped for report usability",
-        "description": (
-            "Some repeated findings were suppressed after the configured per-type limit. "
-            "This prevents one noisy detector from overwhelming the customer report while "
-            "preserving the highest-priority evidence already generated before the cap."
-        ),
-        "affected_rules": [],
-        "affected_objects": [],
-        "evidence": {
-            "max_findings_per_type": max_per_type,
-            "suppressed_by_type": suppressed,
-            "confidence_reason": "Suppression is count-based after detector execution and does not alter firewall data.",
-        },
-        "recommendation": (
-            "Use filters and source data quality improvements to reduce noisy categories. "
-            "Increase ANALYSIS_MAX_FINDINGS_PER_TYPE only when reports must include every "
-            "individual occurrence."
-        ),
-    })
-    return kept
 
 
 def _finding_scope_key(finding: dict) -> tuple:
@@ -604,7 +545,10 @@ def _consolidate_findings(findings: List[dict]) -> List[dict]:
             "database_exposed",
             "cleartext_service",
             "any_to_any_allow",
-            *_SHADOW_FINDING_TYPES,
+            "shadowed_rule",
+            "redundant_rule",
+            "conflicting_shadowed_rule",
+            "partial_shadowed_rule",
             "duplicate_rule",
         }:
             for rid in _rule_ids(finding):
@@ -627,9 +571,14 @@ def _consolidate_findings(findings: List[dict]) -> List[dict]:
                 suppress = True
                 reason = "covered_by_specific_inbound_exposure"
                 break
-            if ftype in {"zero_hit_rule", "low_usage_rule"} and specifics.intersection(_SHADOW_FINDING_TYPES):
+            if ftype in {"zero_hit_rule", "low_usage_rule"} and specifics.intersection({
+                "shadowed_rule",
+                "redundant_rule",
+                "conflicting_shadowed_rule",
+                "partial_shadowed_rule",
+            }):
                 suppress = True
-                reason = "covered_by_shadowed_rule"
+                reason = "covered_by_structural_rule_finding"
                 break
             if ftype == "mergeable_rules" and "duplicate_rule" in specifics:
                 suppress = True
@@ -657,6 +606,27 @@ def _consolidate_findings(findings: List[dict]) -> List[dict]:
 
 
 
+def _enrich_evaluation_context(findings: List[dict], rules: List[dict], vendor: str) -> None:
+    """Stamp each rule-scoped finding with its vendor evaluation-context label.
+
+    Mutates findings in place. The label (FortiGate interface pair, Check Point
+    layer + install-on target, Palo Alto rulebase + zones, Cisco ACL/interface,
+    Huawei zone pair) tells a reviewer *where* the finding applies. Only set when
+    every affected rule shares a single context, and never overwritten — shadow
+    and duplicate findings already carry their own context evidence.
+    """
+    from app.analysis.vendor_semantics import context_label
+
+    rule_ctx = {r.get("id"): context_label(r, vendor) for r in rules if r.get("id")}
+    for f in findings:
+        ev = f.get("evidence")
+        if not isinstance(ev, dict) or ev.get("evaluation_context"):
+            continue
+        labels = {rule_ctx[rid] for rid in (f.get("affected_rules") or []) if rid in rule_ctx}
+        if len(labels) == 1:
+            ev["evaluation_context"] = next(iter(labels))
+
+
 def _import_quality_notes(rules: List[dict], objects: List[dict], policy) -> List[dict]:
     """Informational data-availability notes — never inflate severity.
 
@@ -680,7 +650,8 @@ def _import_quality_notes(rules: List[dict], objects: List[dict], policy) -> Lis
              "No hit counts were available for this policy, so zero-hit and low-usage "
              "rule findings were not generated. Enable hit-count collection / re-sync to "
              "include usage analysis.")
-    if not (policy.nat_rules or []):
+    has_vip = any((o.get("object_type") or "").lower() == "vip" for o in objects)
+    if not (policy.nat_rules or []) and not has_vip:
         note("import_quality", "NAT data unavailable",
              "No NAT rules were captured, so NAT-to-policy mapping and NAT-based public "
              "exposure analysis were limited. Public exposure was derived from the security "
@@ -690,42 +661,7 @@ def _import_quality_notes(rules: List[dict], objects: List[dict], policy) -> Lis
              "Rules carried no interface/zone context, so shadowing and duplicate analysis "
              "treated the policy as a single evaluation context. Where the firewall uses "
              "interfaces/zones/layers, results may be broader than the device's real scope.")
-    if _has_unresolved_rule_object_refs(rules, build_object_map(objects)):
-        note("import_quality", "Object graph incomplete",
-             "Some rule references could not be resolved to imported address or service "
-             "objects. Object-usage cleanup findings are suppressed until the object "
-             "database imports completely.")
     return notes
-
-
-def _has_unresolved_rule_object_refs(rules: List[dict], obj_map: dict) -> bool:
-    """True when rule address/service references cannot be resolved safely.
-
-    Unused-object cleanup depends on a complete rule-to-object graph. If a rule
-    references a named object that is missing from the import, reporting other
-    objects as unused is not defensible. Literal IP/CIDR address values and
-    recognizable inline/built-in services are allowed.
-    """
-    for rule in rules or []:
-        for field in ("sources", "destinations"):
-            for ref in rule.get(field, []) or []:
-                name = _ref_name(ref)
-                if not name or name.lower() in ("any", "all", "any4", "any6"):
-                    continue
-                if obj_map.get(name) is not None:
-                    continue
-                if parse_ip_network(name) is not None:
-                    continue
-                return True
-
-        for ref in rule.get("services", []) or []:
-            name = _ref_name(ref)
-            if not name or name.lower() in ("any", "all"):
-                continue
-            if any(s.get("unknown") for s in expand_service_object(name, obj_map)):
-                return True
-
-    return False
 
 
 def _analyze_disabled(rules: List[dict], obj_map: dict) -> List[dict]:
@@ -758,9 +694,21 @@ def _analyze_disabled(rules: List[dict], obj_map: dict) -> List[dict]:
     return findings
 
 
-def _analyze_usage(rules: List[dict], obj_map: dict) -> List[dict]:
+def _analyze_usage(rules: List[dict], obj_map: dict, policy_age_days: int = None) -> List[dict]:
     findings = []
     now = _utcnow_naive()
+
+    # Phase 8: usage findings require a meaningful observation window. If the
+    # policy has been observed for less than the minimum age, hit/last-hit data
+    # cannot yet show a rule is unused — suppress usage findings rather than flag
+    # recently-imported rules as dead.
+    obs_days = settings.usage_observation_days
+    if (settings.suppress_usage_findings_when_incomplete
+            and policy_age_days is not None
+            and policy_age_days < settings.min_rule_age_days):
+        return findings
+
+    low_thr = settings.low_hit_threshold
 
     for rule in rules:
         if not rule.get("enabled", True):
@@ -782,8 +730,25 @@ def _analyze_usage(rules: List[dict], obj_map: dict) -> List[dict]:
                     "matched any traffic, which may indicate it is redundant or incorrectly configured."
                 ),
                 "affected_rules": [rule.get("id")],
-                "evidence": {"rule_id": rule_id, "hit_count": 0},
+                "evidence": {"rule_id": rule_id, "hit_count": 0, "observation_days": obs_days},
                 "recommendation": _RL.get("zero_hit_rule"),
+            })
+        elif low_thr and isinstance(hit_count, int) and 0 < hit_count <= low_thr:
+            # Count-based low usage (opt-in via low_hit_threshold > 0).
+            findings.append({
+                "finding_type": "low_usage_rule",
+                "severity": "Low",
+                "confidence": "High",
+                "title": f"Rule {rule_id} has very few hits ({hit_count})",
+                "description": (
+                    f"{rule_name} has only {hit_count} recorded hit(s) "
+                    f"(threshold {low_thr}). Rules with very low usage over the observation "
+                    f"window (~{obs_days} days) may be candidates for review."
+                ),
+                "affected_rules": [rule.get("id")],
+                "evidence": {"rule_id": rule_id, "hit_count": hit_count,
+                             "low_hit_threshold": low_thr, "observation_days": obs_days},
+                "recommendation": _RL.get("low_usage_rule"),
             })
         elif last_hit:
             try:
@@ -1563,21 +1528,123 @@ def _analyze_temp_rules(rules: List[dict], obj_map: dict) -> List[dict]:
     return findings
 
 
-def _analyze_unused_objects(
-    rules: List[dict], objects: List[dict], obj_map: dict
-) -> List[dict]:
-    findings = []
+def _nat_referenced_names(nat_rules) -> set:
+    """All object names referenced by normalized NAT rules (original/translated
+    source/destination/service). An object used only by NAT must not be flagged
+    unattached. See docs/analysis-accuracy-model.md §3."""
+    names: set = set()
+    for n in (nat_rules or []):
+        if not isinstance(n, dict):
+            continue
+        for field in ("original_src", "original_dst", "original_service",
+                      "translated_src", "translated_dst", "translated_service",
+                      "sources", "destinations", "services"):
+            value = n.get(field)
+            items = value if isinstance(value, (list, tuple)) else ([value] if value else [])
+            for x in items:
+                nm = _ref_name(x)
+                if nm:
+                    names.add(nm)
+    return names
 
-    # Object usage is defined by rule references. With no rules we cannot
-    # determine usage at all — flagging every object as "unused" would be wrong
-    # and floods the results (e.g. thousands of false findings when a rulebase
-    # fetch failed). Skip the check until rules are present.
+
+def _detect_circular_groups(objects: List[dict], obj_map: dict) -> List[str]:
+    """Return names of groups that (transitively) contain themselves. Expansion is
+    cycle-safe regardless; a detected cycle is surfaced as an informational
+    diagnostic and its members are never reported as 'unused'."""
+    circular: List[str] = []
+    for obj in objects:
+        if not _is_group_object(obj):
+            continue
+        root = obj.get("object_name", "")
+        if not root:
+            continue
+        stack = [(root, frozenset([root]))]
+        found = False
+        seen = set()
+        while stack and not found:
+            name, path = stack.pop()
+            cur = obj_map.get(name)
+            if not cur or not _is_group_object(cur):
+                continue
+            for m in _member_refs(cur):
+                mn = _ref_name(m)
+                if not mn:
+                    continue
+                if mn == root or mn in path:
+                    found = True
+                    break
+                if mn not in seen:
+                    seen.add(mn)
+                    stack.append((mn, path | {mn}))
+        if found:
+            circular.append(root)
+    return circular
+
+
+def _analyze_unused_objects(
+    rules: List[dict], objects: List[dict], obj_map: dict, nat_rules=None
+) -> List[dict]:
+    """Config-derived **unattached** object detection (AlgoSec semantics): an object
+    is unattached only if it is referenced nowhere (rules or NAT) AND is not a
+    member of any used group. Requires a complete object reference graph; when the
+    object import looks incomplete the detector is suppressed and an
+    `object_usage_unknown` diagnostic is emitted instead. See
+    docs/analysis-accuracy-model.md §3-4, §10."""
+    findings: List[dict] = []
+
+    # Object usage is defined by references. With no rules we cannot determine
+    # usage at all — flagging every object as "unused" would be wrong and floods
+    # the results (thousands of false findings when a rulebase fetch failed).
     if not rules:
         return findings
-    if _has_unresolved_rule_object_refs(rules, obj_map):
+
+    from app.analysis.ip_utils import parse_ip_network
+
+    # ── Import-completeness gate ──────────────────────────────────────────────
+    # If the majority of *named* address references in rules cannot be resolved to
+    # an object (and are not IP literals), the object database is partial — we
+    # cannot trust "not referenced", so suppress unattached findings.
+    referenced_addr = set()
+    for rule in rules:
+        for field in ("sources", "destinations"):
+            for ref in rule.get(field, []) or []:
+                nm = _ref_name(ref)
+                if nm and nm.lower() not in ("any", "all", "any4", "any6"):
+                    referenced_addr.add(nm)
+
+    def _is_literal(nm: str) -> bool:
+        return parse_ip_network(nm) is not None or (
+            "-" in nm and all(parse_ip_network(p.strip()) is not None
+                              for p in nm.split("-", 1) if p.strip()))
+
+    unresolved = [n for n in referenced_addr
+                  if obj_map.get(n) is None and not _is_literal(n)]
+    incomplete = bool(referenced_addr) and (len(unresolved) / len(referenced_addr) > 0.5)
+    if incomplete:
+        findings.append({
+            "finding_type": "object_usage_unknown",
+            "severity": "Informational",
+            "confidence": "High",
+            "title": "Object usage analysis suppressed — incomplete object import",
+            "description": (
+                f"{len(unresolved)} of {len(referenced_addr)} address references in the "
+                "rulebase could not be resolved to an object, indicating the object "
+                "database was only partially imported. Unattached-object cleanup was "
+                "suppressed to avoid false positives; re-import or re-sync the object "
+                "database to enable it."
+            ),
+            "affected_rules": [],
+            "affected_objects": [],
+            "evidence": {"referenced_addresses": len(referenced_addr),
+                         "unresolved": len(unresolved),
+                         "unresolved_sample": sorted(unresolved)[:25],
+                         "reason": "object reference graph incomplete"},
+            "recommendation": "Read-only data-completeness note; no action implied.",
+        })
         return findings
 
-    # Collect all object names referenced by rules
+    # ── Reference graph: rule + NAT references, then recursive group expansion ──
     used_names = set()
     reference_fields = (
         "sources", "destinations", "services", "applications", "users", "vpn",
@@ -1594,12 +1661,15 @@ def _analyze_unused_objects(
                 if obj:
                     used_names.update(_object_aliases(obj))
 
-    # Also include members of used groups
+    for nm in _nat_referenced_names(nat_rules):
+        used_names.add(nm)
+        obj = obj_map.get(nm)
+        if obj:
+            used_names.update(_object_aliases(obj))
+
     def collect_members(ref, visited: set):
         name = _ref_name(ref)
-        if not name:
-            return
-        if name in visited:
+        if not name or name in visited:
             return
         visited.add(name)
         obj = obj_map.get(name)
@@ -1619,44 +1689,142 @@ def _analyze_unused_objects(
     for name in list(used_names):
         collect_members(name, set())
 
+    # Members of any circular group are treated as used (never "unused"); the cycle
+    # itself is reported as a diagnostic so it can be cleaned up deliberately.
+    circular = _detect_circular_groups(objects, obj_map)
+    if circular:
+        for cname in circular:
+            cobj = obj_map.get(cname)
+            if cobj and _is_group_object(cobj):
+                for m in _member_refs(cobj):
+                    used_names.update({_ref_name(m)})
+        findings.append({
+            "finding_type": "object_usage_unknown",
+            "severity": "Low",
+            "confidence": "High",
+            "title": f"{len(circular)} circular group reference{'s' if len(circular) != 1 else ''} detected",
+            "description": (
+                "One or more address/service groups reference themselves through "
+                "nested membership. Circular groups are evaluated safely here but "
+                "should be reviewed and untangled."
+            ),
+            "affected_rules": [],
+            "affected_objects": [o.get("id") for o in objects
+                                 if o.get("object_name") in circular and o.get("id")],
+            "evidence": {"circular_groups": circular[:50], "count": len(circular)},
+            "recommendation": "Read-only observation; review nested group membership.",
+        })
+
+    # ── Unattached objects (config-derived) ───────────────────────────────────
     unused: List[dict] = []
     for obj in objects:
         name = obj.get("object_name", "")
         if name.lower() in ("any", "all"):
             continue
-        # Skip all service/port objects — type-based, vendor-agnostic filter.
         if _is_service_object(obj):
             continue
-        # Skip vendor built-in / predefined objects; customers cannot remove them.
+        # Built-in / predefined vendor objects are system objects (not cleanup).
         if _is_vendor_builtin_object(obj):
             continue
         if not (_object_aliases(obj) & used_names):
             unused.append(obj)
 
-    # Aggregate unused objects into ONE finding (instead of one per object, which
-    # floods the Findings list with thousands of low-value rows on large policies).
-    # The Objects page "Unused" filter unions affected_objects across findings, so
-    # every unused object is still listed there — this only de-noises Findings.
+    # Aggregate into ONE finding (per-object rows would flood large policies). The
+    # Objects page "Unused" filter unions affected_objects across findings.
     if unused:
-        names = [o.get("object_name", "") for o in unused]
+        sample = [{"name": o.get("object_name", ""), "type": o.get("object_type", "")}
+                  for o in unused][:50]
         findings.append({
-            "finding_type": "unused_object",
+            "finding_type": "unattached_object",
             "severity": "Informational",
-            "confidence": "Medium",
-            "title": f"{len(unused)} unused object{'s' if len(unused) != 1 else ''} in the object database",
+            "confidence": "High",
+            "title": f"{len(unused)} unattached object{'s' if len(unused) != 1 else ''} in the object database",
             "description": (
-                f"{len(unused)} objects are not referenced by any firewall rule in this "
-                "policy (directly or through a group). Unused objects add clutter to the "
-                "object database. Review the full list on the Objects page using the "
-                "'Unused' filter."
+                f"{len(unused)} objects are referenced by no firewall rule or NAT rule in "
+                "this policy — directly or through any used group — and are not vendor "
+                "built-ins. Unattached objects add clutter to the object database. Review "
+                "the full list on the Objects page using the 'Unused' filter."
             ),
             "affected_rules": [],
             "affected_objects": [o.get("id") for o in unused if o.get("id")],
-            "evidence": {"count": len(unused), "sample": names[:50]},
-            "recommendation": _RL.get("unused_object"),
+            "evidence": {
+                "count": len(unused),
+                "sample": [s["name"] for s in sample],
+                "sample_detail": sample,
+                "reference_graph_complete": True,
+                "classification": "unattached (config-derived): not in any rule/NAT, "
+                                   "not a member of any used group",
+                "objects_total": len(objects),
+                "referenced_addresses": len(referenced_addr),
+            },
+            "recommendation": _RL.get("unattached_object") or _RL.get("unused_object"),
         })
 
     return findings
+
+
+def _analyze_overlapping_objects(objects: List[dict]) -> List[dict]:
+    """Network objects whose address space overlaps another — one network
+    strictly contains another, without being identical. Distinct from
+    `duplicate_object` (identical value) and `broad_network` (a single over-broad
+    object). Conservative: only network↔network containment (a host inside a
+    subnet is normal and excluded), built-ins skipped, aggregated into one
+    finding. See docs/analysis-accuracy-model.md §2."""
+    from app.analysis.ip_utils import parse_ip_network, network_contains
+
+    nets = []
+    for obj in objects:
+        if _is_group_object(obj) or _is_vendor_builtin_object(obj):
+            continue
+        val = (obj.get("value") or "").strip()
+        if not val:
+            continue
+        net = parse_ip_network(val)
+        if net is None or net.prefixlen >= 32:   # skip hosts / non-networks
+            continue
+        nets.append((obj, val, net))
+
+    # Pairwise; guard against quadratic blow-up on very large object databases.
+    if len(nets) < 2 or len(nets) > 1500:
+        return []
+
+    seen = set()
+    affected_ids = set()
+    samples = []
+    for oa, va, na in nets:
+        for ob, vb, nb in nets:
+            if na.prefixlen >= nb.prefixlen:      # only broader-contains-narrower, once
+                continue
+            if not network_contains(va, vb):
+                continue
+            key = (oa.get("id"), ob.get("id"))
+            if key in seen:
+                continue
+            seen.add(key)
+            affected_ids.update(x for x in (oa.get("id"), ob.get("id")) if x)
+            samples.append(f"{ob.get('object_name')} ({vb}) ⊂ {oa.get('object_name')} ({va})")
+
+    if not seen:
+        return []
+
+    n = len(seen)
+    return [{
+        "finding_type": "overlapping_object",
+        "severity": "Low",
+        "confidence": "High",
+        "title": f"{n} overlapping network object pair{'s' if n != 1 else ''}",
+        "description": (
+            f"{n} network object pair(s) overlap — one object's address range is fully "
+            "contained within another's, without being identical. Overlapping definitions "
+            "make the object database ambiguous and can mask which object a rule really "
+            "matches. Review whether the narrower object is needed or should reference the "
+            "broader one."
+        ),
+        "affected_rules": [],
+        "affected_objects": sorted(affected_ids),
+        "evidence": {"count": n, "sample": samples[:50]},
+        "recommendation": _RL.get("overlapping_object"),
+    }]
 
 
 def _analyze_duplicate_objects(objects: List[dict]) -> List[dict]:
@@ -1709,7 +1877,7 @@ def _analyze_no_documentation(rules: List[dict]) -> List[dict]:
         "workaround", "vendor", "emergency", "troubleshoot", "to be removed",
         "tbd", "todo", "fixme",
     }
-    undocumented = []
+    findings = []
     for rule in rules:
         if not rule.get("enabled", True):
             continue
@@ -1727,38 +1895,26 @@ def _analyze_no_documentation(rules: List[dict]) -> List[dict]:
             if any(c.isalpha() for c in comments):
                 continue
 
-        undocumented.append({
-            "rule_db_id": rule.get("id"),
+        findings.append({
+            "finding_type": "no_documentation",
+            "severity": "Informational",
+            "confidence": "High",
+            "title": f"Rule {rule_id} has no documentation",
+            "description": (
+                f"{rule_name} is an enabled allow rule with no comment, owner reference, "
+                "or business justification. Undocumented rules make it difficult to determine "
+                "whether access is still required or approved."
+            ),
+            "affected_rules": [rule.get("id")],
             "evidence": {
                 "rule_id": rule_id,
                 "rule_name": rule_name,
                 "comments": comments or None,
                 "action": rule.get("action"),
             },
+            "recommendation": _RL.get("no_documentation"),
         })
-
-    if not undocumented:
-        return []
-
-    return [{
-        "finding_type": "no_documentation",
-        "severity": "Informational",
-        "confidence": "High",
-        "title": f"{len(undocumented)} enabled allow rule(s) lack documentation",
-        "description": (
-            f"{len(undocumented)} enabled allow rule(s) have no comment, owner reference, "
-            "or business justification. Undocumented rules make it difficult to determine "
-            "whether access is still required or approved. Review the sampled rules and "
-            "use the Rulebase filters for the full list."
-        ),
-        "affected_rules": [r["rule_db_id"] for r in undocumented if r.get("rule_db_id")],
-        "evidence": {
-            "count": len(undocumented),
-            "sample_rules": [r["evidence"] for r in undocumented[:50]],
-            "confidence_reason": "Detector only considers enabled allow rules with no meaningful comment text.",
-        },
-        "recommendation": _RL.get("no_documentation"),
-    }]
+    return findings
 
 
 # ─── New analyzers (12-20) ───────────────────────────────────────────────────
@@ -1772,47 +1928,40 @@ _VAGUE_NAME_KEYWORDS = {
 
 def _analyze_naming_quality(rules: List[dict]) -> List[dict]:
     """Detect rules with vague, generic, or missing names."""
-    weak_names = []
+    findings = []
     for rule in rules:
         rule_id = rule.get("rule_id") or rule.get("rule_number", "?")
         name = (rule.get("rule_name") or "").strip()
 
         if not name:
-            weak_names.append({
-                "rule_db_id": rule.get("id"),
-                "rule_id": rule_id,
-                "rule_name": None,
-                "reason": "missing_name",
+            findings.append({
+                "finding_type": "naming_quality",
+                "severity": "Informational",
+                "confidence": "High",
+                "title": f"Rule {rule_id} has no name",
+                "description": (
+                    f"Rule {rule_id} has no descriptive name. Unnamed rules are difficult "
+                    "to identify during audits and change reviews."
+                ),
+                "affected_rules": [rule.get("id")],
+                "evidence": {"rule_id": rule_id, "rule_name": None},
+                "recommendation": _RL.get("naming_quality"),
             })
         elif name.lower() in _VAGUE_NAME_KEYWORDS or len(name) < 4:
-            weak_names.append({
-                "rule_db_id": rule.get("id"),
-                "rule_id": rule_id,
-                "rule_name": name,
-                "reason": "vague_or_short_name",
+            findings.append({
+                "finding_type": "naming_quality",
+                "severity": "Informational",
+                "confidence": "Medium",
+                "title": f"Rule {rule_id} has a vague name: '{name}'",
+                "description": (
+                    f"Rule {rule_id} has a generic or vague name ('{name}'). "
+                    "Non-descriptive names make policy review and audit significantly harder."
+                ),
+                "affected_rules": [rule.get("id")],
+                "evidence": {"rule_id": rule_id, "rule_name": name},
+                "recommendation": _RL.get("naming_quality"),
             })
-
-    if not weak_names:
-        return []
-
-    return [{
-        "finding_type": "naming_quality",
-        "severity": "Informational",
-        "confidence": "Medium",
-        "title": f"{len(weak_names)} rule(s) have weak or missing names",
-        "description": (
-            f"{len(weak_names)} rule(s) have missing, very short, or generic names. "
-            "Non-descriptive names make policy review and audit significantly harder. "
-            "Review the sampled rules and use the Rulebase filters for the full list."
-        ),
-        "affected_rules": [r["rule_db_id"] for r in weak_names if r.get("rule_db_id")],
-        "evidence": {
-            "count": len(weak_names),
-            "sample_rules": weak_names[:50],
-            "confidence_reason": "Names are matched against a conservative generic-keyword list or are shorter than four characters.",
-        },
-        "recommendation": _RL.get("naming_quality"),
-    }]
+    return findings
 
 
 _SCHEDULE_EXPIRED_KEYWORDS = {
@@ -1932,6 +2081,57 @@ def _analyze_vpn_rules(rules: List[dict], obj_map: dict) -> List[dict]:
                 "any_service": any_svc,
             },
             "recommendation": _RL.get("vpn_access"),
+        })
+    return findings
+
+
+def _analyze_inoperative_rules(rules: List[dict], obj_map: dict) -> List[dict]:
+    """FireMon-style **inoperative** rule: an enabled rule that can never match
+    because a match field resolves to an empty group (zero members). Distinct from
+    shadow/redundant — the rule is *structurally* unable to match. Only source and
+    destination are evaluated: address expansion marks empty groups explicitly,
+    whereas an empty service group is ambiguous (vendors fall back to Any), so it
+    is intentionally excluded to avoid false positives. Unknown/unresolved objects
+    never trigger this (High confidence only). See docs/analysis-accuracy-model.md."""
+    findings: List[dict] = []
+    for rule in rules:
+        if not rule.get("enabled", True):
+            continue
+        empty_fields = []
+        for label, entries in (
+            ("source", expand_rule_sources(rule, obj_map)),
+            ("destination", expand_rule_destinations(rule, obj_map)),
+        ):
+            if entries and all(e.get("type") == "empty_group" for e in entries):
+                empty_fields.append((label, [e.get("name") for e in entries if e.get("name")]))
+        if not empty_fields:
+            continue
+        rid = rule.get("rule_id") or rule.get("rule_number", "?")
+        rname = rule.get("rule_name") or f"Rule {rid}"
+        fields_desc = "; ".join(
+            f"{lbl} group{'s' if len(names) != 1 else ''} {', '.join(names) or '(unnamed)'}"
+            for lbl, names in empty_fields)
+        findings.append({
+            "finding_type": "inoperative_rule",
+            "severity": "Medium",
+            "confidence": "High",
+            "title": f"Rule {rid} is inoperative (empty {empty_fields[0][0]} group)",
+            "description": (
+                f"{rname} can never match traffic: its {fields_desc} resolve to a group with "
+                "no members, so no packet can satisfy the rule. This is structurally "
+                "inoperative — distinct from being shadowed by an earlier rule."
+            ),
+            "affected_rules": [rule.get("id")],
+            "evidence": {
+                "empty_fields": [{"field": lbl, "groups": names} for lbl, names in empty_fields],
+                "rule": f"Rule {rid} ({rname})",
+                "why": "match field expands to an empty group (zero members)",
+            },
+            "recommendation": (
+                _RL.get("inoperative_rule")
+                or "Read-only observation. Review whether the empty group should be "
+                "populated or the rule removed, via change management."
+            ),
         })
     return findings
 

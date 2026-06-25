@@ -42,7 +42,7 @@ def test_full_shadow(obj_map):
     findings = detect_shadows(rules, obj_map)
     assert len(findings) == 1
     # Full containment, same action → redundant (same-action) shadow.
-    assert findings[0]["finding_type"] == "same_action_shadowed_rule"
+    assert findings[0]["finding_type"] == "redundant_rule"
     assert "2" in findings[0]["title"]
 
 
@@ -110,7 +110,7 @@ def test_conflicting_action_full_shadow(obj_map):
     ]
     findings = detect_shadows(rules, obj_map)
     assert len(findings) == 1
-    assert findings[0]["finding_type"] == "conflicting_shadowed_rule"
+    assert findings[0]["finding_type"] == "shadowed_rule"
     assert findings[0]["severity"] == "High"
 
 
@@ -147,7 +147,7 @@ def test_shadow_within_same_context(obj_map):
     ]
     findings = detect_shadows(rules, obj_map, vendor="FortiGate")
     assert len(findings) == 1
-    assert findings[0]["finding_type"] == "same_action_shadowed_rule"
+    assert findings[0]["finding_type"] == "redundant_rule"
 
 
 def test_shadowing_not_evaluated_for_unknown_objects(obj_map):

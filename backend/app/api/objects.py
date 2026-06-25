@@ -16,12 +16,23 @@ router = APIRouter(prefix="/api/objects", tags=["objects"])
 
 # Object hygiene categories that map to existing finding types.
 # Keeps the Objects page consistent with the analysis engine.
+# Each category maps to one or more finding types (the config-derived unattached
+# object detector replaced the older "unused_object"; both are unioned so legacy
+# analysis runs still render).
 _CATEGORY_FINDING_TYPE = {
-    "unused": "unused_object",
-    "duplicates": "duplicate_object",
-    "empty_groups": "empty_group",
-    "large_groups": "large_group",
+    "unused": ["unattached_object", "unused_object"],
+    "duplicates": ["duplicate_object"],
+    "empty_groups": ["empty_group"],
+    "large_groups": ["large_group"],
 }
+
+
+def _category_object_ids(ids_by_type: dict[str, set], category: str) -> set:
+    """Union object IDs across all finding types that back a hygiene category."""
+    out: set = set()
+    for t in _CATEGORY_FINDING_TYPE.get(category, []):
+        out |= ids_by_type.get(t, set())
+    return out
 
 
 def _object_ids_for_finding_types(
@@ -110,11 +121,10 @@ def list_objects(
     # Apply category filter (unused_only kept for backward compatibility)
     if unused_only:
         category = category or "unused"
-    category_sets: dict[str, set] = {}
     if category in _CATEGORY_FINDING_TYPE:
-        finding_type = _CATEGORY_FINDING_TYPE[category]
-        category_sets = _object_ids_for_finding_types(db, [finding_type], scoped_policy_ids)
-        target = category_sets.get(finding_type, set())
+        types = _CATEGORY_FINDING_TYPE[category]
+        category_sets = _object_ids_for_finding_types(db, types, scoped_policy_ids)
+        target = _category_object_ids(category_sets, category)
         if target:
             q = q.filter(FirewallObject.id.in_(target))
         else:
@@ -126,13 +136,9 @@ def list_objects(
         sort_col = sort_col.desc()
     objects = q.order_by(sort_col).offset((page - 1) * page_size).limit(page_size).all()
 
-    hygiene_sets = _object_ids_for_finding_types(db, list(_CATEGORY_FINDING_TYPE.values()), scoped_policy_ids)
-    flag_sets = {
-        "unused": hygiene_sets.get("unused_object", set()),
-        "duplicates": hygiene_sets.get("duplicate_object", set()),
-        "empty_groups": hygiene_sets.get("empty_group", set()),
-        "large_groups": hygiene_sets.get("large_group", set()),
-    }
+    all_types = [t for types in _CATEGORY_FINDING_TYPE.values() for t in types]
+    hygiene_sets = _object_ids_for_finding_types(db, all_types, scoped_policy_ids)
+    flag_sets = {cat: _category_object_ids(hygiene_sets, cat) for cat in _CATEGORY_FINDING_TYPE}
 
     return {
         "total": total,

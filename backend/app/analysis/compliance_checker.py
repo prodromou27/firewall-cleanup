@@ -451,7 +451,7 @@ def _cis_checks(
     ))
 
     # ── CIS 4.7 — Clean objects: no unused objects ───────────────────────────
-    unused_obj = _count_by_type(findings, "unused_object")
+    unused_obj = _count_by_type(findings, "unattached_object") + _count_by_type(findings, "unused_object")
     empty_grp  = _count_by_type(findings, "empty_group")
     checks.append(_check(
         check_id="CIS-4.7",

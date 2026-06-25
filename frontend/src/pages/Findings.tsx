@@ -17,7 +17,6 @@ import { DetailDrawer } from '../components/ui/DetailDrawer'
 import { useAuth } from '../contexts/AuthContext'
 import type { Finding, Policy, AffectedRuleData, FindingComment } from '../types'
 import { fetchFailureMessage, friendlyErrorMessage } from '../utils/errors'
-import { FINDING_TYPE_LABELS, SHADOW_FINDING_TYPES, findingTypeLabel } from '../lib/findingLabels'
 
 /** Backend stores array fields as JSON strings in SQLite — handle both formats. */
 function parseArr(v: unknown): string[] {
@@ -32,14 +31,23 @@ function parseArr(v: unknown): string[] {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const FINDING_TYPES: Record<string, string> = {
-  ...FINDING_TYPE_LABELS,
   // Core rule analysis
   duplicate_rule: 'Duplicate Rule',
+  redundant_rule: 'Redundant Rule',
   shadowed_rule: 'Shadowed Rule',
-  same_action_shadowed_rule: 'Redundant Rule',
-  conflicting_shadowed_rule: 'Conflicting Shadowed Rule',
+  same_action_shadowed_rule: 'Redundant Rule',        // legacy alias
+  conflicting_shadowed_rule: 'Shadowed Rule',         // legacy alias
   partial_shadowed_rule: 'Partially Shadowed Rule',
+  inoperative_rule: 'Inoperative Rule',
   shadowing_not_evaluated: 'Shadowing Not Evaluated',
+  // Application control
+  rule_without_app_controls: 'No App Controls',
+  palo_alto_port_based_rule_candidate: 'Port-Based Rule',
+  risky_application_allowed: 'Risky Application',
+  fortigate_security_profile_gap: 'No Security Profiles',
+  application_analysis_not_supported_for_vendor: 'App Analysis N/A',
+  application_data_unavailable: 'App Data Unavailable',
+  detector_prerequisites_unmet: 'Limited by Missing Data',
   disabled_rule: 'Disabled Rule',
   zero_hit_rule: 'Zero Hits',
   low_usage_rule: 'Low Usage',
@@ -67,23 +75,21 @@ const FINDING_TYPES: Record<string, string> = {
   rule_order_optimization: 'Rule Order Optimization',
   large_rule_section: 'Oversized Section',
   // Object analysis
+  unattached_object: 'Unattached Object',
+  object_usage_unknown: 'Object Usage Unknown',
   unused_object: 'Unused Object',
   duplicate_object: 'Duplicate Object',
+  overlapping_object: 'Overlapping Object',
   empty_group: 'Empty Group',
   large_group: 'Large Group',
   broad_network: 'Broad Network',
   service_range: 'Large Port Range',
   // Import / data quality
   import_quality: 'Import Quality',
-  analysis_configuration: 'Analysis Configuration',
 }
 
 const FINDING_ICONS: Record<string, React.ReactNode> = {
   shadowed_rule: <Layers className="w-3.5 h-3.5" />,
-  same_action_shadowed_rule: <Layers className="w-3.5 h-3.5" />,
-  conflicting_shadowed_rule: <Layers className="w-3.5 h-3.5" />,
-  partial_shadowed_rule: <Layers className="w-3.5 h-3.5" />,
-  shadowing_not_evaluated: <Layers className="w-3.5 h-3.5" />,
   duplicate_rule: <Copy className="w-3.5 h-3.5" />,
   zero_hit_rule: <ZapOff className="w-3.5 h-3.5" />,
   overly_permissive: <AlertTriangle className="w-3.5 h-3.5" />,
@@ -92,8 +98,6 @@ const FINDING_ICONS: Record<string, React.ReactNode> = {
   risky_service: <Wifi className="w-3.5 h-3.5" />,
   low_usage_rule: <Activity className="w-3.5 h-3.5" />,
   import_quality: <FileText className="w-3.5 h-3.5" />,
-  analysis_configuration: <FileText className="w-3.5 h-3.5" />,
-  any_to_any_allow: <AlertTriangle className="w-3.5 h-3.5" />,
   rdp_exposed: <Shield className="w-3.5 h-3.5" />,
   ssh_exposed: <Shield className="w-3.5 h-3.5" />,
   database_exposed: <Shield className="w-3.5 h-3.5" />,
@@ -143,16 +147,18 @@ const SEVERITY_COLORS: Record<string, string> = {
 
 // Quick preset filters
 const PRESETS = [
-  { label: 'Critical Severity', params: { severity: 'Critical' } },
-  { label: 'High Severity', params: { severity: 'High' } },
-  { label: 'Any-to-Any Allow', params: { finding_type: 'any_to_any_allow' } },
-  { label: 'Zero-Hit Rules', params: { finding_type: 'zero_hit_rule' } },
-  { label: 'Overly Permissive', params: { finding_type: 'overly_permissive' } },
-  { label: 'Redundant Rules', params: { finding_type: 'same_action_shadowed_rule' } },
-  { label: 'Needs Review', params: { status: 'Review Required' } },
-  { label: 'Cleanup Candidates', params: { status: 'Confirmed Cleanup Candidate' } },
-  { label: 'Import Quality', params: { finding_type: 'import_quality' } },
-  { label: 'Analysis Config', params: { finding_type: 'analysis_configuration' } },
+  { label: '🛑 Critical Severity', params: { severity: 'Critical' } },
+  { label: '🔴 High Severity', params: { severity: 'High' } },
+  { label: '⚡ Zero-Hit Rules', params: { finding_type: 'zero_hit_rule' } },
+  { label: '🔓 Overly Permissive', params: { finding_type: 'overly_permissive' } },
+  { label: '👥 Shadowed Rules', params: { finding_type: 'shadowed_rule' } },
+  { label: '📋 Needs Review', params: { status: 'Review Required' } },
+  { label: '✅ Cleanup Candidates', params: { status: 'Confirmed Cleanup Candidate' } },
+  { label: '📝 No Documentation', params: { finding_type: 'no_documentation' } },
+  { label: '🌐 Broad VPN Access', params: { finding_type: 'vpn_access' } },
+  { label: '📦 Empty Groups', params: { finding_type: 'empty_group' } },
+  { label: '🌍 Broad Networks', params: { finding_type: 'broad_network' } },
+  { label: '🏷️ Poor Names', params: { finding_type: 'naming_quality' } },
 ]
 
 // ── Rule Card ─────────────────────────────────────────────────────────────────
@@ -300,7 +306,9 @@ function AffectedRulesPanel({ finding }: { finding: Finding }) {
   if (rules.length === 0) return null
   const type = finding.finding_type
 
-  if (SHADOW_FINDING_TYPES.has(type) && rules.length >= 2) {
+  const SHADOW_PAIR_TYPES = ['shadowed_rule', 'redundant_rule', 'partial_shadowed_rule',
+    'same_action_shadowed_rule', 'conflicting_shadowed_rule']
+  if (SHADOW_PAIR_TYPES.includes(type) && rules.length >= 2) {
     const shadowed = rules[0]
     const shadowing = rules[1]
     return (
@@ -426,6 +434,194 @@ function EvidenceBox({ evidence }: { evidence: Record<string, unknown> }) {
       <pre className="text-xs text-green-300 whitespace-pre-wrap">
         {JSON.stringify(evidence, null, 2)}
       </pre>
+    </div>
+  )
+}
+
+// ── Structured evidence details (Phase 12: confidence/data-availability,
+//    object reference graph, application control, vendor context) ─────────────
+const CAP_LABELS: Record<string, string> = {
+  rules: 'Rules', objects: 'Object DB', group_graph: 'Group graph',
+  nat: 'NAT data', interfaces: 'Interfaces / zones', applications: 'Application data',
+  hit_counts: 'Hit counts', last_hit: 'Last-hit data', layer_context: 'Layer / zone context',
+}
+
+function evStr(v: unknown): string | null {
+  if (typeof v === 'string') return v.trim() || null
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+  return null
+}
+function evArr(v: unknown): string[] {
+  return Array.isArray(v) ? v.map(x => (typeof x === 'object' ? JSON.stringify(x) : String(x))) : []
+}
+
+function EvSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <h5 className="text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-1">{title}</h5>
+      {children}
+    </div>
+  )
+}
+
+function ChipRow({ items, tone = 'gray' }: { items: string[]; tone?: string }) {
+  const cls: Record<string, string> = {
+    gray: 'bg-gray-100 text-gray-600 border-gray-200',
+    red: 'bg-red-50 text-red-700 border-red-200',
+    amber: 'bg-amber-50 text-amber-700 border-amber-200',
+    blue: 'bg-blue-50 text-blue-700 border-blue-200',
+  }
+  return (
+    <div className="flex flex-wrap gap-1">
+      {items.map((it, i) => (
+        <span key={i} className={`inline-block text-xs px-1.5 py-0.5 rounded border ${cls[tone] || cls.gray}`}>{it}</span>
+      ))}
+    </div>
+  )
+}
+
+function EvidenceDetails({ finding }: { finding: Finding }) {
+  const ev = (finding.evidence || {}) as Record<string, unknown>
+  if (!ev || Object.keys(ev).length === 0) return null
+
+  const context = evStr(ev.evaluation_context)
+  const vendor = evStr(ev.vendor)
+  const avail = (ev.data_available && typeof ev.data_available === 'object' && !Array.isArray(ev.data_available))
+    ? (ev.data_available as Record<string, boolean>) : null
+  const detectors = (Array.isArray(ev.detectors) ? ev.detectors : []) as Array<{ label?: string; decision?: string; unmet?: string[] }>
+  const classification = evStr(ev.classification)
+  const refComplete = ev.reference_graph_complete
+  const circular = evArr(ev.circular_groups)
+  const sampleDetail = (Array.isArray(ev.sample_detail) ? ev.sample_detail : []) as Array<{ name?: string; type?: string }>
+  const unresolved = evArr(ev.unresolved_sample)
+  const riskyApps = evArr(ev.risky_applications)
+  const profiles = evArr(ev.profiles_present)
+  const appsOrig = evArr(ev.applications_original)
+  const svcOrig = evArr(ev.services_original)
+  const emptyFields = (Array.isArray(ev.empty_fields) ? ev.empty_fields : []) as Array<{ field?: string; groups?: string[] }>
+  const internalTarget = evStr(ev.internal_target)
+  const publicIp = evStr(ev.public_ip)
+  const relations = ([
+    ['Source', evStr(ev.source_relation)],
+    ['Destination', evStr(ev.destination_relation)],
+    ['Service', evStr(ev.service_relation)],
+    ['Action', evStr(ev.action_relation)],
+  ] as Array<[string, string | null]>).filter(([, v]) => v)
+
+  const hasAny = context || vendor || avail || detectors.length || classification ||
+    circular.length || sampleDetail.length || unresolved.length || riskyApps.length ||
+    profiles.length || appsOrig.length || svcOrig.length || relations.length ||
+    emptyFields.length || internalTarget || publicIp
+  if (!hasAny) return null
+
+  return (
+    <div className="border-t border-gray-100 pt-4 space-y-3">
+      <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide">Evidence & Context</h4>
+
+      {(vendor || context) && (
+        <EvSection title="Vendor context">
+          <p className="text-sm text-gray-700">
+            {vendor && <span className="font-medium">{vendor}</span>}
+            {vendor && context && ' · '}
+            {context && <span className="text-gray-600">{context}</span>}
+          </p>
+        </EvSection>
+      )}
+
+      {avail && (
+        <EvSection title="Data availability">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1">
+            {Object.keys(avail).map(k => (
+              <div key={k} className="flex items-center gap-1.5 text-xs">
+                <span className={avail[k] ? 'text-emerald-600' : 'text-gray-300'}>{avail[k] ? '✓' : '✕'}</span>
+                <span className={avail[k] ? 'text-gray-700' : 'text-gray-400'}>{CAP_LABELS[k] || k}</span>
+              </div>
+            ))}
+          </div>
+        </EvSection>
+      )}
+
+      {detectors.length > 0 && (
+        <EvSection title="Detectors limited by missing data">
+          <ul className="space-y-0.5">
+            {detectors.map((d, i) => (
+              <li key={i} className="text-xs text-gray-700">
+                <span className={`font-medium ${d.decision === 'downgrade' ? 'text-amber-700' : 'text-gray-700'}`}>
+                  {d.label || '—'}
+                </span>
+                <span className="text-gray-400"> — {d.decision === 'downgrade' ? 'reduced confidence' : 'suppressed'}
+                  {d.unmet?.length ? ` (needs: ${d.unmet.map(u => CAP_LABELS[u] || u).join(', ')})` : ''}</span>
+              </li>
+            ))}
+          </ul>
+        </EvSection>
+      )}
+
+      {(classification || refComplete !== undefined) && (
+        <EvSection title="Object reference graph">
+          {classification && <p className="text-sm text-gray-700">{classification}</p>}
+          {refComplete !== undefined && (
+            <p className="text-xs text-gray-500 mt-0.5">
+              Reference graph {refComplete ? 'complete' : 'incomplete'}.
+            </p>
+          )}
+        </EvSection>
+      )}
+
+      {sampleDetail.length > 0 && (
+        <EvSection title="Affected objects (sample)">
+          <ChipRow items={sampleDetail.slice(0, 30).map(o => o.type ? `${o.name} (${o.type})` : String(o.name))} />
+        </EvSection>
+      )}
+
+      {circular.length > 0 && (
+        <EvSection title="Circular groups">
+          <ChipRow items={circular} tone="amber" />
+        </EvSection>
+      )}
+
+      {unresolved.length > 0 && (
+        <EvSection title="Unresolved references (sample)">
+          <ChipRow items={unresolved} tone="amber" />
+        </EvSection>
+      )}
+
+      {emptyFields.length > 0 && (
+        <EvSection title="Empty match fields">
+          <ChipRow items={emptyFields.map(f => `${f.field}: ${(f.groups || []).join(', ') || '(unnamed)'}`)} tone="red" />
+        </EvSection>
+      )}
+
+      {(appsOrig.length > 0 || svcOrig.length > 0 || riskyApps.length > 0 || profiles.length > 0) && (
+        <EvSection title="Application control">
+          <div className="space-y-1.5">
+            {appsOrig.length > 0 && <div><span className="text-xs text-gray-400 mr-1">Applications:</span><ChipRow items={appsOrig} tone="blue" /></div>}
+            {svcOrig.length > 0 && <div><span className="text-xs text-gray-400 mr-1">Services:</span><ChipRow items={svcOrig} /></div>}
+            {riskyApps.length > 0 && <div><span className="text-xs text-gray-400 mr-1">High-risk:</span><ChipRow items={riskyApps} tone="red" /></div>}
+            {profiles.length > 0 && <div><span className="text-xs text-gray-400 mr-1">Profiles present:</span><ChipRow items={profiles} /></div>}
+          </div>
+        </EvSection>
+      )}
+
+      {(internalTarget || publicIp) && (
+        <EvSection title="Exposure mapping">
+          <p className="text-sm text-gray-700">
+            {publicIp && <span>{publicIp}</span>}
+            {publicIp && internalTarget && <span className="text-gray-400"> → </span>}
+            {internalTarget && <span className="font-medium">{internalTarget}</span>}
+          </p>
+        </EvSection>
+      )}
+
+      {relations.length > 0 && (
+        <EvSection title="Coverage relations">
+          <ul className="space-y-0.5">
+            {relations.map(([k, v]) => (
+              <li key={k} className="text-xs text-gray-600"><span className="text-gray-400">{k}:</span> {v}</li>
+            ))}
+          </ul>
+        </EvSection>
+      )}
     </div>
   )
 }
@@ -670,7 +866,7 @@ function FindingRow({ finding, onUpdate, selected, onSelect }: {
         <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">
           <span className="flex items-center gap-1">
             {FINDING_ICONS[finding.finding_type]}
-            {findingTypeLabel(finding.finding_type)}
+            {FINDING_TYPES[finding.finding_type] || finding.finding_type}
           </span>
         </td>
         <td className="px-4 py-3 text-sm font-medium text-gray-900 max-w-[280px]">
@@ -708,7 +904,7 @@ function FindingRow({ finding, onUpdate, selected, onSelect }: {
           onClose={() => setExpanded(false)}
           width="xl"
           title={finding.title}
-          subtitle={findingTypeLabel(finding.finding_type)}
+          subtitle={FINDING_TYPES[finding.finding_type] || finding.finding_type}
           badges={<><SeverityBadge severity={finding.severity} size="sm" /><StatusBadge status={finding.status} /><ConfidenceBadge confidence={finding.confidence || 'Medium'} /></>}
         >
           <div className="space-y-5">
@@ -746,6 +942,10 @@ function FindingRow({ finding, onUpdate, selected, onSelect }: {
 
               {/* Per-vendor remediation guidance (review-only) */}
               <VendorRemediation finding={finding} />
+
+              {/* Structured evidence & context (confidence / data availability /
+                  object reference graph / application control) */}
+              <EvidenceDetails finding={finding} />
 
               {/* Evidence toggle */}
               <div className="border-t border-gray-100 pt-3">

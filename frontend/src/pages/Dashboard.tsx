@@ -20,6 +20,7 @@ import { findingTypeLabel } from '../lib/findingLabels'
 
 const TYPE_LABELS: Record<string, string> = {
   duplicate_rule: 'Duplicate Rules', shadowed_rule: 'Shadowed Rules',
+  redundant_rule: 'Redundant Rules',
   same_action_shadowed_rule: 'Redundant Rules',
   conflicting_shadowed_rule: 'Conflicting Shadowed Rules',
   partial_shadowed_rule: 'Partially Shadowed Rules',
@@ -29,9 +30,12 @@ const TYPE_LABELS: Record<string, string> = {
   risky_service: 'Risky Services',   no_logging: 'No Logging',
   temporary_rule: 'Temporary Rules', unused_object: 'Unused Objects',
   duplicate_object: 'Duplicate Objects',
+  unattached_object: 'Unattached Objects',
+  object_usage_unknown: 'Object Usage Unknown',
+  overlapping_object: 'Overlapping Objects',
   any_to_any_allow: 'Any-to-Any Allow',
   import_quality: 'Import Quality',
-  analysis_configuration: 'Analysis Configuration',
+  detector_prerequisites_unmet: 'Limited by Missing Data',
 }
 
 function riskColor(score: number) {
@@ -235,7 +239,7 @@ export function Dashboard() {
   const cleanupTypes: Array<{ key: string; label: string; icon: ElementType; keys?: string[] }> = [
     { key: 'disabled_rule',    label: 'Disabled Rules',   icon: Ban },
     { key: 'zero_hit_rule',    label: 'Zero-Hit Rules',   icon: Activity },
-    { key: 'same_action_shadowed_rule', label: 'Redundant Rules', icon: Layers, keys: ['shadowed_rule', 'same_action_shadowed_rule'] },
+    { key: 'redundant_rule', label: 'Redundant Rules', icon: Layers, keys: ['shadowed_rule', 'redundant_rule', 'same_action_shadowed_rule'] },
     { key: 'conflicting_shadowed_rule', label: 'Conflicting Shadows', icon: AlertTriangle, keys: ['conflicting_shadowed_rule', 'partial_shadowed_rule'] },
     { key: 'overly_permissive',label: 'Overly Permissive',icon: Eye },
     { key: 'no_logging',       label: 'No Logging',       icon: FileText },

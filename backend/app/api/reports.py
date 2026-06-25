@@ -842,10 +842,11 @@ CATEGORY_META: dict = {
     "low_usage_rule":     "Low-Usage Rules",
     "duplicate_rule":     "Duplicate Rules",
     "shadowed_rule":      "Shadowed Rules",
-    "same_action_shadowed_rule": "Redundant Shadowed Rules",
-    "conflicting_shadowed_rule": "Conflicting Shadowed Rules",
+    "redundant_rule":     "Redundant Rules",
+    "same_action_shadowed_rule": "Redundant Rules",
+    "conflicting_shadowed_rule": "Shadowed Rules",
     "partial_shadowed_rule": "Partially Shadowed Rules",
-    "shadowing_not_evaluated": "Shadowing Not Evaluated",
+    "inoperative_rule":   "Inoperative Rules",
     "risky_service":      "Risky Service Rules",
     "no_logging":         "Rules Without Logging",
     "temporary_rule":     "Temporary Rules",
@@ -865,14 +866,17 @@ CATEGORY_META: dict = {
     "no_cleanup_rule":    "Missing/Unlogged Cleanup Rule",
     "rule_order_optimization": "Rule Order Optimization",
     "large_rule_section": "Oversized Rule Sections",
+    "unattached_object":  "Unattached Objects",
+    "object_usage_unknown": "Object Usage Unknown",
     "unused_object":      "Unused Objects",
     "duplicate_object":   "Duplicate Objects",
+    "overlapping_object": "Overlapping Objects",
     "empty_group":        "Empty Groups",
     "large_group":        "Large Groups",
     "broad_network":      "Broad Network Objects",
     "service_range":      "Wide Service Ranges",
+    "detector_prerequisites_unmet": "Detector Prerequisite Notes",
     "import_quality":     "Import Quality Notes",
-    "analysis_configuration": "Analysis Configuration Notes",
 }
 
 REPORT_TYPE_TITLES: dict = {
@@ -1440,10 +1444,11 @@ CATEGORY_SHEET_NAMES: dict = {
     "low_usage_rule":     "Low-Usage Rules",
     "duplicate_rule":     "Duplicate Rules",
     "shadowed_rule":      "Shadowed Rules",
-    "same_action_shadowed_rule": "Redundant Shadows",
-    "conflicting_shadowed_rule": "Conflicting Shadows",
-    "partial_shadowed_rule": "Partial Shadows",
-    "shadowing_not_evaluated": "Shadowing Skipped",
+    "redundant_rule":     "Redundant Rules",
+    "same_action_shadowed_rule": "Redundant Rules",
+    "conflicting_shadowed_rule": "Shadowed Rules",
+    "partial_shadowed_rule": "Partially Shadowed Rules",
+    "inoperative_rule":   "Inoperative Rules",
     "risky_service":      "Risky Services",
     "no_logging":         "No Logging",
     "temporary_rule":     "Temp Rules",
@@ -1463,21 +1468,20 @@ CATEGORY_SHEET_NAMES: dict = {
     "no_cleanup_rule":    "Cleanup Rule",
     "rule_order_optimization": "Rule Order",
     "large_rule_section": "Oversized Sections",
+    "unattached_object":  "Unattached Objects",
+    "object_usage_unknown": "Object Usage Unknown",
     "unused_object":      "Unused Objects",
     "duplicate_object":   "Duplicate Objects",
+    "overlapping_object": "Overlapping Objects",
     "empty_group":        "Empty Groups",
     "large_group":        "Large Groups",
     "broad_network":      "Broad Networks",
     "service_range":      "Service Ranges",
+    "detector_prerequisites_unmet": "Prerequisites",
     "import_quality":     "Import Quality",
-    "analysis_configuration": "Analysis Config",
 }
 
-CLEANUP_TYPES = {
-    "disabled_rule", "zero_hit_rule", "low_usage_rule", "duplicate_rule",
-    "shadowed_rule", "same_action_shadowed_rule", "conflicting_shadowed_rule",
-    "partial_shadowed_rule", "temporary_rule",
-}
+CLEANUP_TYPES = {"disabled_rule","zero_hit_rule","low_usage_rule","duplicate_rule","shadowed_rule","temporary_rule"}
 
 
 def _build_excel_full(policy, rules, findings, config: ReportBuildConfig, customer_name: str):

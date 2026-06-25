@@ -64,6 +64,14 @@ export interface Policy {
   complexity_breakdown?: Record<string, { value: number; label: string; points: number }> | null
   cleanup_readiness_score?: number | null
   health_score?: number | null
+  import_quality_score?: number | null
+  import_quality?: {
+    score: number
+    grade: string
+    capabilities?: Record<string, boolean>
+    missing?: string[]
+    parser_warnings?: number
+  } | null
   top_risk_drivers?: Array<{ type: string; count: number }>
 }
 

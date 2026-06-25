@@ -185,7 +185,7 @@ def _detect_within_context(expanded: List[dict], vendor: str, not_evaluated: lis
             if full and actions_differ:
                 # Earlier rule fully covers later with a DIFFERENT action: the
                 # later rule can never take effect — a policy logic error.
-                finding_type = "conflicting_shadowed_rule"
+                finding_type = "shadowed_rule"
                 confidence = "High"
                 conflict_type = "different-action"
                 severity = "High"
@@ -198,7 +198,7 @@ def _detect_within_context(expanded: List[dict], vendor: str, not_evaluated: lis
                 result = f"Rule {later_id} is fully shadowed (conflicting action)"
             elif full:
                 # Same action, fully contained → redundant rule.
-                finding_type = "same_action_shadowed_rule"
+                finding_type = "redundant_rule"
                 confidence = "High"
                 conflict_type = "same-action"
                 severity = "Medium"

@@ -36,8 +36,8 @@ WAVES = [
         "rollback": "Re-create or re-enable the rule/object from the captured configuration baseline (revision snapshot) if needed.",
         "types": {
             "disabled_rule", "zero_hit_rule", "duplicate_rule", "shadowed_rule",
-            "same_action_shadowed_rule", "conflicting_shadowed_rule", "partial_shadowed_rule",
-            "unused_object", "duplicate_object", "empty_group",
+            "redundant_rule", "same_action_shadowed_rule", "conflicting_shadowed_rule",
+            "unattached_object", "unused_object", "duplicate_object", "empty_group",
         },
     },
     {
@@ -93,24 +93,14 @@ _TYPE_ACTION: dict[str, tuple[str, str, str]] = {
         "Remove or reorder the shadowed rule only after the intended policy behavior is confirmed.",
         "Restore original order and rule content from the baseline if behavior changes unexpectedly.",
     ),
-    "same_action_shadowed_rule": (
-        "Validate rule order and confirm the redundant rule matches traffic already handled by an earlier same-action rule.",
-        "Consolidate or remove the redundant rule only after the intended policy behavior is confirmed.",
-        "Restore original rule content from the baseline if behavior changes unexpectedly.",
-    ),
-    "conflicting_shadowed_rule": (
-        "Validate rule order and confirm the later rule cannot take effect because an earlier different-action rule matches first.",
-        "Correct the policy logic through approved change management after confirming the intended behavior.",
-        "Restore original order and rule content from the baseline if behavior changes unexpectedly.",
-    ),
-    "partial_shadowed_rule": (
-        "Validate the overlapping source, destination, and service dimensions before treating the rule as redundant.",
-        "Adjust or split the partially overlapped rule only after confirming business requirements.",
-        "Restore original rule content from the baseline if behavior changes unexpectedly.",
-    ),
     "unused_object": (
         "Confirm the object is not referenced by active rules, NAT, VPN, groups, or pending changes.",
         "Remove the unused object or archive it according to customer standards.",
+        "Recreate the object from the baseline if a hidden dependency is discovered.",
+    ),
+    "unattached_object": (
+        "Confirm the object is not referenced by active rules, NAT, VPN, groups, or pending changes.",
+        "Remove the unattached object or archive it according to customer standards.",
         "Recreate the object from the baseline if a hidden dependency is discovered.",
     ),
     "duplicate_object": (

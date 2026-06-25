@@ -70,6 +70,11 @@ LIBRARY: dict[str, str] = {
         "intended active period. If the schedule has expired or no longer reflects the "
         "business requirement, raise a change request to disable or remove the rule."
     ),
+    "inoperative_rule": (
+        "This rule references an empty group on its source or destination, so it can never "
+        "match traffic. Confirm whether the group should be populated (a missed change) or "
+        "the rule removed, then raise the appropriate change request."
+    ),
     "nat_complexity": (
         "Review this NAT rule to confirm the address translation is accurate, necessary, "
         "and documented. Verify the associated security rule permits only the intended "
@@ -91,6 +96,21 @@ LIBRARY: dict[str, str] = {
         "Verify that this object is not referenced in policies outside the current view. "
         "If the object is confirmed unused, raise a change request to remove it from the "
         "object database to reduce policy complexity."
+    ),
+    "unattached_object": (
+        "These objects are referenced by no rule or NAT rule and are not members of any "
+        "used group. Verify against any policies outside the current view, then raise a "
+        "change request to remove confirmed-unattached objects to reduce clutter."
+    ),
+    "object_usage_unknown": (
+        "Object usage could not be determined because the object import is incomplete or "
+        "contains a circular reference. Re-import / re-sync the object database (and review "
+        "any circular groups) before relying on unattached-object cleanup."
+    ),
+    "overlapping_object": (
+        "Review the overlapping network objects: confirm whether the narrower object is "
+        "still required, or whether rules should reference the broader object. Consolidate "
+        "to remove ambiguity, via change management."
     ),
     "duplicate_object": (
         "Consolidate duplicate objects to a single canonical definition. Update any rules "

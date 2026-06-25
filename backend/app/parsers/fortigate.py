@@ -83,6 +83,14 @@ class FortiGateParser(BaseParser):
         if svcgrp_section:
             objects.extend(self._parse_service_groups(svcgrp_section))
 
+        # Parse Virtual IPs (destination-NAT objects). A policy that uses a VIP
+        # as its destination matches on the VIP's external IP (extip, the
+        # original/pre-NAT destination) and DNATs to the mapped internal host.
+        # Without this, VIP-referenced destinations resolve as "unknown".
+        vip_section = sections.get("config firewall vip", "")
+        if vip_section:
+            objects.extend(self._parse_vips(vip_section))
+
         # Parse policies
         policy_section = sections.get("config firewall policy", "")
         if policy_section:
@@ -333,6 +341,47 @@ class FortiGateParser(BaseParser):
                 "port_end": None,
                 "members": members,
                 "comment": f.get("comment", ""),
+                "raw_data": raw,
+            })
+        return objects
+
+    def _parse_vips(self, content: str) -> List[dict]:
+        """Parse 'config firewall vip' entries (destination NAT).
+
+        The normalized object value is the external IP (extip) because a policy
+        referencing the VIP matches on the original/pre-NAT destination — this is
+        what shadow/overlap and public-exposure analysis must compare. The mapped
+        internal target (mappedip) and port-forward details are preserved in
+        raw_data and surfaced as explicit fields for NAT/exposure reporting.
+        """
+        objects = []
+        for entry in self._parse_entries(content):
+            f = entry["_fields"]
+            raw = {**f, "_id": entry["_id"], "_raw_lines": entry.get("_raw_lines", [])}
+            name = entry["_id"]
+            extip = (f.get("extip", "") or "").strip()
+            mappedip = (f.get("mappedip", "") or "").strip()
+            # mappedip may be a quoted single IP, a range, or (load-balance) a list.
+            mapped_list = self._parse_space_list(mappedip) if mappedip else []
+            mapped_value = mapped_list[0] if mapped_list else mappedip
+            portforward = (f.get("portforward", "disable") or "disable").lower() == "enable"
+            objects.append({
+                "object_name": name,
+                "object_type": "vip",
+                # extip can be a single IP or a range; value stays as written so the
+                # normalizer resolves it as a concrete network/range, not "unknown".
+                "value": extip,
+                "protocol": (f.get("protocol", "") or "").lower() or None,
+                "port_start": None,
+                "port_end": None,
+                "members": [],
+                "comment": f.get("comment", ""),
+                "nat_type": "destination",
+                "external_ip": extip,
+                "mapped_ip": mapped_value,
+                "external_port": f.get("extport", "") if portforward else "",
+                "mapped_port": f.get("mappedport", "") if portforward else "",
+                "external_interface": f.get("extintf", ""),
                 "raw_data": raw,
             })
         return objects

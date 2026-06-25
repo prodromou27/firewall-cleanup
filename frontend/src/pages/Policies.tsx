@@ -366,13 +366,14 @@ export function PolicyDetail() {
         </div>
 
         {/* Score gauges */}
-        {(policy.health_score != null || policy.complexity_score != null || policy.cleanup_readiness_score != null) && (
+        {(policy.health_score != null || policy.complexity_score != null || policy.cleanup_readiness_score != null || policy.import_quality_score != null) && (
           <div className="card">
             <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-4">Policy Health Scores</h3>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <ScoreGauge value={policy.health_score} label="Health Score" color="text-emerald-600" />
               <ScoreGauge value={typeof policy.complexity_score === 'number' ? 100 - policy.complexity_score : null} label="Simplicity Score" color="text-blue-600" />
               <ScoreGauge value={policy.cleanup_readiness_score} label="Data Readiness" color="text-amber-600" />
+              <ScoreGauge value={policy.import_quality_score} label="Import Quality" color="text-violet-600" />
             </div>
             {policy.top_risk_drivers && policy.top_risk_drivers.length > 0 && (
               <div className="mt-4 pt-4 border-t border-gray-100">

@@ -179,3 +179,36 @@ def test_nat_confidence_high_when_policy_corroborates():
     res = NE.analyze([_sec(dst=["10.0.0.5"], svc=["tcp/3389"])], [_nat(tdst=["10.0.0.5"])], {})
     nat_exp = [e for e in res["exposure"]["exposures"] if e["source"] == "nat"]
     assert nat_exp and nat_exp[0]["confidence"] == "High"
+
+
+# ── FortiGate VIP (inbound DNAT via policy destination) ──────────────────────
+def _vip_obj(name="WebVIP", extip="203.0.113.10", mapped="10.0.0.5"):
+    return {"object_name": name, "object_type": "vip", "value": extip,
+            "mapped_ip": mapped, "members": [], "raw_data": {"mappedip": mapped}}
+
+
+def test_policy_to_vip_exposes_mapped_internal_host():
+    """Inbound allow whose destination is a VIP exposes the mapped internal host,
+    not the public extip, at High confidence (we see the permit + the DNAT)."""
+    obj_map = {"WebVIP": _vip_obj()}
+    sec = [_sec(src=["any"], dst=["WebVIP"], svc=["tcp/3389"])]
+    res = NE.analyze(sec, None, obj_map)
+
+    assert "rdp_public_exposure" in _types(res)
+    exp = [e for e in res["exposure"]["exposures"] if "10.0.0.5" in e["internal_target"]]
+    assert exp, "mapped internal host should be the exposure target"
+    assert exp[0]["source"] == "policy+nat"
+    assert exp[0]["confidence"] == "High"
+    assert exp[0]["nat_rules"] == ["WebVIP"]
+
+
+def test_policy_to_vip_keeps_policy_service_restriction():
+    """A port-restricted inbound rule to a VIP must NOT be inflated to 'any
+    service' — the VIP never invents an unrestricted exposure."""
+    obj_map = {"WebVIP": _vip_obj()}
+    sec = [_sec(src=["any"], dst=["WebVIP"], svc=["tcp/443"])]
+    res = NE.analyze(sec, None, obj_map)
+
+    assert "any_service_public_exposure" not in _types(res)
+    # No sensitive-port finding for plain HTTPS, but the host is in the inventory.
+    assert any("10.0.0.5" in e["internal_target"] for e in res["exposure"]["exposures"])

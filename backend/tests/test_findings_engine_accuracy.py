@@ -2,15 +2,13 @@
 
 from app.analysis.duplicate_detector import detect_duplicates
 from app.analysis.engine import (
-    _analysis_detector_enabled,
     _analyze_empty_groups,
     _analyze_exposed_services,
+    _analyze_inoperative_rules,
     _analyze_permissive,
     _analyze_risky_services,
     _analyze_service_ranges,
-    _apply_finding_volume_policy,
     _consolidate_findings,
-    _disabled_detectors_note,
     _analyze_unused_objects,
     _analyze_usage,
     _obj_to_dict,
@@ -78,6 +76,32 @@ def test_zero_hit_requires_hit_count_data():
     _assert_quality(findings)
 
 
+def test_usage_observation_window_recorded_in_evidence():
+    findings = _analyze_usage([_rule(2, hit_count=0)], {})
+    assert findings[0]["evidence"]["observation_days"]  # window surfaced
+
+
+def test_min_age_suppresses_usage_findings_for_new_policy():
+    # A policy observed for fewer days than the minimum age → usage suppressed.
+    assert _analyze_usage([_rule(1, hit_count=0)], {}, policy_age_days=1) == []
+    # An old-enough policy still produces the zero-hit finding.
+    assert _analyze_usage([_rule(1, hit_count=0)], {}, policy_age_days=400)
+
+
+def test_low_hit_threshold_is_opt_in(monkeypatch):
+    from app.config import settings
+    # Disabled by default → a 3-hit rule is not flagged.
+    assert _analyze_usage([_rule(1, hit_count=3)], {}) == []
+    # Enable the threshold → 0 < hits <= threshold is a low-usage finding.
+    monkeypatch.setattr(settings, "low_hit_threshold", 5)
+    findings = _analyze_usage([_rule(1, hit_count=3)], {})
+    assert len(findings) == 1
+    assert findings[0]["finding_type"] == "low_usage_rule"
+    assert findings[0]["evidence"]["hit_count"] == 3
+    # Above the threshold → not flagged.
+    assert _analyze_usage([_rule(2, hit_count=9)], {}) == []
+
+
 def test_overly_permissive_rule_reports_evidence_and_recommendation():
     findings = _analyze_permissive([_rule(1)], {})
 
@@ -136,7 +160,7 @@ def test_shadowed_rule_reports_first_enabled_shadowing_rule():
     findings = detect_shadows(rules, {})
 
     assert len(findings) == 1
-    assert findings[0]["finding_type"] == "same_action_shadowed_rule"
+    assert findings[0]["finding_type"] == "redundant_rule"
     assert findings[0]["evidence"]["shadowed_rule"].startswith("Rule 2")
     _assert_quality(findings)
 
@@ -152,9 +176,109 @@ def test_unused_objects_follow_nested_vendor_group_usage_and_skip_builtins():
     obj_map = build_object_map(objects)
     findings = _analyze_unused_objects([_rule(1, sources=["Parent"])], objects, obj_map)
 
+    assert findings[0]["finding_type"] == "unattached_object"
     names = _unused_names(findings)
     assert names == {"Orphan"}
     _assert_quality(findings)
+
+
+def test_overlapping_objects_flags_network_containment_not_duplicates_or_hosts():
+    from app.analysis.engine import _analyze_overlapping_objects
+    objects = [
+        _object("Net-16", "network", "10.10.0.0/16"),
+        _object("Net-24", "network", "10.10.5.0/24"),     # contained in Net-16 → overlap
+        _object("Other-16", "network", "192.168.0.0/16"),  # disjoint → no overlap
+        _object("Host", "host", "10.10.5.20/32"),          # host inside Net-16 → excluded (noise)
+        _object("Dup-A", "network", "172.16.0.0/24"),
+        _object("Dup-B", "network", "172.16.0.0/24"),      # identical → duplicate, not overlap
+        _object("Builtin", "network", "10.10.7.0/24", raw_data={"predefined": True}),
+    ]
+    findings = _analyze_overlapping_objects(objects)
+
+    assert len(findings) == 1
+    f = findings[0]
+    assert f["finding_type"] == "overlapping_object"
+    assert f["evidence"]["count"] == 1                     # only Net-24 ⊂ Net-16
+    sample = " ".join(f["evidence"]["sample"])
+    assert "Net-24" in sample and "Net-16" in sample
+    assert "Host" not in sample and "Dup-" not in sample and "Builtin" not in sample
+    _assert_quality(findings)
+
+
+def test_inoperative_rule_when_source_is_empty_group():
+    """An enabled rule whose source resolves to an empty group can never match —
+    distinct from shadowing. Disabled rules, populated groups, and unknown
+    (unresolved) objects must not trigger it."""
+    objects = [
+        _object("EmptyGrp", "address_group", "", []),
+        _object("FullGrp", "address_group", "", ["RealHost"]),
+        _object("RealHost", value="10.0.0.3/32"),
+    ]
+    obj_map = build_object_map(objects)
+
+    inert = _analyze_inoperative_rules([_rule(1, sources=["EmptyGrp"])], obj_map)
+    assert len(inert) == 1
+    assert inert[0]["finding_type"] == "inoperative_rule"
+    assert inert[0]["confidence"] == "High"
+    assert inert[0]["evidence"]["empty_fields"][0]["field"] == "source"
+
+    # Disabled → not inoperative; populated group → not inoperative.
+    assert _analyze_inoperative_rules([_rule(2, sources=["EmptyGrp"], enabled=False)], obj_map) == []
+    assert _analyze_inoperative_rules([_rule(3, sources=["FullGrp"])], obj_map) == []
+
+    # Unknown / unresolved object is NOT empty — must not be flagged inoperative.
+    assert _analyze_inoperative_rules([_rule(4, sources=["DoesNotExist"])], obj_map) == []
+
+
+def test_object_used_only_through_nat_is_not_unattached():
+    """An object referenced solely by a NAT rule must not be flagged unattached."""
+    objects = [
+        _object("NAT-Host", value="10.0.0.50/32"),
+        _object("RealOrphan", value="10.0.0.99/32"),
+    ]
+    obj_map = build_object_map(objects)
+    nat_rules = [{"nat_type": "destination", "original_dst": ["203.0.113.1"],
+                  "translated_dst": ["NAT-Host"]}]
+    findings = _analyze_unused_objects(
+        [_rule(1, sources=["10.0.0.1/32"])], objects, obj_map, nat_rules)
+
+    names = _unused_names(findings)
+    assert names == {"RealOrphan"}            # NAT-Host is used via NAT
+
+
+def test_incomplete_object_import_suppresses_unattached_and_diagnoses():
+    """When most named references don't resolve, suppress cleanup and emit a
+    data-availability diagnostic instead of flagging everything."""
+    objects = [_object("LonelyObj", value="10.0.0.5/32")]
+    obj_map = build_object_map(objects)
+    rules = [
+        _rule(1, sources=["Missing-A"], destinations=["Missing-B"]),
+        _rule(2, sources=["Missing-C"], destinations=["Missing-D"]),
+    ]
+    findings = _analyze_unused_objects(rules, objects, obj_map)
+
+    types = {f["finding_type"] for f in findings}
+    assert "object_usage_unknown" in types
+    assert "unattached_object" not in types
+
+
+def test_circular_group_is_diagnosed_and_members_not_unattached():
+    objects = [
+        _object("G1", "address_group", "", ["G2"]),
+        _object("G2", "address_group", "", ["G1", "MemberHost"]),
+        _object("MemberHost", value="10.0.0.7/32"),
+    ]
+    obj_map = build_object_map(objects)
+    # G1 is used by a rule; the cycle G1->G2->G1 must be diagnosed, not crash,
+    # and MemberHost (inside the circular group) must not be unattached.
+    findings = _analyze_unused_objects([_rule(1, sources=["G1"])], objects, obj_map)
+
+    types = {f["finding_type"] for f in findings}
+    assert "object_usage_unknown" in types     # circular diagnostic
+    circ = [f for f in findings if f["finding_type"] == "object_usage_unknown"][0]
+    assert "G1" in circ["evidence"].get("circular_groups", [])
+    unattached = [f for f in findings if f["finding_type"] == "unattached_object"]
+    assert not unattached or "MemberHost" not in unattached[0]["evidence"]["sample"]
 
 
 def test_empty_groups_include_customer_groups_and_suppress_vendor_builtins():
@@ -344,7 +468,7 @@ def test_consolidation_suppresses_usage_when_new_shadow_types_exist():
         "recommendation": "review",
     }
     shadow = {
-        "finding_type": "same_action_shadowed_rule",
+        "finding_type": "redundant_rule",
         "severity": "Medium",
         "confidence": "High",
         "title": "Rule 2 is redundant",
@@ -356,7 +480,7 @@ def test_consolidation_suppresses_usage_when_new_shadow_types_exist():
 
     consolidated = _consolidate_findings([zero_hit, shadow])
 
-    assert {f["finding_type"] for f in consolidated} == {"same_action_shadowed_rule"}
+    assert {f["finding_type"] for f in consolidated} == {"redundant_rule"}
     assert consolidated[0]["evidence"]["consolidated_related_findings"][0]["finding_type"] == "zero_hit_rule"
 
 
@@ -375,7 +499,10 @@ def test_unresolved_rule_object_suppresses_unused_object_detector():
     ]
     rules = [_rule(1, sources=["MissingGroup"], destinations=["any"], services=["https"])]
 
-    assert _analyze_unused_objects(rules, objects, build_object_map(objects)) == []
+    findings = _analyze_unused_objects(rules, objects, build_object_map(objects))
+
+    assert {f["finding_type"] for f in findings} == {"object_usage_unknown"}
+    assert "unattached_object" not in {f["finding_type"] for f in findings}
 
 
 def test_service_object_used_through_service_group_is_not_reported_as_service_range():
@@ -412,51 +539,6 @@ def test_debug_keyword_flags_temp_rule_and_cleanup_removed():
     assert "cleanup" not in settings.temp_keywords
 
 
-def test_analysis_detector_configuration_disables_selected_families(monkeypatch):
-    from app.config import settings
-
-    monkeypatch.setattr(settings, "analysis_disabled_detectors", "usage, shadowing")
-
-    assert _analysis_detector_enabled("permissive") is True
-    assert _analysis_detector_enabled("usage") is False
-    assert _analysis_detector_enabled("shadowing") is False
-
-    class P:
-        vendor = "CheckPoint"
-
-    note = _disabled_detectors_note(["usage", "shadowing", "usage"], [_rule(1)], [], P())
-
-    assert note["finding_type"] == "analysis_configuration"
-    assert note["severity"] == "Informational"
-    assert note["evidence"]["disabled_detectors"] == ["shadowing", "usage"]
-    assert "write" not in note["recommendation"].lower()
-
-
-def test_finding_volume_policy_caps_repeated_types(monkeypatch):
-    from app.config import settings
-
-    monkeypatch.setattr(settings, "analysis_max_findings_per_type", 2)
-    findings = [
-        {
-            "finding_type": "no_logging",
-            "severity": "Low",
-            "confidence": "High",
-            "title": f"No logging {idx}",
-            "description": "logging disabled",
-            "affected_rules": [f"r{idx}"],
-            "evidence": {"idx": idx},
-            "recommendation": "review",
-        }
-        for idx in range(4)
-    ]
-
-    capped = _apply_finding_volume_policy(findings)
-
-    assert [f["finding_type"] for f in capped].count("no_logging") == 2
-    note = [f for f in capped if f["finding_type"] == "analysis_configuration"][0]
-    assert note["evidence"]["suppressed_by_type"] == {"no_logging": 2}
-
-
 def test_import_quality_notes_flag_missing_data():
     from app.analysis.engine import _import_quality_notes
 
@@ -474,14 +556,6 @@ def test_import_quality_notes_flag_missing_data():
     assert "Object graph incomplete" not in titles
     assert all(n["severity"] == "Informational" for n in notes)
 
-    rules_missing_object = [{
-        "id": "r2", "enabled": True, "hit_count": 1,
-        "sources": ["MissingGroup"], "destinations": ["any"], "services": ["https"],
-        "source_interfaces": ["wan"], "destination_interfaces": ["lan"],
-    }]
-    notes_missing_object = _import_quality_notes(rules_missing_object, [], P())
-    assert "Object graph incomplete" in {n["title"] for n in notes_missing_object}
-
     # With hit data + interfaces + NAT, the corresponding notes disappear.
     class P2:
         vendor = "FortiGate"
@@ -490,3 +564,29 @@ def test_import_quality_notes_flag_missing_data():
     rules2 = [{"id": "r1", "enabled": True, "hit_count": 5,
                "source_interfaces": ["wan1"], "destination_interfaces": ["lan"]}]
     assert _import_quality_notes(rules2, [], P2()) == []
+
+
+def test_evaluation_context_stamped_on_rule_scoped_findings():
+    from app.analysis.engine import _enrich_evaluation_context
+
+    rules = [
+        {"id": "r1", "source_interfaces": ["wan1"], "destination_interfaces": ["lan"]},
+        {"id": "r2", "source_interfaces": ["wan2"], "destination_interfaces": ["dmz"]},
+    ]
+
+    # Single-rule finding → context attached.
+    single = {"finding_type": "risky_service", "affected_rules": ["r1"], "evidence": {}}
+    # Finding spanning two different contexts → left unstamped (ambiguous).
+    spanning = {"finding_type": "duplicate_rule", "affected_rules": ["r1", "r2"], "evidence": {}}
+    # Finding that already carries context → not overwritten.
+    preset = {"finding_type": "redundant_rule", "affected_rules": ["r1"],
+              "evidence": {"evaluation_context": "preset"}}
+    # Object-only finding (no rules) → untouched.
+    object_only = {"finding_type": "unused_object", "affected_rules": [], "evidence": {}}
+
+    _enrich_evaluation_context([single, spanning, preset, object_only], rules, "FortiGate")
+
+    assert single["evidence"]["evaluation_context"] == "interfaces wan1 → lan"
+    assert "evaluation_context" not in spanning["evidence"]
+    assert preset["evidence"]["evaluation_context"] == "preset"
+    assert "evaluation_context" not in object_only["evidence"]

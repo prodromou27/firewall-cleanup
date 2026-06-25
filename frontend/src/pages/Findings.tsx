@@ -434,6 +434,194 @@ function EvidenceBox({ evidence }: { evidence: Record<string, unknown> }) {
   )
 }
 
+// ── Structured evidence details (Phase 12: confidence/data-availability,
+//    object reference graph, application control, vendor context) ─────────────
+const CAP_LABELS: Record<string, string> = {
+  rules: 'Rules', objects: 'Object DB', group_graph: 'Group graph',
+  nat: 'NAT data', interfaces: 'Interfaces / zones', applications: 'Application data',
+  hit_counts: 'Hit counts', last_hit: 'Last-hit data', layer_context: 'Layer / zone context',
+}
+
+function evStr(v: unknown): string | null {
+  if (typeof v === 'string') return v.trim() || null
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+  return null
+}
+function evArr(v: unknown): string[] {
+  return Array.isArray(v) ? v.map(x => (typeof x === 'object' ? JSON.stringify(x) : String(x))) : []
+}
+
+function EvSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <h5 className="text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-1">{title}</h5>
+      {children}
+    </div>
+  )
+}
+
+function ChipRow({ items, tone = 'gray' }: { items: string[]; tone?: string }) {
+  const cls: Record<string, string> = {
+    gray: 'bg-gray-100 text-gray-600 border-gray-200',
+    red: 'bg-red-50 text-red-700 border-red-200',
+    amber: 'bg-amber-50 text-amber-700 border-amber-200',
+    blue: 'bg-blue-50 text-blue-700 border-blue-200',
+  }
+  return (
+    <div className="flex flex-wrap gap-1">
+      {items.map((it, i) => (
+        <span key={i} className={`inline-block text-xs px-1.5 py-0.5 rounded border ${cls[tone] || cls.gray}`}>{it}</span>
+      ))}
+    </div>
+  )
+}
+
+function EvidenceDetails({ finding }: { finding: Finding }) {
+  const ev = (finding.evidence || {}) as Record<string, unknown>
+  if (!ev || Object.keys(ev).length === 0) return null
+
+  const context = evStr(ev.evaluation_context)
+  const vendor = evStr(ev.vendor)
+  const avail = (ev.data_available && typeof ev.data_available === 'object' && !Array.isArray(ev.data_available))
+    ? (ev.data_available as Record<string, boolean>) : null
+  const detectors = (Array.isArray(ev.detectors) ? ev.detectors : []) as Array<{ label?: string; decision?: string; unmet?: string[] }>
+  const classification = evStr(ev.classification)
+  const refComplete = ev.reference_graph_complete
+  const circular = evArr(ev.circular_groups)
+  const sampleDetail = (Array.isArray(ev.sample_detail) ? ev.sample_detail : []) as Array<{ name?: string; type?: string }>
+  const unresolved = evArr(ev.unresolved_sample)
+  const riskyApps = evArr(ev.risky_applications)
+  const profiles = evArr(ev.profiles_present)
+  const appsOrig = evArr(ev.applications_original)
+  const svcOrig = evArr(ev.services_original)
+  const emptyFields = (Array.isArray(ev.empty_fields) ? ev.empty_fields : []) as Array<{ field?: string; groups?: string[] }>
+  const internalTarget = evStr(ev.internal_target)
+  const publicIp = evStr(ev.public_ip)
+  const relations = ([
+    ['Source', evStr(ev.source_relation)],
+    ['Destination', evStr(ev.destination_relation)],
+    ['Service', evStr(ev.service_relation)],
+    ['Action', evStr(ev.action_relation)],
+  ] as Array<[string, string | null]>).filter(([, v]) => v)
+
+  const hasAny = context || vendor || avail || detectors.length || classification ||
+    circular.length || sampleDetail.length || unresolved.length || riskyApps.length ||
+    profiles.length || appsOrig.length || svcOrig.length || relations.length ||
+    emptyFields.length || internalTarget || publicIp
+  if (!hasAny) return null
+
+  return (
+    <div className="border-t border-gray-100 pt-4 space-y-3">
+      <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide">Evidence & Context</h4>
+
+      {(vendor || context) && (
+        <EvSection title="Vendor context">
+          <p className="text-sm text-gray-700">
+            {vendor && <span className="font-medium">{vendor}</span>}
+            {vendor && context && ' · '}
+            {context && <span className="text-gray-600">{context}</span>}
+          </p>
+        </EvSection>
+      )}
+
+      {avail && (
+        <EvSection title="Data availability">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1">
+            {Object.keys(avail).map(k => (
+              <div key={k} className="flex items-center gap-1.5 text-xs">
+                <span className={avail[k] ? 'text-emerald-600' : 'text-gray-300'}>{avail[k] ? '✓' : '✕'}</span>
+                <span className={avail[k] ? 'text-gray-700' : 'text-gray-400'}>{CAP_LABELS[k] || k}</span>
+              </div>
+            ))}
+          </div>
+        </EvSection>
+      )}
+
+      {detectors.length > 0 && (
+        <EvSection title="Detectors limited by missing data">
+          <ul className="space-y-0.5">
+            {detectors.map((d, i) => (
+              <li key={i} className="text-xs text-gray-700">
+                <span className={`font-medium ${d.decision === 'downgrade' ? 'text-amber-700' : 'text-gray-700'}`}>
+                  {d.label || '—'}
+                </span>
+                <span className="text-gray-400"> — {d.decision === 'downgrade' ? 'reduced confidence' : 'suppressed'}
+                  {d.unmet?.length ? ` (needs: ${d.unmet.map(u => CAP_LABELS[u] || u).join(', ')})` : ''}</span>
+              </li>
+            ))}
+          </ul>
+        </EvSection>
+      )}
+
+      {(classification || refComplete !== undefined) && (
+        <EvSection title="Object reference graph">
+          {classification && <p className="text-sm text-gray-700">{classification}</p>}
+          {refComplete !== undefined && (
+            <p className="text-xs text-gray-500 mt-0.5">
+              Reference graph {refComplete ? 'complete' : 'incomplete'}.
+            </p>
+          )}
+        </EvSection>
+      )}
+
+      {sampleDetail.length > 0 && (
+        <EvSection title="Affected objects (sample)">
+          <ChipRow items={sampleDetail.slice(0, 30).map(o => o.type ? `${o.name} (${o.type})` : String(o.name))} />
+        </EvSection>
+      )}
+
+      {circular.length > 0 && (
+        <EvSection title="Circular groups">
+          <ChipRow items={circular} tone="amber" />
+        </EvSection>
+      )}
+
+      {unresolved.length > 0 && (
+        <EvSection title="Unresolved references (sample)">
+          <ChipRow items={unresolved} tone="amber" />
+        </EvSection>
+      )}
+
+      {emptyFields.length > 0 && (
+        <EvSection title="Empty match fields">
+          <ChipRow items={emptyFields.map(f => `${f.field}: ${(f.groups || []).join(', ') || '(unnamed)'}`)} tone="red" />
+        </EvSection>
+      )}
+
+      {(appsOrig.length > 0 || svcOrig.length > 0 || riskyApps.length > 0 || profiles.length > 0) && (
+        <EvSection title="Application control">
+          <div className="space-y-1.5">
+            {appsOrig.length > 0 && <div><span className="text-xs text-gray-400 mr-1">Applications:</span><ChipRow items={appsOrig} tone="blue" /></div>}
+            {svcOrig.length > 0 && <div><span className="text-xs text-gray-400 mr-1">Services:</span><ChipRow items={svcOrig} /></div>}
+            {riskyApps.length > 0 && <div><span className="text-xs text-gray-400 mr-1">High-risk:</span><ChipRow items={riskyApps} tone="red" /></div>}
+            {profiles.length > 0 && <div><span className="text-xs text-gray-400 mr-1">Profiles present:</span><ChipRow items={profiles} /></div>}
+          </div>
+        </EvSection>
+      )}
+
+      {(internalTarget || publicIp) && (
+        <EvSection title="Exposure mapping">
+          <p className="text-sm text-gray-700">
+            {publicIp && <span>{publicIp}</span>}
+            {publicIp && internalTarget && <span className="text-gray-400"> → </span>}
+            {internalTarget && <span className="font-medium">{internalTarget}</span>}
+          </p>
+        </EvSection>
+      )}
+
+      {relations.length > 0 && (
+        <EvSection title="Coverage relations">
+          <ul className="space-y-0.5">
+            {relations.map(([k, v]) => (
+              <li key={k} className="text-xs text-gray-600"><span className="text-gray-400">{k}:</span> {v}</li>
+            ))}
+          </ul>
+        </EvSection>
+      )}
+    </div>
+  )
+}
+
 // ── Comment Thread ────────────────────────────────────────────────────────────
 
 function CommentThread({ findingId }: { findingId: string }) {
@@ -750,6 +938,10 @@ function FindingRow({ finding, onUpdate, selected, onSelect }: {
 
               {/* Per-vendor remediation guidance (review-only) */}
               <VendorRemediation finding={finding} />
+
+              {/* Structured evidence & context (confidence / data availability /
+                  object reference graph / application control) */}
+              <EvidenceDetails finding={finding} />
 
               {/* Evidence toggle */}
               <div className="border-t border-gray-100 pt-3">

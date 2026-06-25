@@ -8,13 +8,28 @@ and Palo Alto Policy Optimizer. It complements [analysis-vendor-semantics.md](an
 (per-vendor evaluation context).
 
 ## 1. How mature tools classify cleanup findings
-- **Tufin SecureTrack** cleanup browser: unused / shadowed / disabled / duplicate
-  rules and objects. Usage analysis is driven by **logs/revisions**, not static
-  config alone.
+- **Tufin SecureTrack** Cleanup Browser (verified against Tufin docs, R25-2). Its
+  categories split cleanly into **configuration-derived** and **traffic-derived**:
+  - Config-only: *C01 fully shadowed & redundant rules*, *C05 disabled rules*,
+    **C06 unattached network objects** ("objects not appearing in firewall
+    rules"), *C08 empty groups*, *C11 duplicate network objects*,
+    *C12 duplicate services*.
+  - Traffic-log-dependent: **C15 unused network objects** — "no hits in the
+    policy traffic log during the time period configured" (the period — days /
+    weeks / months — is operator-selected). Cleanups are configurable
+    (name / severity / definition).
+  - **We follow this split exactly.** Our config-derived object finding is named
+    `unattached_object` (= Tufin C06); the traffic-based "unused object" (C15) is
+    intentionally **not** emitted because PolicyInsight does not ingest per-object
+    traffic logs (documented limitation, not a false negative).
+  - **Deliberate divergence:** Tufin merges *shadowed* and *redundant* into one
+    category (C01). We instead **split** them (`conflicting_shadowed_rule` vs
+    `same_action_shadowed_rule`) and add `inoperative_rule`, following FireMon's
+    finer-grained model below. Both are config-derived from rule containment.
 - **AlgoSec**: an object is **unattached** only if it is *not used in any rule* **and**
-  *not a member of any group used in a rule*.
+  *not a member of any group used in a rule* — matches Tufin C06 and our graph.
 - **FireMon** removable-rules report separates **shadowed**, **redundant**, and
-  **inoperative** rules as distinct findings.
+  **inoperative** rules as distinct findings (the model we adopt for rules).
 - **Palo Alto Policy Optimizer** separates **rules without app controls**,
   **unused apps in a rule**, and **unused rules**.
 

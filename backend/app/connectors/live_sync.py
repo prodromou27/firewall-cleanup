@@ -688,6 +688,14 @@ def _cp_translate(raw: dict) -> dict:
             "sources":               resolve_list(r.get("source", [])),
             "destinations":          resolve_list(r.get("destination", [])),
             "services":              resolve_list(r.get("service", [])),
+            # Negated cells ("Any except X"). Containment math is inverted for
+            # these, so analysis excludes them from shadow/duplicate comparison.
+            # Defaults to False when the (possibly degraded) payload omits them.
+            "negated":               bool(r.get("source-negate") or r.get("destination-negate")
+                                          or r.get("service-negate")),
+            "negate_fields":         [f for f, k in (("source", "source-negate"),
+                                                     ("destination", "destination-negate"),
+                                                     ("service", "service-negate")) if r.get(k)],
             "source_interfaces":     [],   # CP uses src/dst objects, not interface refs in rules
             "destination_interfaces": [],
             "applications":          resolve_list(r.get("content", [])),
@@ -909,6 +917,8 @@ def _write_to_db(parsed: dict, policy: FirewallPolicy, db: Session):
             hit_count=r.get("hit_count"),
             last_hit=r.get("last_hit"),
             first_hit=r.get("first_hit"),
+            raw_data={"negated": bool(r.get("negated")),
+                      "negate_fields": r.get("negate_fields", [])},
         )
         db.add(db_rule)
 

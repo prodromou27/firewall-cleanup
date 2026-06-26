@@ -36,7 +36,7 @@ const FINDING_TYPES: Record<string, string> = {
   redundant_rule: 'Redundant Rule',
   shadowed_rule: 'Shadowed Rule',
   same_action_shadowed_rule: 'Redundant Rule',        // legacy alias
-  conflicting_shadowed_rule: 'Shadowed Rule',         // legacy alias
+  conflicting_shadowed_rule: 'Shadowed Rule',         // legacy alias  // see LEGACY_FINDING_TYPE_ALIASES
   partial_shadowed_rule: 'Partially Shadowed Rule',
   inoperative_rule: 'Inoperative Rule',
   shadowing_not_evaluated: 'Shadowing Not Evaluated',
@@ -87,6 +87,10 @@ const FINDING_TYPES: Record<string, string> = {
   // Import / data quality
   import_quality: 'Import Quality',
 }
+
+// Old finding-type names kept in FINDING_TYPES only so historical findings still
+// render a label — hidden from the type filter so it shows no duplicate options.
+const LEGACY_FINDING_TYPE_ALIASES = new Set(['same_action_shadowed_rule', 'conflicting_shadowed_rule'])
 
 const FINDING_ICONS: Record<string, React.ReactNode> = {
   shadowed_rule: <Layers className="w-3.5 h-3.5" />,
@@ -152,6 +156,8 @@ const PRESETS = [
   { label: '⚡ Zero-Hit Rules', params: { finding_type: 'zero_hit_rule' } },
   { label: '🔓 Overly Permissive', params: { finding_type: 'overly_permissive' } },
   { label: '👥 Shadowed Rules', params: { finding_type: 'shadowed_rule' } },
+  { label: '♻️ Redundant Rules', params: { finding_type: 'redundant_rule' } },
+  { label: '⛔ Inoperative Rules', params: { finding_type: 'inoperative_rule' } },
   { label: '📋 Needs Review', params: { status: 'Review Required' } },
   { label: '✅ Cleanup Candidates', params: { status: 'Confirmed Cleanup Candidate' } },
   { label: '📝 No Documentation', params: { finding_type: 'no_documentation' } },
@@ -1362,7 +1368,9 @@ export function Findings() {
           className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-gray-50 focus:bg-white"
         >
           <option value="">All Types</option>
-          {Object.entries(FINDING_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          {Object.entries(FINDING_TYPES)
+            .filter(([k]) => !LEGACY_FINDING_TYPE_ALIASES.has(k))
+            .map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
 
         <select

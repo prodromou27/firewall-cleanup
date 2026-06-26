@@ -448,6 +448,9 @@ def _rule_to_dict(r: FirewallRule) -> dict:
         # True only when raw_data looks like a parsed FortiGate CLI policy, so the
         # profile-gap detector never fires on a rule whose profiles weren't captured.
         "_cli_parsed": bool(raw) and any(k in raw for k in ("_raw_lines", "srcintf", "dstintf")),
+        # Negated cell ("Any except X") — excluded from shadow/duplicate comparison.
+        "negated": bool(raw.get("negated")),
+        "negate_fields": raw.get("negate_fields") or [],
     }
 
 
@@ -2144,7 +2147,10 @@ def _analyze_negated_objects(rules: List[dict]) -> List[dict]:
         destinations = rule.get("destinations", []) or []
         neg_srcs = [s for s in sources if str(s).startswith("!") or str(s).startswith("NOT ")]
         neg_dsts = [d for d in destinations if str(d).startswith("!") or str(d).startswith("NOT ")]
-        if not neg_srcs and not neg_dsts:
+        # Vendor negate flag (e.g. Check Point source-negate/destination-negate),
+        # captured by the connector and surfaced on the rule dict.
+        flag_fields = rule.get("negate_fields") or []
+        if not neg_srcs and not neg_dsts and not rule.get("negated"):
             continue
         rule_id = rule.get("rule_id") or rule.get("rule_number", "?")
         rule_name = rule.get("rule_name") or f"Rule {rule_id}"
@@ -2164,6 +2170,7 @@ def _analyze_negated_objects(rules: List[dict]) -> List[dict]:
                 "rule_id": rule_id,
                 "negated_sources": neg_srcs,
                 "negated_destinations": neg_dsts,
+                "negated_fields": flag_fields,
             },
             "recommendation": _RL.get("negated_object"),
         })

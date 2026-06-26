@@ -307,7 +307,7 @@ def _load_report_data(
 @router.get("/customer/{customer_id}/summary")
 def generate_customer_summary_report(
     customer_id: str,
-    format: str = Query("json", regex="^(json|excel)$"),
+    format: str = Query("json", pattern="^(json|excel)$"),
     severities: Optional[str] = None,
     finding_types: Optional[str] = None,
     statuses: Optional[str] = None,
@@ -916,7 +916,7 @@ class ReportBuildConfig(_BaseModel):
 def build_report_v2(
     policy_id: str,
     config: ReportBuildConfig,
-    format: str = Query("html", regex="^(html|excel|csv|json)$"),
+    format: str = Query("html", pattern="^(html|excel|csv|json)$"),
     customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
     user: User = Depends(require_capability(CAP_GENERATE_REPORT)),

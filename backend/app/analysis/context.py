@@ -51,6 +51,32 @@ def unresolved_references(
     return unresolved
 
 
+def _member_refs(obj: dict) -> list:
+    members = obj.get("members") or []
+    if members:
+        return members
+    raw = obj.get("raw_data") or {}
+    if isinstance(raw, dict):
+        for key in ("members", "member", "groups"):
+            raw_members = raw.get(key)
+            if raw_members:
+                return raw_members if isinstance(raw_members, list) else [raw_members]
+    return []
+
+
+def unresolved_group_member_references(objects: List[dict], obj_map: dict) -> List[str]:
+    unresolved: set[str] = set()
+    for obj in objects or []:
+        obj_type = (obj.get("object_type") or "").lower().replace("-", "_")
+        if "group" not in obj_type:
+            continue
+        for member in _member_refs(obj):
+            name = _ref_name(member)
+            if name and obj_map.get(name) is None:
+                unresolved.add(name)
+    return sorted(unresolved)
+
+
 @dataclass(frozen=True)
 class DetectorDecision:
     detector: str
@@ -66,6 +92,7 @@ class AnalysisContext:
     policy: Any
     availability: Dict[str, bool]
     unresolved_address_refs: List[str]
+    unresolved_group_member_refs: List[str]
 
     @property
     def object_graph_complete(self) -> bool:
@@ -103,6 +130,7 @@ def build_context(
     device_interfaces: Optional[list] = None,
 ) -> AnalysisContext:
     unresolved_addr = unresolved_references(rules, obj_map, ("sources", "destinations"))
+    unresolved_members = unresolved_group_member_references(objects, obj_map)
     availability = prerequisites.assess(
         rules,
         objects,
@@ -114,7 +142,7 @@ def build_context(
     # Cleanup semantics require a complete graph. The more permissive import
     # quality score may still grade partial imports, but detectors that declare
     # objects as cleanup candidates must be strict.
-    if unresolved_addr:
+    if unresolved_addr or unresolved_members:
         availability = dict(availability)
         availability["group_graph"] = False
     return AnalysisContext(
@@ -124,6 +152,7 @@ def build_context(
         policy=policy,
         availability=availability,
         unresolved_address_refs=unresolved_addr,
+        unresolved_group_member_refs=unresolved_members,
     )
 
 

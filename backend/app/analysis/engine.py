@@ -15,7 +15,7 @@ from app.analysis.shadow_detector import detect_shadows
 from app.analysis.risk_scorer import score_rule, score_to_severity
 from app.analysis.service_utils import identify_risky_service, normalize_service
 from app.analysis.ip_utils import is_public_network, is_broad_network
-from app.analysis.context import build_context
+from app.analysis.context import build_context, unresolved_group_member_references
 from app.analysis import recommendation_library as _RL
 from app.config import settings
 from app.security.redaction import redact_secrets
@@ -739,11 +739,14 @@ def _object_hygiene_suppressed_note(ctx, reason: str) -> dict | None:
         )
     elif reason == "object_graph_incomplete":
         title = "Object cleanup analysis suppressed - incomplete object graph"
+        unresolved_total = (
+            len(ctx.unresolved_address_refs) + len(ctx.unresolved_group_member_refs)
+        )
         description = (
-            f"{len(ctx.unresolved_address_refs)} named address reference(s) in rules "
-            "could not be resolved to imported objects. Object cleanup and object "
-            "hygiene findings were suppressed because missing group membership can "
-            "make used objects look unused or empty."
+            f"{unresolved_total} object reference(s) could not be resolved in the "
+            "imported object graph. Object cleanup and object hygiene findings were "
+            "suppressed because missing group membership can make used objects look "
+            "unused or empty."
         )
     else:
         title = "Object cleanup analysis suppressed"
@@ -766,6 +769,8 @@ def _object_hygiene_suppressed_note(ctx, reason: str) -> dict | None:
             "object_count": len(ctx.objects),
             "unresolved_address_references": ctx.unresolved_address_refs[:50],
             "unresolved_address_reference_count": len(ctx.unresolved_address_refs),
+            "unresolved_group_member_references": ctx.unresolved_group_member_refs[:50],
+            "unresolved_group_member_reference_count": len(ctx.unresolved_group_member_refs),
             "suppressed_detectors": [
                 "unattached_object",
                 "empty_group",
@@ -1740,7 +1745,8 @@ def _analyze_unused_objects(
 
     unresolved = [n for n in referenced_addr
                   if obj_map.get(n) is None and not _is_literal(n)]
-    incomplete = bool(unresolved)
+    unresolved_members = unresolved_group_member_references(objects, obj_map)
+    incomplete = bool(unresolved or unresolved_members)
     if incomplete:
         findings.append({
             "finding_type": "object_usage_unknown",
@@ -1749,16 +1755,19 @@ def _analyze_unused_objects(
             "title": "Object usage analysis suppressed — incomplete object import",
             "description": (
                 f"{len(unresolved)} of {len(referenced_addr)} address references in the "
-                "rulebase could not be resolved to an object, indicating the object "
-                "database was only partially imported. Unattached-object cleanup was "
-                "suppressed to avoid false positives; re-import or re-sync the object "
-                "database to enable it."
+                f"rulebase and {len(unresolved_members)} group member references could "
+                "not be resolved to imported objects, indicating the object database "
+                "was only partially imported. Unattached-object cleanup was suppressed "
+                "to avoid false positives; re-import or re-sync the object database to "
+                "enable it."
             ),
             "affected_rules": [],
             "affected_objects": [],
             "evidence": {"referenced_addresses": len(referenced_addr),
                          "unresolved": len(unresolved),
                          "unresolved_sample": sorted(unresolved)[:25],
+                         "unresolved_group_members": len(unresolved_members),
+                         "unresolved_group_member_sample": sorted(unresolved_members)[:25],
                          "reason": "object reference graph incomplete"},
             "recommendation": "Read-only data-completeness note; no action implied.",
         })

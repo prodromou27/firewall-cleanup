@@ -24,6 +24,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.device import FirewallDevice
@@ -850,7 +851,7 @@ def _write_to_db(parsed: dict, policy: FirewallPolicy, db: Session):
 
     # Remove old data — delete ObjectMembers first to satisfy FK constraint,
     # then objects and rules (bulk DELETE bypasses ORM cascade).
-    obj_ids = db.query(FirewallObject.id).filter(FirewallObject.policy_id == policy.id).subquery()
+    obj_ids = select(FirewallObject.id).where(FirewallObject.policy_id == policy.id)
     db.query(ObjectMember).filter(ObjectMember.parent_id.in_(obj_ids)).delete(synchronize_session=False)
     db.query(FirewallObject).filter(FirewallObject.policy_id == policy.id).delete(synchronize_session=False)
     db.query(FirewallRule).filter(FirewallRule.policy_id == policy.id).delete(synchronize_session=False)

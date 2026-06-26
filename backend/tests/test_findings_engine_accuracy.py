@@ -522,6 +522,21 @@ def test_single_unresolved_object_reference_suppresses_cleanup_detector():
     assert "unattached_object" not in {f["finding_type"] for f in findings}
 
 
+def test_unresolved_group_member_reference_suppresses_cleanup_detector():
+    objects = [
+        _object("UsedGroup", "address_group", "", ["KnownHost", "MissingMember"]),
+        _object("KnownHost", "host", "10.0.0.10/32"),
+        _object("Orphan", "host", "10.0.0.99/32"),
+    ]
+    rules = [_rule(1, sources=["UsedGroup"], destinations=["any"], services=["https"])]
+
+    findings = _analyze_unused_objects(rules, objects, build_object_map(objects))
+
+    assert {f["finding_type"] for f in findings} == {"object_usage_unknown"}
+    assert findings[0]["evidence"]["unresolved_group_members"] == 1
+    assert "unattached_object" not in {f["finding_type"] for f in findings}
+
+
 def test_service_object_used_through_service_group_is_not_reported_as_service_range():
     objects = [
         _object("SvcGroup", "service-group", "", ["WideSvc"]),

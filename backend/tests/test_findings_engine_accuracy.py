@@ -291,7 +291,8 @@ def test_empty_groups_include_customer_groups_and_suppress_vendor_builtins():
 
     assert len(findings) == 1
     assert findings[0]["finding_type"] == "empty_group"
-    assert findings[0]["evidence"]["object_name"] == "CustomerEmpty"
+    assert findings[0]["evidence"]["sample"] == ["CustomerEmpty"]
+    assert findings[0]["evidence"]["count"] == 1
     _assert_quality(findings)
 
 
@@ -323,7 +324,7 @@ def test_checkpoint_raw_group_members_prevent_empty_group_false_positive():
 
     findings = _analyze_empty_groups(objects)
 
-    names = {f["evidence"]["object_name"] for f in findings}
+    names = set(findings[0]["evidence"]["sample"])
     assert names == {"TrulyEmpty"}
 
 
@@ -498,6 +499,22 @@ def test_unresolved_rule_object_suppresses_unused_object_detector():
         _object("Orphan", "host", "10.0.0.99/32"),
     ]
     rules = [_rule(1, sources=["MissingGroup"], destinations=["any"], services=["https"])]
+
+    findings = _analyze_unused_objects(rules, objects, build_object_map(objects))
+
+    assert {f["finding_type"] for f in findings} == {"object_usage_unknown"}
+    assert "unattached_object" not in {f["finding_type"] for f in findings}
+
+
+def test_single_unresolved_object_reference_suppresses_cleanup_detector():
+    objects = [
+        _object("UsedHost", "host", "10.0.0.10/32"),
+        _object("Orphan", "host", "10.0.0.99/32"),
+    ]
+    rules = [
+        _rule(1, sources=["UsedHost"], destinations=["any"], services=["https"]),
+        _rule(2, sources=["MissingGroup"], destinations=["any"], services=["https"]),
+    ]
 
     findings = _analyze_unused_objects(rules, objects, build_object_map(objects))
 

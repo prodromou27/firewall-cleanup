@@ -15,6 +15,7 @@ from app.analysis.shadow_detector import detect_shadows
 from app.analysis.risk_scorer import score_rule, score_to_severity
 from app.analysis.service_utils import identify_risky_service, normalize_service
 from app.analysis.ip_utils import is_public_network, is_broad_network
+from app.analysis.context import build_context
 from app.analysis import recommendation_library as _RL
 from app.config import settings
 from app.security.redaction import redact_secrets
@@ -72,6 +73,7 @@ def run_analysis(policy_id: str, db: Session) -> str:
         objects = [_obj_to_dict(o) for o in objects_orm]
 
         obj_map = build_object_map(objects)
+        analysis_ctx = build_context(rules, objects, obj_map, policy)
 
         # Score all rules and save
         for rule_orm, rule in zip(rules_orm, rules):
@@ -117,8 +119,7 @@ def run_analysis(policy_id: str, db: Session) -> str:
             # Detector prerequisite matrix: assess data availability once and
             # surface which detectors were suppressed/downgraded (transparency).
             from app.analysis import prerequisites
-            _avail = prerequisites.assess(rules, objects, obj_map, policy.nat_rules, policy.vendor)
-            _prereq = prerequisites.summary_finding(_avail, policy.vendor)
+            _prereq = prerequisites.summary_finding(analysis_ctx.availability, policy.vendor)
             if _prereq:
                 findings.append(_prereq)
 
@@ -185,13 +186,19 @@ def run_analysis(policy_id: str, db: Session) -> str:
         findings.extend(_analyze_temp_rules(rules, obj_map))
 
         # 9. Unused / unattached objects (reference graph includes NAT references)
-        findings.extend(_analyze_unused_objects(rules, objects, obj_map, policy.nat_rules))
+        object_hygiene = analysis_ctx.decide("unused_objects")
+        if object_hygiene.run:
+            findings.extend(_analyze_unused_objects(rules, objects, obj_map, policy.nat_rules))
 
-        # 10. Duplicate objects
-        findings.extend(_analyze_duplicate_objects(objects))
+            # 10. Duplicate objects
+            findings.extend(_analyze_duplicate_objects(objects))
 
-        # 10b. Overlapping network objects (one network contains another)
-        findings.extend(_analyze_overlapping_objects(objects))
+            # 10b. Overlapping network objects (one network contains another)
+            findings.extend(_analyze_overlapping_objects(objects))
+        else:
+            note = _object_hygiene_suppressed_note(analysis_ctx, object_hygiene.reason)
+            if note:
+                findings.append(note)
 
         # 11. Rules without documentation (no comments, no owner reference)
         findings.extend(_analyze_no_documentation(rules))
@@ -229,17 +236,13 @@ def run_analysis(policy_id: str, db: Session) -> str:
         # 16. Negated objects
         findings.extend(_analyze_negated_objects(rules))
 
-        # 17. Empty groups
-        findings.extend(_analyze_empty_groups(objects))
-
-        # 18. Large groups
-        findings.extend(_analyze_large_groups(objects))
-
-        # 19. Broad network objects
-        findings.extend(_analyze_broad_networks(objects))
-
-        # 20. Service objects with large port ranges
-        findings.extend(_analyze_service_ranges(objects, rules, obj_map))
+        # 17-20. Object/service hygiene. These run only with a complete object
+        # graph because otherwise they become high-volume false positives.
+        if object_hygiene.run:
+            findings.extend(_analyze_empty_groups(objects))
+            findings.extend(_analyze_large_groups(objects))
+            findings.extend(_analyze_broad_networks(objects))
+            findings.extend(_analyze_service_ranges(objects, rules, obj_map))
 
         # 21. Import quality summary (parse completeness, hit-data availability)
         findings.extend(_analyze_import_quality(rules, objects, policy))
@@ -521,6 +524,62 @@ def _rule_ids(finding: dict) -> set:
     return {r for r in finding.get("affected_rules") or [] if r}
 
 
+def _aggregate_hygiene_findings(findings: List[dict]) -> List[dict]:
+    aggregate_types = {"service_range"}
+    grouped: Dict[str, List[dict]] = {}
+    out: List[dict] = []
+    for finding in findings:
+        ftype = finding.get("finding_type")
+        if ftype in aggregate_types:
+            grouped.setdefault(ftype, []).append(finding)
+        else:
+            out.append(finding)
+
+    for ftype, items in grouped.items():
+        if len(items) == 1:
+            out.append(items[0])
+            continue
+        affected_objects = []
+        sample = []
+        max_severity = "Informational"
+        for item in items:
+            affected_objects.extend(item.get("affected_objects") or [])
+            ev = item.get("evidence") or {}
+            name = ev.get("object_name") or ev.get("name")
+            if name:
+                sample.append({
+                    "name": name,
+                    "protocol": ev.get("protocol"),
+                    "port_start": ev.get("port_start"),
+                    "port_end": ev.get("port_end"),
+                    "port_span": ev.get("port_span"),
+                })
+            if _SEVERITY_RANK.get(item.get("severity", "Informational"), 0) > _SEVERITY_RANK.get(max_severity, 0):
+                max_severity = item.get("severity", "Informational")
+
+        out.append({
+            "finding_type": ftype,
+            "severity": max_severity,
+            "confidence": "High",
+            "title": f"{len(items)} used service objects with large port ranges",
+            "description": (
+                f"{len(items)} used customer-managed service object(s) span large "
+                "continuous port ranges. Large service ranges may inadvertently "
+                "permit traffic on unintended ports."
+            ),
+            "affected_rules": [],
+            "affected_objects": sorted({obj for obj in affected_objects if obj}),
+            "evidence": {
+                "count": len(items),
+                "sample": [s["name"] for s in sample[:50]],
+                "sample_detail": sample[:50],
+                "aggregated_from": len(items),
+            },
+            "recommendation": _RL.get(ftype),
+        })
+    return out
+
+
 def _consolidate_findings(findings: List[dict]) -> List[dict]:
     """Reduce duplicate/overlapping findings before customer-facing persistence.
 
@@ -605,7 +664,7 @@ def _consolidate_findings(findings: List[dict]) -> List[dict]:
                     evidence.setdefault("consolidated_related_findings", []).append(suppressed)
                     break
 
-    return consolidated
+    return _aggregate_hygiene_findings(consolidated)
 
 
 
@@ -665,6 +724,64 @@ def _import_quality_notes(rules: List[dict], objects: List[dict], policy) -> Lis
              "treated the policy as a single evaluation context. Where the firewall uses "
              "interfaces/zones/layers, results may be broader than the device's real scope.")
     return notes
+
+
+def _object_hygiene_suppressed_note(ctx, reason: str) -> dict | None:
+    if reason == "no_rules_imported":
+        return None
+    if reason == "no_objects_imported":
+        title = "Object cleanup analysis suppressed - no objects imported"
+        description = (
+            "No firewall objects were imported for this policy, so object cleanup, "
+            "empty-group, broad-object, duplicate-object, and service-range findings "
+            "were suppressed. Re-import or re-sync the object database before using "
+            "cleanup results."
+        )
+    elif reason == "object_graph_incomplete":
+        title = "Object cleanup analysis suppressed - incomplete object graph"
+        description = (
+            f"{len(ctx.unresolved_address_refs)} named address reference(s) in rules "
+            "could not be resolved to imported objects. Object cleanup and object "
+            "hygiene findings were suppressed because missing group membership can "
+            "make used objects look unused or empty."
+        )
+    else:
+        title = "Object cleanup analysis suppressed"
+        description = (
+            "Object cleanup and object hygiene findings were suppressed because the "
+            "imported data did not satisfy the detector prerequisites."
+        )
+
+    return {
+        "finding_type": "object_usage_unknown",
+        "severity": "Informational",
+        "confidence": "High",
+        "title": title,
+        "description": description,
+        "affected_rules": [],
+        "affected_objects": [],
+        "evidence": {
+            "reason": reason,
+            "rule_count": len(ctx.rules),
+            "object_count": len(ctx.objects),
+            "unresolved_address_references": ctx.unresolved_address_refs[:50],
+            "unresolved_address_reference_count": len(ctx.unresolved_address_refs),
+            "suppressed_detectors": [
+                "unattached_object",
+                "empty_group",
+                "large_group",
+                "broad_network",
+                "duplicate_object",
+                "overlapping_object",
+                "service_range",
+            ],
+        },
+        "recommendation": (
+            "Read-only data-completeness note. Re-import or re-sync the full object "
+            "database, including nested group members, before acting on cleanup "
+            "findings."
+        ),
+    }
 
 
 def _analyze_disabled(rules: List[dict], obj_map: dict) -> List[dict]:
@@ -1623,7 +1740,7 @@ def _analyze_unused_objects(
 
     unresolved = [n for n in referenced_addr
                   if obj_map.get(n) is None and not _is_literal(n)]
-    incomplete = bool(referenced_addr) and (len(unresolved) / len(referenced_addr) > 0.5)
+    incomplete = bool(unresolved)
     if incomplete:
         findings.append({
             "finding_type": "object_usage_unknown",
@@ -2338,7 +2455,7 @@ def _analyze_empty_groups(objects: List[dict]) -> List[dict]:
     CheckPoint predefined service groups are intentionally empty and are
     suppressed to avoid false-positive noise.
     """
-    findings = []
+    empty = []
     for obj in objects:
         if not _is_group_object(obj):
             continue
@@ -2347,26 +2464,31 @@ def _analyze_empty_groups(objects: List[dict]) -> List[dict]:
             # Suppress known vendor predefined empty groups.
             if _is_vendor_builtin_object(obj):
                 continue
-            findings.append({
-                "finding_type": "empty_group",
-                "severity": "Low",
-                "confidence": "High",
-                "title": f"Group '{obj['object_name']}' is empty",
-                "description": (
-                    f"The group object '{obj['object_name']}' has no members. "
-                    "Empty groups referenced in rules may behave unexpectedly and "
-                    "add unnecessary clutter to the object database."
-                ),
-                "affected_rules": [],
-                "affected_objects": [obj.get("id")],
-                "evidence": {
-                    "object_name": obj["object_name"],
-                    "object_type": obj["object_type"],
-                    "member_count": 0,
-                },
-                "recommendation": _RL.get("empty_group"),
-            })
-    return findings
+            empty.append(obj)
+    if not empty:
+        return []
+    sample = [{"name": o.get("object_name", ""), "type": o.get("object_type", "")} for o in empty[:50]]
+    return [{
+        "finding_type": "empty_group",
+        "severity": "Low",
+        "confidence": "High",
+        "title": f"{len(empty)} empty customer group{'s' if len(empty) != 1 else ''}",
+        "description": (
+            f"{len(empty)} customer-managed group object(s) have no members. Empty "
+            "groups referenced in rules may behave unexpectedly and add unnecessary "
+            "clutter to the object database."
+        ),
+        "affected_rules": [],
+        "affected_objects": [o.get("id") for o in empty if o.get("id")],
+        "evidence": {
+            "count": len(empty),
+            "sample": [s["name"] for s in sample],
+            "sample_detail": sample,
+            "member_count": 0,
+            "vendor_builtins_suppressed": True,
+        },
+        "recommendation": _RL.get("empty_group"),
+    }]
 
 
 _LARGE_GROUP_THRESHOLD = 20
@@ -2374,7 +2496,7 @@ _LARGE_GROUP_THRESHOLD = 20
 
 def _analyze_large_groups(objects: List[dict]) -> List[dict]:
     """Detect group objects with an excessive number of members."""
-    findings = []
+    large = []
     for obj in objects:
         if not _is_group_object(obj):
             continue
@@ -2382,26 +2504,33 @@ def _analyze_large_groups(objects: List[dict]) -> List[dict]:
             continue
         members = obj.get("members") or []
         if len(members) >= _LARGE_GROUP_THRESHOLD:
-            findings.append({
-                "finding_type": "large_group",
-                "severity": "Informational",
-                "confidence": "High",
-                "title": f"Group '{obj['object_name']}' has {len(members)} members",
-                "description": (
-                    f"The group object '{obj['object_name']}' contains {len(members)} members. "
-                    "Very large groups are difficult to audit and may include obsolete members."
-                ),
-                "affected_rules": [],
-                "affected_objects": [obj.get("id")],
-                "evidence": {
-                    "object_name": obj["object_name"],
-                    "object_type": obj["object_type"],
-                    "member_count": len(members),
-                    "members": members[:10],
-                },
-                "recommendation": _RL.get("large_group"),
-            })
-    return findings
+            large.append((obj, members))
+    if not large:
+        return []
+    sample = [
+        {"name": obj.get("object_name", ""), "member_count": len(members), "members": members[:10]}
+        for obj, members in large[:50]
+    ]
+    return [{
+        "finding_type": "large_group",
+        "severity": "Informational",
+        "confidence": "High",
+        "title": f"{len(large)} large customer group{'s' if len(large) != 1 else ''}",
+        "description": (
+            f"{len(large)} customer-managed group object(s) contain at least "
+            f"{_LARGE_GROUP_THRESHOLD} members. Very large groups are difficult "
+            "to audit and may include obsolete members."
+        ),
+        "affected_rules": [],
+        "affected_objects": [obj.get("id") for obj, _ in large if obj.get("id")],
+        "evidence": {
+            "count": len(large),
+            "threshold": _LARGE_GROUP_THRESHOLD,
+            "sample": [s["name"] for s in sample],
+            "sample_detail": sample,
+        },
+        "recommendation": _RL.get("large_group"),
+    }]
 
 
 import ipaddress
@@ -2409,7 +2538,7 @@ import ipaddress
 
 def _analyze_broad_networks(objects: List[dict]) -> List[dict]:
     """Detect network objects with very large address spaces (/8, /12, /16)."""
-    findings = []
+    broad = []
     _BROAD_PREFIXES = {8, 12, 16}
     for obj in objects:
         if _object_type(obj) not in ("network", "host"):
@@ -2422,29 +2551,40 @@ def _analyze_broad_networks(objects: List[dict]) -> List[dict]:
         try:
             net = ipaddress.ip_network(value, strict=False)
             if net.prefixlen in _BROAD_PREFIXES or net.prefixlen < 16:
-                findings.append({
-                    "finding_type": "broad_network",
-                    "severity": "Medium",
-                    "confidence": "High",
-                    "title": f"Network object '{obj['object_name']}' is very broad ({value})",
-                    "description": (
-                        f"The object '{obj['object_name']}' covers {net.num_addresses:,} "
-                        f"addresses ({value}). Overly broad network objects can inadvertently "
-                        "grant access to unintended hosts."
-                    ),
-                    "affected_rules": [],
-                    "affected_objects": [obj.get("id")],
-                    "evidence": {
-                        "object_name": obj["object_name"],
-                        "value": value,
-                        "prefix_length": net.prefixlen,
-                        "num_addresses": net.num_addresses,
-                    },
-                    "recommendation": _RL.get("broad_network"),
-                })
+                broad.append((obj, value, net))
         except ValueError:
             pass
-    return findings
+    if not broad:
+        return []
+    sample = [
+        {
+            "name": obj.get("object_name", ""),
+            "value": value,
+            "prefix_length": net.prefixlen,
+            "num_addresses": net.num_addresses,
+        }
+        for obj, value, net in broad[:50]
+    ]
+    return [{
+        "finding_type": "broad_network",
+        "severity": "Medium",
+        "confidence": "High",
+        "title": f"{len(broad)} broad network object{'s' if len(broad) != 1 else ''}",
+        "description": (
+            f"{len(broad)} customer-managed network object(s) cover very large "
+            "address spaces. Broad objects can inadvertently grant access to "
+            "unintended hosts when used in rules."
+        ),
+        "affected_rules": [],
+        "affected_objects": [obj.get("id") for obj, _, _ in broad if obj.get("id")],
+        "evidence": {
+            "count": len(broad),
+            "prefix_policy": "prefix length <= 16 or common broad private ranges",
+            "sample": [s["name"] for s in sample],
+            "sample_detail": sample,
+        },
+        "recommendation": _RL.get("broad_network"),
+    }]
 
 
 _LARGE_PORT_RANGE = 100

@@ -243,6 +243,22 @@ async def upload_logo(file: UploadFile = File(...),
     return {"logo_ref": ref, "data_uri": logos.data_uri(ref)}
 
 
+@templates_router.get("/logo")
+def get_logo(ref: str, user: User = Depends(require_capability(CAP_VIEW))):
+    """Resolve a stored branding-logo ref to a data URI (for editor previews).
+
+    Only refs under branding/ are served — the upload dir also holds imported
+    firewall configs, which must never be readable through this endpoint.
+    """
+    from app.reporting import logos
+    if not ref.startswith("branding/") or ".." in ref:
+        raise HTTPException(status_code=400, detail="Invalid logo reference.")
+    uri = logos.data_uri(ref)
+    if not uri:
+        raise HTTPException(status_code=404, detail="Logo not found.")
+    return {"logo_ref": ref, "data_uri": uri}
+
+
 @templates_router.get("")
 def list_templates(db: Session = Depends(get_db), user: User = Depends(require_capability(CAP_VIEW))):
     rows = _accessible_template_q(db, user).order_by(ReportTemplate.created_at.desc()).all()

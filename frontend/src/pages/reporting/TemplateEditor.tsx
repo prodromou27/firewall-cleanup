@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, ArrowUp, ArrowDown, Save, Loader2 } from 'lucide-react'
 import {
   getReportTemplate, createReportTemplate, updateReportTemplate, getReportSections,
-  getReportFindingCategories, getReportPlaceholders, uploadReportLogo,
+  getReportFindingCategories, getReportPlaceholders, uploadReportLogo, getReportLogo,
   type ReportTemplate, type TemplateSection, type ReportSectionDef,
 } from '../../api/client'
 
@@ -93,6 +93,23 @@ export function TemplateEditor() {
   const setBrand = (k: string, v: string) => set({ branding_config: { ...bc, [k]: v } })
   const setCover = (k: string, v: string) => set({ cover_page_config: { ...cc, [k]: v } })
   const [logoPreview, setLogoPreview] = useState<Record<string, string>>({})
+  // Resolve already-saved logo refs to previews when editing an existing template.
+  useEffect(() => {
+    if (!loaded) return
+    const brand = (t.branding_config || {}) as Record<string, string>
+    for (const slot of ['company_logo', 'customer_logo'] as const) {
+      const ref = brand[slot]
+      if (!ref) continue
+      if (ref.startsWith('data:')) {
+        setLogoPreview(p => (p[slot] ? p : { ...p, [slot]: ref }))
+      } else {
+        getReportLogo(ref)
+          .then(r => setLogoPreview(p => (p[slot] ? p : { ...p, [slot]: r.data_uri })))
+          .catch(() => {})
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded])
   const uploadLogo = async (slot: 'company_logo' | 'customer_logo', file?: File) => {
     if (!file) return
     try {
@@ -199,8 +216,8 @@ export function TemplateEditor() {
             <div key={slot} className="text-sm">
               <span className="capitalize">{slot.replace('_', ' ')}</span>
               <div className="flex items-center gap-3 mt-1">
-                {(logoPreview[slot] || bc[slot]) && (
-                  <img src={logoPreview[slot] || ''} alt="" className="h-10 max-w-[120px] object-contain border border-gray-100 rounded" />
+                {logoPreview[slot] && (
+                  <img src={logoPreview[slot]} alt="" className="h-10 max-w-[120px] object-contain border border-gray-100 rounded" />
                 )}
                 {!logoPreview[slot] && bc[slot] && <span className="text-[11px] text-gray-400">logo set</span>}
                 <input type="file" accept="image/*" className="text-xs"

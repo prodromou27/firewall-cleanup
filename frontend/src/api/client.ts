@@ -509,6 +509,10 @@ export const uploadReportLogo = (file: File) => {
   return api.post('/report-templates/logo', fd).then(r => r.data as { logo_ref: string; data_uri: string })
 }
 
+export const getReportLogo = (ref: string) =>
+  api.get('/report-templates/logo', { params: { ref } })
+    .then(r => r.data as { logo_ref: string; data_uri: string })
+
 export interface GenerateBody {
   policy_id: string; template_id?: string; export_format: string; report_type?: string
   analysis_run_id?: string

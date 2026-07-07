@@ -197,6 +197,35 @@ def test_logo_path_traversal_blocked(tmp_path, monkeypatch):
     assert logos.abs_path("../../etc/passwd") is None
 
 
+def test_get_logo_endpoint_serves_branding_refs_only(tmp_path, monkeypatch):
+    """GET /report-templates/logo must only resolve branding/ refs — the upload
+    dir also stores imported firewall configs, which must never leak."""
+    from fastapi import HTTPException
+    from app.config import settings
+    from app.reporting import logos
+    from app.api.reporting_v2 import get_logo
+    monkeypatch.setattr(settings, "upload_dir", str(tmp_path))
+
+    png = bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+        "890000000a49444154789c6360000002000154a24f9c0000000049454e44ae426082")
+    ref = logos.save_logo(png, "logo.png")
+    ok = get_logo(ref, user=None)
+    assert ok["data_uri"].startswith("data:image/png;base64,")
+
+    # Non-branding refs and traversal are rejected outright.
+    (tmp_path / "customer_config.png").write_bytes(png)
+    for bad in ("customer_config.png", "../secrets.png", "branding/../customer_config.png"):
+        with pytest.raises(HTTPException) as exc:
+            get_logo(bad, user=None)
+        assert exc.value.status_code == 400
+
+    # Missing branding file → 404, not a server error.
+    with pytest.raises(HTTPException) as exc:
+        get_logo("branding/does-not-exist.png", user=None)
+    assert exc.value.status_code == 404
+
+
 def test_html_embeds_logo_data_uri():
     data = _sample()
     data.branding["company_logo"] = "data:image/png;base64,AAAA"

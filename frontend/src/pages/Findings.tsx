@@ -102,8 +102,11 @@ const PRESETS = [
   { label: '🔴 High Severity', params: { severity: 'High' } },
   { label: '⚡ Zero-Hit Rules', params: { finding_type: 'zero_hit_rule' } },
   { label: '🔓 Overly Permissive', params: { finding_type: 'overly_permissive' } },
-  { label: '👥 Shadowed Rules', params: { finding_type: 'shadowed_rule' } },
-  { label: '♻️ Redundant Rules', params: { finding_type: 'redundant_rule' } },
+  // All shadow variants: the detector emits redundant_rule for same-action full
+  // shadows and shadowed_rule only for conflicting actions, so filtering on
+  // shadowed_rule alone shows almost nothing. Legacy names cover old runs.
+  { label: '👥 Shadowed Rules', params: { finding_type: 'shadowed_rule,redundant_rule,partial_shadowed_rule,same_action_shadowed_rule,conflicting_shadowed_rule' } },
+  { label: '♻️ Redundant Rules', params: { finding_type: 'redundant_rule,same_action_shadowed_rule' } },
   { label: '⛔ Inoperative Rules', params: { finding_type: 'inoperative_rule' } },
   { label: '📋 Needs Review', params: { status: 'Review Required' } },
   { label: '✅ Cleanup Candidates', params: { status: 'Confirmed Cleanup Candidate' } },
@@ -1315,6 +1318,11 @@ export function Findings() {
           className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-gray-50 focus:bg-white"
         >
           <option value="">All Types</option>
+          {/* Grouped preset values (comma-separated) need their own option or
+              the select would misleadingly display "All Types". */}
+          {findingType.includes(',') && (
+            <option value={findingType}>Grouped types (preset)</option>
+          )}
           {Object.entries(FINDING_TYPES)
             .filter(([k]) => !LEGACY_FINDING_TYPE_ALIASES.has(k))
             .map(([k, v]) => <option key={k} value={k}>{v}</option>)}

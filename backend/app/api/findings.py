@@ -135,7 +135,13 @@ def list_findings(
     if confidence:
         q = q.filter(Finding.confidence == confidence)
     if finding_type:
-        q = q.filter(Finding.finding_type == finding_type)
+        # Comma-separated list supported so related types can be viewed as one
+        # group (e.g. all shadow variants: shadowed_rule,redundant_rule,…).
+        types = [t.strip() for t in finding_type.split(",") if t.strip()]
+        if len(types) == 1:
+            q = q.filter(Finding.finding_type == types[0])
+        elif types:
+            q = q.filter(Finding.finding_type.in_(types))
     if status:
         q = q.filter(Finding.status == status)
     if priority:

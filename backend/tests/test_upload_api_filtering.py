@@ -198,3 +198,33 @@ def test_findings_api_filters_severity_status_search_and_paginates(db, user_and_
     assert result["total"] == 1
     assert result["severity_counts"] == {"High": 1}
     assert result["findings"][0]["id"] == "f2"
+
+
+def test_findings_api_finding_type_accepts_comma_list(db, user_and_customer):
+    """The 'Shadowed Rules' preset queries all shadow variants at once —
+    shadowed_rule alone misses same-action shadows stored as redundant_rule."""
+    user, customer = user_and_customer
+    policy = _add_policy(db, customer.id, 1)
+    db.flush()
+    db.add_all([
+        Finding(id="s1", policy_id=policy.id, vendor="FortiGate", finding_type="shadowed_rule", severity="High", confidence="High", status="Review Required", title="conflict shadow", description="d"),
+        Finding(id="s2", policy_id=policy.id, vendor="FortiGate", finding_type="redundant_rule", severity="Medium", confidence="High", status="Review Required", title="redundant", description="d"),
+        Finding(id="s3", policy_id=policy.id, vendor="FortiGate", finding_type="partial_shadowed_rule", severity="Low", confidence="Medium", status="Review Required", title="partial", description="d"),
+        Finding(id="x1", policy_id=policy.id, vendor="FortiGate", finding_type="no_logging", severity="Low", confidence="High", status="Review Required", title="no log", description="d"),
+    ])
+    db.commit()
+
+    grouped = findings.list_findings(
+        customer_id=customer.id,
+        finding_type="shadowed_rule,redundant_rule,partial_shadowed_rule",
+        page=1, page_size=50, db=db, user=user,
+    )
+    assert grouped["total"] == 3
+    assert {f["id"] for f in grouped["findings"]} == {"s1", "s2", "s3"}
+
+    # Single value still behaves as exact match.
+    single = findings.list_findings(
+        customer_id=customer.id, finding_type="redundant_rule",
+        page=1, page_size=50, db=db, user=user,
+    )
+    assert {f["id"] for f in single["findings"]} == {"s2"}

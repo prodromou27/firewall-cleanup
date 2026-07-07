@@ -44,7 +44,15 @@ AFTER="$(git rev-parse --short HEAD)"
 [ "$BEFORE" != "$AFTER" ] && git --no-pager log --oneline "${BEFORE}..${AFTER}" | sed 's/^/    /'
 
 log "Rebuilding and restarting the stack…"
-$DC "${COMPOSE[@]}" up -d --build
+# --remove-orphans clears containers from services that no longer exist. If up
+# still fails (e.g. a stale container from a failed/older run holds a compose
+# name — "Conflict. The container name … is already in use"), tear the stack
+# down and bring it up fresh rather than leaving the host half-updated.
+if ! $DC "${COMPOSE[@]}" up -d --build --remove-orphans; then
+  warn "compose up failed — removing the old stack and retrying once…"
+  $DC "${COMPOSE[@]}" down --remove-orphans || true
+  $DC "${COMPOSE[@]}" up -d
+fi
 
 log "Waiting for health…"
 ok=0

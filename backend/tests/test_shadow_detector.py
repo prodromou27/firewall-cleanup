@@ -65,6 +65,46 @@ def test_partial_shadow_different_dest(obj_map):
     assert "partially shadowed" in findings[0]["title"]
 
 
+def test_full_shadow_with_hits_reported_low_confidence(obj_map):
+    """A 'fully shadowed' rule with recorded hits is contradicted by the
+    device's own counters — keep the finding but at Low confidence."""
+    rules = [
+        make_rule(1, ["Net-16"], ["Server"], ["any-svc"]),
+        make_rule(2, ["Host-5"], ["Server"], ["HTTPS-SVC"]),
+    ]
+    rules[1]["hit_count"] = 245
+    findings = detect_shadows(rules, obj_map)
+    assert len(findings) == 1
+    assert findings[0]["finding_type"] == "redundant_rule"
+    assert findings[0]["confidence"] == "Low"
+    assert findings[0]["evidence"]["hit_count_contradicts_shadow"] is True
+    assert "245" in findings[0]["description"]
+
+
+def test_full_shadow_zero_hits_stays_high_confidence(obj_map):
+    rules = [
+        make_rule(1, ["Net-16"], ["Server"], ["any-svc"]),
+        make_rule(2, ["Host-5"], ["Server"], ["HTTPS-SVC"]),
+    ]
+    rules[1]["hit_count"] = 0
+    findings = detect_shadows(rules, obj_map)
+    assert len(findings) == 1
+    assert findings[0]["confidence"] == "High"
+
+
+def test_conflicting_shadow_with_hits_reported_low_confidence(obj_map):
+    """'Can never take effect' is disproved by a nonzero hit counter."""
+    rules = [
+        make_rule(1, ["Net-16"], ["Server"], ["any-svc"]),
+        make_rule(2, ["Host-5"], ["Server"], ["HTTPS-SVC"], action="deny"),
+    ]
+    rules[1]["hit_count"] = 10
+    findings = detect_shadows(rules, obj_map)
+    assert len(findings) == 1
+    assert findings[0]["finding_type"] == "shadowed_rule"
+    assert findings[0]["confidence"] == "Low"
+
+
 def test_disabled_rule_not_shadowed(obj_map):
     """Disabled rules are skipped."""
     rules = [

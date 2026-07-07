@@ -125,11 +125,13 @@ class Settings(BaseSettings):
     severity_medium_threshold: int = 50
     severity_low_threshold: int = 25
 
-    # Temporary rule keywords
+    # Temporary rule keywords. Matched as whole tokens (see _analyze_temp_rules).
+    # Deliberately excludes words that describe aged-but-permanent rules
+    # ("old", "legacy", "backup", "change") — those flagged rules like
+    # BACKUP-RESTORE or LEGACY-TELNET as "temporary" when they are not.
     temp_keywords: List[str] = [
         "temp", "temporary", "test", "testing", "migration",
-        "change", "old", "legacy", "backup", "delete", "remove",
-        "debug", "tmp", "bak"
+        "delete", "remove", "debug", "tmp", "bak"
     ]
 
     # Risky services

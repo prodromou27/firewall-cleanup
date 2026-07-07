@@ -571,6 +571,34 @@ def test_debug_keyword_flags_temp_rule_and_cleanup_removed():
     assert "cleanup" not in settings.temp_keywords
 
 
+def test_temp_rule_keywords_do_not_flag_permanent_rules():
+    """'old', 'legacy', 'backup' and 'change' describe aged/permanent rules,
+    and substring matches ('latest' → 'test', 'exchange' → 'change') were
+    false positives. Only genuine temp markers should fire, as whole tokens."""
+    from app.analysis.engine import _analyze_temp_rules
+
+    def r(n, name, comments=None):
+        return {"id": f"r{n}", "rule_id": str(n), "rule_name": name, "comments": comments}
+
+    not_temp = [
+        r(1, "BACKUP-RESTORE"),
+        r(2, "LEGACY-TELNET"),
+        r(3, "OLD-DMZ-ACCESS"),
+        r(4, "EXCHANGE-SMTP"),          # 'change' substring
+        r(5, "LATEST-PROXY"),           # 'test' substring
+        r(6, "INTERNET-ANY", "Legacy catch-all"),
+    ]
+    assert _analyze_temp_rules(not_temp, {}) == []
+
+    temp = [
+        r(7, "TEMP-ALLOW-HTTP"),
+        r(8, "test_rule_vpn"),
+        r(9, "APP-ACCESS", "to delete after migration"),
+    ]
+    flagged = {f["affected_rules"][0] for f in _analyze_temp_rules(temp, {})}
+    assert flagged == {"r7", "r8", "r9"}
+
+
 def test_import_quality_notes_flag_missing_data():
     from app.analysis.engine import _import_quality_notes
 

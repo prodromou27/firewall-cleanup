@@ -219,6 +219,7 @@ def run_analysis(policy_id: str, db: Session) -> str:
         # 14c. Interface / public-IP review (gated on interface data from device sync).
         from app.analysis import interfaces as _iface
         _dev_ifaces = []
+        _dev = None
         if policy.device_id:
             from app.models.device import FirewallDevice
             _dev = db.query(FirewallDevice).filter(FirewallDevice.id == policy.device_id).first()
@@ -229,6 +230,33 @@ def run_analysis(policy_id: str, db: Session) -> str:
                 except (ValueError, TypeError):
                     _dev_ifaces = []
         findings.extend(_iface.analyze(_dev_ifaces, policy.nat_rules, obj_map, policy.firewall_name or "")["findings"])
+
+        # 14d. Version intelligence findings (device-level advisory, read-only).
+        # Runs whenever a linked device is present; produces Informational findings
+        # when catalog data is absent, Medium/High when version is outdated or EOL.
+        if _dev:
+            try:
+                from app.models.version_catalog import VersionCatalogEntry
+                from app.analysis import version_intel
+                _catalog_orm = db.query(VersionCatalogEntry).filter(
+                    VersionCatalogEntry.vendor == policy.vendor
+                ).all()
+                _catalog_dicts = [
+                    {
+                        "vendor": e.vendor,
+                        "product": e.product,
+                        "release_train": e.release_train,
+                        "recommended_version": e.recommended_version,
+                        "eol_versions": e.eol_versions or [],
+                        "support_status": e.support_status,
+                        "advisory_url": e.advisory_url,
+                    }
+                    for e in _catalog_orm
+                ]
+                _ver_result = version_intel.analyze_device(_dev, _catalog_dicts)
+                findings.extend(_ver_result["findings"])
+            except Exception as _ve:
+                logger.warning("Version intel check failed for device %s: %s", policy.device_id, _ve)
 
         # 15. Broad VPN access
         findings.extend(_analyze_vpn_rules(rules, obj_map))
@@ -360,10 +388,22 @@ def run_analysis(policy_id: str, db: Session) -> str:
         rules_with_hits = sum(1 for r in rules if r.get("hit_count") is not None)
         readiness_score = int(100 * rules_with_hits / max(1, total_rules))
 
-        # ── Health score: inverse risk proxy ─────────────────────────────────
-        sev_weights = {"Critical": 18, "High": 10, "Medium": 5, "Low": 2, "Informational": 0}
-        total_sev = sum(sev_weights.get(f.get("severity", "Informational"), 0) for f in findings)
-        health_score = max(0, 100 - min(100, total_sev))
+        # ── Health score: inverse risk proxy (0–100, higher = healthier) ────────
+        # Each severity tier contributes up to a fixed cap so a single tier
+        # cannot floor the entire score. This keeps the metric meaningful across
+        # both clean and heavily-finding policies.
+        _sev_cnt = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0}
+        for f in findings:
+            sev = f.get("severity", "Informational")
+            if sev in _sev_cnt:
+                _sev_cnt[sev] += 1
+        _penalty = (
+            min(40, _sev_cnt["Critical"] * 8) +   # 5+ criticals  → full 40 pts
+            min(30, _sev_cnt["High"] * 5) +         # 6+ highs      → full 30 pts
+            min(20, _sev_cnt["Medium"] * 2) +       # 10+ mediums   → full 20 pts
+            min(10, _sev_cnt["Low"] * 1)            # 10+ lows      → full 10 pts
+        )
+        health_score = max(0, 100 - _penalty)
 
         # ── Top risk drivers ──────────────────────────────────────────────────
         driver_counts = Counter(f["finding_type"] for f in findings)
@@ -1130,6 +1170,13 @@ def _analyze_exposed_services(rules: List[dict], obj_map: dict) -> List[dict]:
         if not rule.get("enabled", True):
             continue
 
+        # An "any"-service rule matches every port, but claiming it "exposes
+        # RDP/SSH/databases" is misleading — the breadth is already reported by
+        # any_to_any_allow / overly_permissive. Only flag rules that actually
+        # reference the sensitive service.
+        if has_any_service(rule, obj_map):
+            continue
+
         exposure, public_srcs = _untrusted_source(rule, obj_map)
         if exposure is None:
             continue
@@ -1209,6 +1256,12 @@ def _analyze_cleartext_services(rules: List[dict], obj_map: dict) -> List[dict]:
         if action not in ("accept", "allow", "permit"):
             continue
         if not rule.get("enabled", True):
+            continue
+
+        # Same rationale as _analyze_exposed_services: an "any"-service rule
+        # doesn't specifically permit Telnet/FTP/etc — reporting all ten
+        # cleartext protocols on it is noise on top of overly_permissive.
+        if has_any_service(rule, obj_map):
             continue
 
         matched = {}  # name -> alternative
@@ -1619,13 +1672,14 @@ def _analyze_no_logging(rules: List[dict], obj_map: dict) -> List[dict]:
 
 
 def _analyze_temp_rules(rules: List[dict], obj_map: dict) -> List[dict]:
+    from app.analysis.risk_scorer import temp_keyword_match
     findings = []
     for rule in rules:
         name = (rule.get("rule_name") or "").lower()
         comment = (rule.get("comments") or "").lower()
         matched_keyword = None
         for kw in settings.temp_keywords:
-            if kw in name or kw in comment:
+            if temp_keyword_match(name, kw) or temp_keyword_match(comment, kw):
                 matched_keyword = kw
                 break
         if matched_keyword:

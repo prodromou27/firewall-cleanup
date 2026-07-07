@@ -20,7 +20,9 @@ Push-Location ".\backend"
 Pop-Location
 
 if ($SeedDemo) {
-    & $PythonExe "backend\scripts\seed_demo.py"
+    Push-Location ".\backend"
+    & "..\$PythonExe" "seed_demo.py"
+    Pop-Location
 }
 
 # Start backend

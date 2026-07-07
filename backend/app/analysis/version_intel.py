@@ -18,6 +18,22 @@ _ADVISORY = (
 
 _CHECKPOINT_OS_RE = re.compile(r"[Rr]\d+(?:\.\d+)?")
 
+_IPV4_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
+_VERSION_LIKE_RE = re.compile(r"^(?:[Rr]?\d+(?:\.\d+)+|V\d+R\d+[A-Z0-9]*)$", re.IGNORECASE)
+
+
+def peer_version_or_blank(value: str) -> str:
+    """Return `value` only when it reads like an OS version.
+
+    FirewallDevice.ha_peer stores the peer's hostname/IP, not its OS version.
+    Comparing an IP against the local version made version_ha_mismatch fire on
+    every HA device, so anything that isn't version-shaped is discarded.
+    """
+    v = (value or "").strip()
+    if not v or _IPV4_RE.match(v):
+        return ""
+    return v if _VERSION_LIKE_RE.match(v) else ""
+
 
 # ── version normalization ────────────────────────────────────────────────────
 def _digits(v: str) -> tuple:
@@ -236,7 +252,7 @@ def analyze_device(device, catalog: List[dict]) -> Dict[str, Any]:
         getattr(device, "vendor", ""), resolved["os_version"],
         fw_model=getattr(device, "fw_model", "") or "",
         management_version=getattr(device, "management_platform", "") or "",
-        ha_peer_version=getattr(device, "ha_peer", "") or "",
+        ha_peer_version=peer_version_or_blank(getattr(device, "ha_peer", "") or ""),
     )
     norm["source"] = resolved["source"]
     norm["raw_os_version"] = resolved["raw_os_version"]

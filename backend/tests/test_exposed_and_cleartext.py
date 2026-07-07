@@ -92,3 +92,19 @@ def test_encrypted_service_not_flagged_as_cleartext():
     om = build_object_map(_objs())
     findings = _analyze_cleartext_services([_rule(10, ["any"], ["SSH"])], om)
     assert findings == []
+
+
+# ── Any-service rules must not fabricate specific-service exposures ──────────
+
+def test_any_service_rule_not_flagged_as_exposed():
+    """any/any/any breadth is reported by any_to_any_allow / overly_permissive;
+    claiming it 'exposes RDP/SSH/databases' is a false positive."""
+    om = build_object_map(_objs())
+    findings = _analyze_exposed_services([_rule(11, ["any"], ["any"])], om)
+    assert findings == []
+
+
+def test_any_service_rule_not_flagged_as_cleartext():
+    om = build_object_map(_objs())
+    findings = _analyze_cleartext_services([_rule(12, ["any"], ["any"])], om)
+    assert findings == []

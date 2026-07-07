@@ -177,6 +177,14 @@ def _detect_within_context(expanded: List[dict], vendor: str, not_evaluated: lis
 
             full = contained_count == 3
 
+            # Recorded hits on the later rule contradict a full-shadow claim:
+            # the device's own counters show traffic matched it (commonly the
+            # real evaluation scope — interfaces/zones — wasn't captured in the
+            # import, or the hits predate the earlier rule). Keep the finding
+            # but report it at Low confidence instead of High.
+            later_hits = later_rule.get("hit_count")
+            hits_contradict = full and isinstance(later_hits, int) and later_hits > 0
+
             earlier_id = earlier_rule.get("rule_id") or earlier_rule.get("rule_number", "?")
             later_id = later_rule.get("rule_id") or later_rule.get("rule_number", "?")
             earlier_name = earlier_rule.get("rule_name") or f"Rule {earlier_id}"
@@ -193,7 +201,7 @@ def _detect_within_context(expanded: List[dict], vendor: str, not_evaluated: lis
                 # Earlier rule fully covers later with a DIFFERENT action: the
                 # later rule can never take effect — a policy logic error.
                 finding_type = "shadowed_rule"
-                confidence = "High"
+                confidence = "Low" if hits_contradict else "High"
                 conflict_type = "different-action"
                 severity = "High"
                 title = f"Rule {later_id} can never take effect (shadowed by Rule {earlier_id}, conflicting action)"
@@ -206,7 +214,7 @@ def _detect_within_context(expanded: List[dict], vendor: str, not_evaluated: lis
             elif full:
                 # Same action, fully contained → redundant rule.
                 finding_type = "redundant_rule"
-                confidence = "High"
+                confidence = "Low" if hits_contradict else "High"
                 conflict_type = "same-action"
                 severity = "Medium"
                 title = f"Rule {later_id} is redundant (fully shadowed by Rule {earlier_id})"
@@ -247,6 +255,14 @@ def _detect_within_context(expanded: List[dict], vendor: str, not_evaluated: lis
                     "finding is reported with reduced confidence and should be validated "
                     "against the effective object definitions."
                 )
+            if hits_contradict:
+                desc += (
+                    f" However, Rule {later_id} has {later_hits} recorded hit(s), which "
+                    "contradicts full shadowing — traffic does reach this rule in "
+                    "practice (for example when interface/zone scope was not captured "
+                    "in the import). Reported at Low confidence; validate on the device "
+                    "before acting."
+                )
 
             findings.append({
                 "finding_type": finding_type,
@@ -268,6 +284,8 @@ def _detect_within_context(expanded: List[dict], vendor: str, not_evaluated: lis
                         else f"Earlier: {e_action}, Later: {l_action} — CONFLICT"
                     ),
                     "expansion_complete": not incomplete,
+                    "later_rule_hit_count": later_hits,
+                    "hit_count_contradicts_shadow": hits_contradict,
                     "result": result,
                 },
                 "recommendation": (

@@ -1,4 +1,5 @@
 """Risk scoring for firewall rules."""
+import re
 from typing import Dict, List, Tuple
 from datetime import datetime, timedelta
 from app.analysis.normalizer import (
@@ -8,6 +9,15 @@ from app.analysis.normalizer import (
 from app.analysis.service_utils import identify_risky_service
 from app.analysis.ip_utils import is_any, is_broad_network
 from app.config import settings
+
+
+def temp_keyword_match(text: str, keyword: str) -> bool:
+    """Whole-token keyword match (letters/digits delimit tokens; '-' and '_' do
+    not). Substring matching flagged 'latest' for 'test' and 'exchange' for
+    'change' — classic temporary-rule false positives. Shared by the temp-rule
+    detector and the risk scorer so both agree on what counts as temporary."""
+    return bool(re.search(
+        rf"(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])", text))
 
 
 def score_rule(rule: dict, obj_map: Dict[str, dict]) -> Tuple[int, Dict[str, int]]:
@@ -85,7 +95,7 @@ def score_rule(rule: dict, obj_map: Dict[str, dict]) -> Tuple[int, Dict[str, int
     name = (rule.get("rule_name") or "").lower()
     comment = (rule.get("comments") or "").lower()
     for keyword in settings.temp_keywords:
-        if keyword in name or keyword in comment:
+        if temp_keyword_match(name, keyword) or temp_keyword_match(comment, keyword):
             add("temp_keyword", settings.risk_temp_keyword,
                 f"Rule name/comment contains temporary keyword: '{keyword}'")
             break

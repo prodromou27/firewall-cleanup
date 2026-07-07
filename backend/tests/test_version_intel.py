@@ -98,6 +98,30 @@ def test_ha_version_mismatch():
     assert "version_ha_mismatch" in _types(fs)
 
 
+def test_peer_version_or_blank_rejects_ip_and_hostname():
+    """device.ha_peer stores the peer's address, not a version — an IP or
+    hostname must never be compared against os_version (false HA mismatch)."""
+    assert V.peer_version_or_blank("192.168.1.2") == ""
+    assert V.peer_version_or_blank("fw-hq-02") == ""
+    assert V.peer_version_or_blank("") == ""
+    assert V.peer_version_or_blank("7.2.3") == "7.2.3"
+    assert V.peer_version_or_blank("R81.20") == "R81.20"
+
+
+def test_analyze_device_ignores_ip_ha_peer():
+    class Dev:
+        vendor = "FortiGate"
+        os_version = "7.2.5"
+        fw_model = "FortiGate-600F"
+        ha_peer = "192.168.1.2"
+        management_platform = ""
+
+    result = V.analyze_device(Dev(), [{"vendor": "FortiGate", "release_train": "7.2",
+                                       "recommended_version": "7.2.5",
+                                       "support_status": "supported"}])
+    assert "version_ha_mismatch" not in _types(result["findings"])
+
+
 def test_advisory_wording_is_safe():
     norm = V.normalize_version("CheckPoint", "R81.10")
     for f in V.evaluate(norm, [_cat(recommended_version="R81.20")]):

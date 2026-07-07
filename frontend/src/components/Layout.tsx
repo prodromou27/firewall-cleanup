@@ -11,7 +11,9 @@ import { getCustomers } from '../api/client'
 import { useCustomer } from '../contexts/CustomerContext'
 import { useAuth } from '../contexts/AuthContext'
 import type { Customer } from '../types'
-import logoImg from '../assets/logo.png'
+// The brand-lockup chip has a white background, so use the on-light logo
+// variant — logo.png has white "Policy" text and disappears on white.
+import logoImg from '../assets/logo-onlight.png'
 
 /* ── Nav definitions ─────────────────────────────────────────── */
 

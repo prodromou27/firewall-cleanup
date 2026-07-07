@@ -49,6 +49,31 @@ export const FINDING_TYPE_LABELS: Record<string, string> = {
   service_range: 'Large Port Range',
   import_quality: 'Import Quality',
   analysis_configuration: 'Analysis Configuration',
+  // Version intelligence
+  version_outdated: 'Version Outdated',
+  version_end_of_support: 'End of Support',
+  version_catalog_unavailable: 'Version Catalog N/A',
+  version_ha_mismatch: 'HA Version Mismatch',
+  version_unknown: 'Unknown Version',
+  // NAT & public exposure (nat_exposure / interfaces analyzers)
+  nat_public_to_internal: 'NAT: Public to Internal',
+  nat_static: 'Static NAT Mapping',
+  nat_source: 'Source / Hide NAT',
+  nat_duplicate: 'Duplicate NAT Rule',
+  nat_overlap: 'Overlapping NAT Rules',
+  nat_without_policy: 'NAT Without Security Policy',
+  policy_without_nat: 'Inbound Rule Without NAT',
+  rdp_public_exposure: 'RDP Publicly Exposed',
+  ssh_public_exposure: 'SSH Publicly Exposed',
+  telnet_public_exposure: 'Telnet Publicly Exposed',
+  smb_public_exposure: 'SMB Publicly Exposed',
+  winrm_public_exposure: 'WinRM Publicly Exposed',
+  vnc_public_exposure: 'VNC Publicly Exposed',
+  database_public_exposure: 'Database Publicly Exposed',
+  any_service_public_exposure: 'Any-Service Public Exposure',
+  sensitive_destination_exposure: 'Sensitive Host Exposed',
+  public_exposure_no_logging: 'Unlogged Public Exposure',
+  mgmt_on_public_interface: 'Mgmt on Public Interface',
 }
 
 export function findingTypeLabel(type: string): string {

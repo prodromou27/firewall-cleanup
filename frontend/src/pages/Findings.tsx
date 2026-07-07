@@ -12,6 +12,7 @@ import {
   addFindingComment, getFindingComments, getFindingsExportUrl,
 } from '../api/client'
 import { SeverityBadge, StatusBadge, ConfidenceBadge } from '../components/ui/SeverityBadge'
+import { FINDING_TYPE_LABELS } from '../lib/findingLabels'
 import { EmptyState, ErrorState, LoadingState } from '../components/ui/page-state'
 import { DetailDrawer } from '../components/ui/DetailDrawer'
 import { useAuth } from '../contexts/AuthContext'
@@ -30,63 +31,9 @@ function parseArr(v: unknown): string[] {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const FINDING_TYPES: Record<string, string> = {
-  // Core rule analysis
-  duplicate_rule: 'Duplicate Rule',
-  redundant_rule: 'Redundant Rule',
-  shadowed_rule: 'Shadowed Rule',
-  same_action_shadowed_rule: 'Redundant Rule',        // legacy alias
-  conflicting_shadowed_rule: 'Shadowed Rule',         // legacy alias  // see LEGACY_FINDING_TYPE_ALIASES
-  partial_shadowed_rule: 'Partially Shadowed Rule',
-  inoperative_rule: 'Inoperative Rule',
-  shadowing_not_evaluated: 'Shadowing Not Evaluated',
-  // Application control
-  rule_without_app_controls: 'No App Controls',
-  palo_alto_port_based_rule_candidate: 'Port-Based Rule',
-  risky_application_allowed: 'Risky Application',
-  fortigate_security_profile_gap: 'No Security Profiles',
-  application_analysis_not_supported_for_vendor: 'App Analysis N/A',
-  application_data_unavailable: 'App Data Unavailable',
-  detector_prerequisites_unmet: 'Limited by Missing Data',
-  disabled_rule: 'Disabled Rule',
-  zero_hit_rule: 'Zero Hits',
-  low_usage_rule: 'Low Usage',
-  overly_permissive: 'Overly Permissive',
-  risky_service: 'Risky Service',
-  no_logging: 'No Logging',
-  no_documentation: 'No Documentation',
-  temporary_rule: 'Temporary Rule',
-  // Advanced rule analysis
-  naming_quality: 'Poor Rule Name',
-  expired_rule: 'Expired Schedule',
-  nat_complexity: 'NAT Rule',
-  vpn_access: 'Broad VPN Access',
-  negated_object: 'Negated Object',
-  // Exposure
-  rdp_exposed: 'RDP Exposed',
-  ssh_exposed: 'SSH Exposed',
-  database_exposed: 'Database Exposed',
-  cleartext_service: 'Cleartext Protocol',
-  inbound_from_internet: 'Inbound From Internet',
-  lateral_movement_risk: 'Lateral Movement Risk',
-  // Policy structure
-  mergeable_rules: 'Consolidation Candidate',
-  no_cleanup_rule: 'Missing Cleanup Rule',
-  rule_order_optimization: 'Rule Order Optimization',
-  large_rule_section: 'Oversized Section',
-  // Object analysis
-  unattached_object: 'Unattached Object',
-  object_usage_unknown: 'Object Usage Unknown',
-  unused_object: 'Unused Object',
-  duplicate_object: 'Duplicate Object',
-  overlapping_object: 'Overlapping Object',
-  empty_group: 'Empty Group',
-  large_group: 'Large Group',
-  broad_network: 'Broad Network',
-  service_range: 'Large Port Range',
-  // Import / data quality
-  import_quality: 'Import Quality',
-}
+// Single source of truth for finding-type labels — shared with Dashboard,
+// Rulebase, and reporting so the maps can never drift apart again.
+const FINDING_TYPES: Record<string, string> = FINDING_TYPE_LABELS
 
 // Old finding-type names kept in FINDING_TYPES only so historical findings still
 // render a label — hidden from the type filter so it shows no duplicate options.

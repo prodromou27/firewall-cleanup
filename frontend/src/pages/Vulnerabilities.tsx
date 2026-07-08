@@ -186,6 +186,16 @@ function DeviceVulnRow({
         </div>
       </div>
 
+      {hasData && state.error && (
+        <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+          <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="text-xs font-semibold text-amber-800">CVE diagnostic</p>
+            <p className="text-xs text-amber-700 leading-relaxed">{state.error}</p>
+          </div>
+        </div>
+      )}
+
       {/* CVE detail list */}
       {expanded && state.cves.length > 0 && (
         <div className="mt-4 pt-4 border-t border-gray-100 space-y-2">

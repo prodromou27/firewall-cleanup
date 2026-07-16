@@ -7,15 +7,16 @@ interface Props {
 
 export function SeverityBadge({ severity, size = 'md' }: Props) {
   const severityClass: Record<string, string> = {
-    Critical: 'badge-critical',
-    High: 'badge-high',
-    Medium: 'badge-medium',
-    Low: 'badge-low',
-    Informational: 'badge-info',
+    Critical: 'pi-badge-critical',
+    High: 'pi-badge-high',
+    Medium: 'pi-badge-medium',
+    Low: 'pi-badge-low',
+    Informational: 'pi-badge-info',
   }
   const cls = clsx(
-    severityClass[severity] || 'badge-info',
-    size === 'sm' ? 'text-xs px-2 py-0.5' : 'text-sm px-2.5 py-0.5',
+    'pi-badge',
+    severityClass[severity] || 'pi-badge-info',
+    size === 'sm' ? 'pi-badge-sm' : 'pi-badge-md',
   )
   return <span className={cls}>{severity}</span>
 }
@@ -25,15 +26,14 @@ interface ConfidenceProps {
   size?: 'sm' | 'md'
 }
 
-/** Confidence badge — neutral, outline style so it never competes with severity. */
+/** Confidence badge: neutral outline style so it never competes with severity. */
 export function ConfidenceBadge({ confidence, size = 'sm' }: ConfidenceProps) {
   const cls = clsx(
-    'inline-flex items-center font-medium rounded border',
+    'pi-badge pi-confidence',
     size === 'sm' ? 'text-[10px] px-1.5 py-0.5' : 'text-xs px-2 py-0.5',
     {
-      'border-brand-300 text-brand-700 bg-brand-50': confidence === 'High',
-      'border-info-300 text-info-700 bg-info-50': confidence === 'Medium',
-      'border-slate-300 text-slate-500 bg-slate-50': confidence === 'Low' || !['High', 'Medium'].includes(confidence),
+      'pi-confidence-high': confidence === 'High',
+      'pi-confidence-medium': confidence === 'Medium',
     }
   )
   return <span className={cls} title="Analysis confidence reflects data completeness">{confidence} confidence</span>

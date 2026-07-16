@@ -30,7 +30,7 @@ export function StatCard({ title, value, icon, color = 'blue', subtitle }: Props
           {subtitle && <p className="mt-1 text-xs text-ink-400">{subtitle}</p>}
         </div>
         {icon && (
-          <div className={clsx('p-3 rounded-lg', valueClass, iconBgClass)}>
+          <div className={clsx('pi-stat-icon', valueClass, iconBgClass)}>
             {icon}
           </div>
         )}

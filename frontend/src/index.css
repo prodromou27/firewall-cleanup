@@ -2,9 +2,64 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * PolicyInsight design tokens.
+ *
+ * This is the first step away from page-level Tailwind styling: shared UI
+ * primitives should consume these variables through semantic classes. Tailwind
+ * stays available during the migration so existing pages keep working.
+ */
 @layer base {
   :root {
     --sidebar-width: 220px;
+
+    --pi-font-sans: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --pi-font-display: "Space Grotesk", Inter, system-ui, sans-serif;
+    --pi-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+    --pi-canvas: #f5f7f6;
+    --pi-surface: rgba(255, 255, 255, 0.96);
+    --pi-surface-solid: #ffffff;
+    --pi-surface-muted: #f8fafc;
+    --pi-surface-hover: #eefbf6;
+    --pi-border: rgba(148, 163, 184, 0.34);
+    --pi-border-strong: rgba(100, 116, 139, 0.34);
+    --pi-text: #0f172a;
+    --pi-text-muted: #64748b;
+    --pi-text-subtle: #94a3b8;
+    --pi-brand: #059669;
+    --pi-brand-strong: #047857;
+    --pi-brand-soft: #ecfdf5;
+    --pi-danger: #dc2626;
+
+    --pi-sidebar: #101719;
+    --pi-sidebar-raised: #172123;
+    --pi-sidebar-text: #f8fafc;
+    --pi-sidebar-muted: #a5b4b6;
+    --pi-sidebar-subtle: #6f7f82;
+    --pi-sidebar-border: rgba(255, 255, 255, 0.08);
+
+    --pi-radius-xs: 4px;
+    --pi-radius-sm: 6px;
+    --pi-radius-md: 8px;
+    --pi-shadow-card: 0 1px 0 rgba(16, 23, 25, 0.04), 0 10px 30px -28px rgba(16, 23, 25, 0.45);
+    --pi-shadow-elevated: 0 24px 60px -36px rgba(15, 23, 42, 0.55);
+
+    --pi-critical-bg: #dc2626;
+    --pi-critical-fg: #ffffff;
+    --pi-critical-border: #b91c1c;
+    --pi-high-bg: #fef2f2;
+    --pi-high-fg: #991b1b;
+    --pi-high-border: #fecaca;
+    --pi-medium-bg: #fffbeb;
+    --pi-medium-fg: #92400e;
+    --pi-medium-border: #fde68a;
+    --pi-low-bg: #f0f9ff;
+    --pi-low-fg: #075985;
+    --pi-low-border: #bae6fd;
+    --pi-info-bg: #f1f5f9;
+    --pi-info-fg: #475569;
+    --pi-info-border: #e2e8f0;
 
     /* ── shadcn/ui semantic theme (blue primary, slate neutrals) ── */
     --background: 0 0% 100%;
@@ -44,6 +99,330 @@
   ::-webkit-scrollbar-thumb { @apply bg-ink-200 rounded-full; }
   ::-webkit-scrollbar-thumb:hover { @apply bg-ink-300; }
   ::selection { @apply bg-brand-600/15 text-brand-900; }
+}
+
+/* Semantic UI primitives. Prefer these in shared components over inline
+   Tailwind strings. */
+.pi-card {
+  color: var(--pi-text);
+  background: var(--pi-surface);
+  border: 1px solid var(--pi-border);
+  border-radius: var(--pi-radius-md);
+  box-shadow: var(--pi-shadow-card);
+  backdrop-filter: blur(8px);
+}
+
+.pi-card-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 20px;
+}
+
+.pi-card-title {
+  color: var(--pi-text);
+  font-family: var(--pi-font-display);
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.pi-card-description {
+  color: var(--pi-text-muted);
+  font-size: 14px;
+}
+
+.pi-card-content {
+  padding: 0 20px 20px;
+}
+
+.pi-card-footer {
+  display: flex;
+  align-items: center;
+  padding: 0 20px 20px;
+}
+
+.pi-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: var(--pi-radius-md);
+  border: 1px solid transparent;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 120ms ease, box-shadow 140ms ease;
+  user-select: none;
+}
+
+.pi-button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.pi-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.pi-button-default {
+  background: var(--pi-brand);
+  color: white;
+  box-shadow: 0 10px 24px -18px rgba(5, 150, 105, 0.75);
+}
+
+.pi-button-default:hover {
+  background: var(--pi-brand-strong);
+}
+
+.pi-button-secondary {
+  background: var(--pi-surface-solid);
+  border-color: var(--pi-border);
+  color: #334155;
+  box-shadow: var(--pi-shadow-card);
+}
+
+.pi-button-secondary:hover,
+.pi-button-outline:hover,
+.pi-button-ghost:hover {
+  background: var(--pi-surface-muted);
+  color: var(--pi-text);
+}
+
+.pi-button-ghost {
+  color: var(--pi-text-muted);
+}
+
+.pi-button-outline {
+  background: transparent;
+  border-color: var(--pi-border);
+  color: #334155;
+}
+
+.pi-button-destructive {
+  background: var(--pi-danger);
+  color: white;
+}
+
+.pi-button-link {
+  color: var(--pi-brand);
+  text-underline-offset: 4px;
+}
+
+.pi-button-link:hover {
+  text-decoration: underline;
+}
+
+.pi-button-size-default {
+  height: 36px;
+  padding: 0 14px;
+}
+
+.pi-button-size-sm {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--pi-radius-sm);
+  font-size: 12px;
+}
+
+.pi-button-size-lg {
+  height: 40px;
+  padding: 0 20px;
+}
+
+.pi-button-size-icon {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+}
+
+.pi-input {
+  display: flex;
+  width: 100%;
+  height: 36px;
+  border-radius: var(--pi-radius-md);
+  border: 1px solid var(--pi-border);
+  background: var(--pi-surface-solid);
+  padding: 8px 12px;
+  color: var(--pi-text);
+  font-size: 14px;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+
+.pi-input::placeholder {
+  color: var(--pi-text-subtle);
+}
+
+.pi-input:focus {
+  border-color: rgba(5, 150, 105, 0.62);
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.16);
+  outline: none;
+}
+
+.pi-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.pi-table-wrap {
+  position: relative;
+  width: 100%;
+  overflow: auto;
+}
+
+.pi-table {
+  width: 100%;
+  caption-side: bottom;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.pi-table-head {
+  background: rgba(248, 250, 252, 0.92);
+  border-bottom: 1px solid var(--pi-border);
+}
+
+.pi-table-row {
+  border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+  transition: background 90ms ease;
+}
+
+.pi-table-row:hover {
+  background: var(--pi-surface-hover);
+}
+
+.pi-table-th {
+  height: 36px;
+  padding: 0 16px;
+  color: var(--pi-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-align: left;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.pi-table-td {
+  padding: 12px 16px;
+  color: #334155;
+  vertical-align: middle;
+}
+
+.pi-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--pi-radius-sm);
+  border: 1px solid transparent;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.pi-badge-default {
+  background: var(--pi-brand);
+  border-color: var(--pi-brand);
+  color: white;
+}
+
+.pi-badge-critical {
+  background: var(--pi-critical-bg);
+  border-color: var(--pi-critical-border);
+  color: var(--pi-critical-fg);
+  box-shadow: 0 8px 16px -14px rgba(220, 38, 38, 0.8);
+}
+
+.pi-badge-high {
+  background: var(--pi-high-bg);
+  border-color: var(--pi-high-border);
+  color: var(--pi-high-fg);
+}
+
+.pi-badge-medium {
+  background: var(--pi-medium-bg);
+  border-color: var(--pi-medium-border);
+  color: var(--pi-medium-fg);
+}
+
+.pi-badge-low {
+  background: var(--pi-low-bg);
+  border-color: var(--pi-low-border);
+  color: var(--pi-low-fg);
+}
+
+.pi-badge-info {
+  background: var(--pi-info-bg);
+  border-color: var(--pi-info-border);
+  color: var(--pi-info-fg);
+}
+
+.pi-badge-success {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #047857;
+}
+
+.pi-badge-sm {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.pi-badge-md {
+  padding: 2px 10px;
+  font-size: 14px;
+}
+
+.pi-confidence {
+  background: var(--pi-info-bg);
+  border-color: var(--pi-info-border);
+  color: var(--pi-info-fg);
+  font-weight: 600;
+}
+
+.pi-confidence-high {
+  background: var(--pi-brand-soft);
+  border-color: #a7f3d0;
+  color: var(--pi-brand-strong);
+}
+
+.pi-confidence-medium {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
+.pi-stat-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--pi-radius-md);
+  padding: 12px;
+}
+
+.pi-drawer-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.32);
+  backdrop-filter: blur(1px);
+}
+
+.pi-drawer-panel {
+  position: relative;
+  display: flex;
+  height: 100%;
+  max-width: 100%;
+  flex-direction: column;
+  background: var(--pi-surface-solid);
+  border-left: 1px solid var(--pi-border);
+  box-shadow: var(--pi-shadow-elevated);
+}
+
+.pi-drawer-header,
+.pi-drawer-footer {
+  background: var(--pi-surface-muted);
+  border-color: var(--pi-border);
 }
 
 @layer components {

@@ -30,13 +30,13 @@ export function DetailDrawer({ open, onClose, title, subtitle, badges, width = '
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true">
-      <div className="absolute inset-0 bg-ink-900/30 backdrop-blur-[1px]" onClick={onClose} />
+      <div className="pi-drawer-overlay" onClick={onClose} />
       <div
-        className={clsx('relative h-full bg-white shadow-2xl border-l border-ink-200 flex flex-col max-w-full', WIDTHS[width])}
+        className={clsx('pi-drawer-panel', WIDTHS[width])}
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-ink-200 bg-ink-50/60">
+        <div className="pi-drawer-header flex items-start justify-between gap-3 px-5 py-4 border-b">
           <div className="min-w-0">
             <h2 className="text-[15px] font-semibold text-ink-900 leading-snug">{title}</h2>
             {subtitle && <p className="text-xs text-ink-500 mt-0.5">{subtitle}</p>}
@@ -49,7 +49,7 @@ export function DetailDrawer({ open, onClose, title, subtitle, badges, width = '
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">{children}</div>
         {/* Footer */}
-        {footer && <div className="border-t border-ink-200 px-5 py-3 bg-ink-50/60">{footer}</div>}
+        {footer && <div className="pi-drawer-footer border-t px-5 py-3">{footer}</div>}
       </div>
     </div>,
     document.body,

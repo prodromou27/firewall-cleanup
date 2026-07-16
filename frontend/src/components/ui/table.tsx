@@ -3,8 +3,8 @@ import { cn } from '@/lib/utils'
 
 const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableElement>>(
   ({ className, ...props }, ref) => (
-    <div className="relative w-full overflow-auto">
-      <table ref={ref} className={cn('w-full caption-bottom text-sm', className)} {...props} />
+    <div className="pi-table-wrap">
+      <table ref={ref} className={cn('pi-table', className)} {...props} />
     </div>
   )
 )
@@ -14,7 +14,7 @@ const TableHeader = React.forwardRef<
   HTMLTableSectionElement,
   React.HTMLAttributes<HTMLTableSectionElement>
 >(({ className, ...props }, ref) => (
-  <thead ref={ref} className={cn('bg-ink-50/80 border-b border-ink-200/70', className)} {...props} />
+  <thead ref={ref} className={cn('pi-table-head', className)} {...props} />
 ))
 TableHeader.displayName = 'TableHeader'
 
@@ -31,7 +31,7 @@ const TableRow = React.forwardRef<HTMLTableRowElement, React.HTMLAttributes<HTML
     <tr
       ref={ref}
       className={cn(
-        'border-b border-ink-100 transition-colors hover:bg-brand-50/40 data-[state=selected]:bg-brand-50',
+        'pi-table-row data-[state=selected]:bg-brand-50',
         className
       )}
       {...props}
@@ -47,7 +47,7 @@ const TableHead = React.forwardRef<
   <th
     ref={ref}
     className={cn(
-      'h-9 px-4 text-left align-middle text-[11px] font-semibold uppercase tracking-wider text-ink-400 [&:has([role=checkbox])]:pr-0',
+      'pi-table-th [&:has([role=checkbox])]:pr-0',
       className
     )}
     {...props}
@@ -61,7 +61,7 @@ const TableCell = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <td
     ref={ref}
-    className={cn('px-4 py-3 align-middle text-ink-700 [&:has([role=checkbox])]:pr-0', className)}
+    className={cn('pi-table-td [&:has([role=checkbox])]:pr-0', className)}
     {...props}
   />
 ))

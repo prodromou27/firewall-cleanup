@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import func, or_
 from typing import Optional
 from app.database import get_db
-from app.models.policy import FirewallPolicy, FirewallRule, FirewallObject, AnalysisRun
+from app.models.policy import FirewallPolicy, FirewallRule, FirewallObject, ObjectMember, AnalysisRun
 from app.models.finding import Finding
 from app.analysis.engine import run_analysis
 from app.analysis.usage_observation import verified_observation
@@ -575,7 +575,9 @@ def get_policy_scorecard(
     p = _authz_policy(policy_id, db, user)
 
     rules   = db.query(FirewallRule).filter(FirewallRule.policy_id == policy_id).all()
-    objects = db.query(FirewallObject).filter(FirewallObject.policy_id == policy_id).all()
+    objects = db.query(FirewallObject).options(
+        selectinload(FirewallObject.member_entries).selectinload(ObjectMember.member)
+    ).filter(FirewallObject.policy_id == policy_id).all()
 
     total_rules   = len(rules)
     enabled       = [r for r in rules if r.enabled]
@@ -615,25 +617,39 @@ def get_policy_scorecard(
 
     # 5. Temporary rules
     from app.config import settings as cfg
+    from app.analysis.risk_scorer import temp_keyword_match
     temp_rules = [
         r for r in rules
-        if any(kw in (r.rule_name or "").lower() or kw in (r.comments or "").lower()
+        if any(temp_keyword_match(r.rule_name or "", kw) or temp_keyword_match(r.comments or "", kw)
                for kw in cfg.temp_keywords)
     ]
     n_temp = len(temp_rules)
 
     # 6. Object hygiene — unused objects
-    used_names: set[str] = set()
-    for r in rules:
-        for n in (r.sources or []) + (r.destinations or []) + (r.services or []):
-            used_names.add(n.lower())
-    unused_objects = [
-        o for o in objects
-        if o.object_name.lower() not in used_names
-        and o.object_name.lower() not in ("any", "all")
-    ]
-    n_unused_obj = len(unused_objects)
-    obj_hygiene_pct = round((1 - n_unused_obj / max(total_objects, 1)) * 100, 1)
+    from app.analysis.engine import (
+        _rule_to_dict, _obj_to_dict, _analyze_unused_objects,
+        _is_service_object, _is_vendor_builtin_object,
+    )
+    from app.analysis.normalizer import build_object_map
+    # Include both parser membership and relational membership.
+    normalized_objects = [_obj_to_dict(o) for o in objects]
+    eligible_objects = [o for o in normalized_objects
+                        if not _is_service_object(o) and not _is_vendor_builtin_object(o)
+                        and o["object_name"].lower() not in ("any", "all")]
+    object_findings = _analyze_unused_objects(
+        [_rule_to_dict(r) for r in rules], normalized_objects,
+        build_object_map(normalized_objects), p.nat_rules,
+    )
+    object_usage_known = bool(rules and eligible_objects) and not any(
+        f["finding_type"] == "object_usage_unknown" for f in object_findings
+    )
+    n_unused_obj = len({oid for f in object_findings
+                        if f["finding_type"] == "unattached_object"
+                        for oid in f.get("affected_objects", [])})
+    obj_hygiene_pct = (
+        round((1 - n_unused_obj / len(eligible_objects)) * 100, 1)
+        if object_usage_known else None
+    )
 
     # 7. Duplicate objects
     from collections import Counter
@@ -652,7 +668,7 @@ def get_policy_scorecard(
     dim_usage     = usage_score_pct                      # excluded if telemetry unavailable
     dim_obj       = obj_hygiene_pct                      # 15 % weight
 
-    weights       = [0.20, 0.20, 0.25, 0.20 if rules_with_data else 0, 0.15]
+    weights       = [0.20, 0.20, 0.25, 0.20 if rules_with_data else 0, 0.15 if object_usage_known else 0]
     dim_scores    = [dim_logging, dim_doc, dim_perm, dim_usage, dim_obj]
     total_score   = round(sum(w * (s or 0) for w, s in zip(weights, dim_scores)) / sum(weights))
 
@@ -670,8 +686,8 @@ def get_policy_scorecard(
         strengths.append("No zero-hit rules detected")
     if n_temp == 0:
         strengths.append("No temporary or test rules detected")
-    if dim_obj >= 90:
-        strengths.append(f"Object database is clean — only {n_unused_obj} unused object{'s' if n_unused_obj != 1 else ''}")
+    if dim_obj is not None and dim_obj >= 90:
+        strengths.append(f"{n_unused_obj} unattached non-service objects in the imported configuration")
     if len(disabled) == 0:
         strengths.append("No disabled rules — policy is fully active")
     elif len(disabled) <= 2:
@@ -701,10 +717,10 @@ def get_policy_scorecard(
             "count": undocumented,
             "severity": "Medium",
         })
-    if n_unused_obj > 0:
+    if object_usage_known and n_unused_obj > 0:
         improvements.append({
             "metric": "unused_objects",
-            "label": f"{n_unused_obj} object{'s are' if n_unused_obj != 1 else ' is'} unused",
+            "label": f"{n_unused_obj} object{'s are' if n_unused_obj != 1 else ' is'} unattached in the imported configuration",
             "count": n_unused_obj,
             "severity": "Low",
         })
@@ -760,7 +776,11 @@ def get_policy_scorecard(
             {"key": "usage",         "label": "Rule Usage",          "score": round(dim_usage) if dim_usage is not None else None,
              "weight": 20 if rules_with_data else 0,
              "detail": f"{n_zero_hit} zero-hit rules in verified windows" if rules_with_data else "Insufficient verified counter history"},
-            {"key": "objects",       "label": "Object Hygiene",      "score": round(dim_obj),      "weight": 15, "detail": f"{n_unused_obj} unused objects out of {total_objects}"},
+            {"key": "objects", "label": "Object Hygiene",
+             "score": round(dim_obj) if dim_obj is not None else None,
+             "weight": 15 if object_usage_known else 0,
+             "detail": f"{n_unused_obj} unattached objects out of {len(eligible_objects)} eligible non-service objects"
+             if object_usage_known else "Object usage unavailable: no eligible objects or incomplete reference graph"},
         ],
         "strengths": strengths,
         "improvements": improvements,

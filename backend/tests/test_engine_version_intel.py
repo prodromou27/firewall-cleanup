@@ -18,6 +18,53 @@ from app.models.version_catalog import VersionCatalogEntry
 from app.analysis.engine import run_analysis
 
 
+@pytest.mark.parametrize("failure_stage", ["detector", "database"])
+def test_failed_reanalysis_preserves_previous_results_and_reviews(db, monkeypatch, failure_stage):
+    from sqlalchemy import event
+    from sqlalchemy.exc import IntegrityError
+    from app.analysis import engine as analysis_engine
+    from app.models.finding import FindingComment
+    from app.models.policy import AnalysisRun
+
+    pid = _seed(db)
+    previous_run = run_analysis(pid, db)
+    original = db.query(Finding).filter_by(policy_id=pid).all()
+    original_ids = {f.id for f in original}
+    reviewed = original[0]
+    reviewed.status = "Accepted Risk"
+    db.add(FindingComment(id="review", finding_id=reviewed.id,
+                          author="reviewer", comment="Retain for business requirement"))
+    rule = db.query(FirewallRule).filter_by(policy_id=pid).one()
+    rule.risk_score = 17
+    db.commit()
+
+    if failure_stage == "detector":
+        def fail(*args, **kwargs):
+            raise RuntimeError("detector failed")
+        monkeypatch.setattr(analysis_engine, "detect_duplicates", fail)
+        expected = RuntimeError
+    else:
+        # Trigger a real NOT NULL failure after the old findings have been deleted.
+        def invalidate_new_finding(session, *args):
+            for row in session.new:
+                if isinstance(row, Finding):
+                    row.title = None
+        event.listen(db, "before_flush", invalidate_new_finding)
+        expected = IntegrityError
+
+    with pytest.raises(expected):
+        run_analysis(pid, db)
+
+    assert {f.id for f in db.query(Finding).filter_by(policy_id=pid)} == original_ids
+    assert db.get(Finding, reviewed.id).status == "Accepted Risk"
+    assert db.get(FindingComment, "review").comment == "Retain for business requirement"
+    assert db.get(FirewallRule, rule.id).risk_score == 17
+    assert db.get(AnalysisRun, previous_run).status == "completed"
+    failed = db.query(AnalysisRun).filter_by(policy_id=pid, status="failed").one()
+    assert failed.completed_at is not None
+    assert db.get(FirewallPolicy, pid).analysis_status == "failed"
+
+
 @pytest.fixture()
 def db():
     engine = create_engine("sqlite:///:memory:")

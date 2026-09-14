@@ -59,6 +59,10 @@ Do not use the current findings as approved change instructions. No automatic fi
 
 ## Data, operations and validation notes
 
+Reanalysis now commits finding replacement, rule scores and completion metadata in one transaction. Detector or database failures roll back the replacement, preserving the previous findings, reviewer comments and scores, while recording the failed run separately. Successful reanalysis still replaces findings and comments: immutable review history and stable finding reconciliation remain phase 4 work.
+
+The scorecard uses the analysis reference graph for non-service object hygiene, including nested groups, relational membership and NAT references. Missing references, cycles, absent rules or no eligible objects make the dimension unavailable and remove its weight. Counts describe unattached objects in the imported configuration, not confirmed runtime non-use. Temporary-rule keywords use the same whole-token matching as analysis. Duplicate-object value comparisons still need type/protocol-aware semantics.
+
 The current relational model links `Finding` to `AnalysisRun` and policy, with JSON evidence and workflow status. It does not have a standalone recommendation classification or immutable report-source snapshot. Preserve all existing rows when extending the schema; add nullable columns or new tables first, backfill, validate, then tighten constraints. Keep customer scope on every query and report lookup.
 
 The first phase needed no migration. The subsequent import-lineage increment adds nullable `firewall_policies.source_sha256` and `parse_warnings` columns in revision `e7f9b2c4d6a8`. New file uploads store the SHA-256 of the exact raw bytes and a `source_ref` with checksum, collection and record index in each imported rule/object's `raw_data`. Older policies retain nulls; they are not silently assigned a checksum for a file that may have changed. Exact source line numbers and source checksums for live connectors remain future work. The source file remains in the existing upload volume.

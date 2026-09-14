@@ -268,6 +268,55 @@ def test_raw_zero_counter_is_excluded_from_risk_and_usage_score(db, user_and_cus
     assert "Insufficient" in usage["detail"]
 
 
+@pytest.mark.parametrize("graph", ["complete", "missing_member", "cycle", "no_rules"])
+def test_scorecard_uses_nested_and_nat_object_references(db, user_and_customer, graph):
+    from app.models.policy import FirewallObject, ObjectMember
+    user, customer = user_and_customer
+    policy = _add_policy(db, customer.id, 1)
+    policy.nat_rules = [{"translated_src": "nat-host"}]
+    db.flush()
+    for name, kind, members in [
+        ("outer", "group", ["inner"]),
+        ("inner", "group", []),
+        ("host", "host", []),
+        ("nat-host", "host", []),
+    ]:
+        db.add(FirewallObject(id=name, policy_id=policy.id, vendor="FortiGate",
+                              object_name=name, object_type=kind,
+                              value="10.0.0.1" if kind == "host" else "", members=members))
+    db.flush()
+    member = "missing" if graph == "missing_member" else "outer" if graph == "cycle" else "host"
+    db.add(ObjectMember(parent_id="inner", member_name=member,
+                        member_id=member if graph != "missing_member" else None))
+    if graph != "no_rules":
+        db.add(FirewallRule(id="group-rule", policy_id=policy.id, vendor="FortiGate",
+                            rule_number=1, sources=["outer"], destinations=["any"],
+                            services=["any"], action="accept", enabled=True))
+    db.commit()
+    result = policies.get_policy_scorecard(policy.id, db=db, user=user)
+    objects = next(d for d in result["dimensions"] if d["key"] == "objects")
+    assert not any(i["metric"] == "unused_objects" for i in result["improvements"])
+    if graph == "complete":
+        assert objects["score"] == 100
+        assert objects["weight"] == 15
+        assert "0 unattached" in objects["detail"]
+    else:
+        assert objects["score"] is None
+        assert objects["weight"] == 0
+
+
+def test_scorecard_does_not_treat_keyword_substrings_as_temporary(db, user_and_customer):
+    user, customer = user_and_customer
+    policy = _add_policy(db, customer.id, 1)
+    db.flush()
+    db.add(FirewallRule(id="rule", policy_id=policy.id, vendor="FortiGate",
+                        rule_number=1, rule_name="Latest production access",
+                        comments="Production threshold monitoring", action="accept", enabled=True))
+    db.commit()
+    result = policies.get_policy_scorecard(policy.id, db=db, user=user)
+    assert not any(i["metric"] == "temporary_rules" for i in result["improvements"])
+
+
 def test_findings_api_filters_severity_status_search_and_paginates(db, user_and_customer):
     user, customer = user_and_customer
     policy = _add_policy(db, customer.id, 1)

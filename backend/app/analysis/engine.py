@@ -47,13 +47,6 @@ def run_analysis(policy_id: str, db: Session) -> str:
         if not policy:
             raise ValueError(f"Policy {policy_id} not found")
 
-        # Clear previous findings (delete child comments first to satisfy FK)
-        finding_ids = [row[0] for row in db.query(Finding.id).filter(Finding.policy_id == policy_id).all()]
-        if finding_ids:
-            db.query(FindingComment).filter(FindingComment.finding_id.in_(finding_ids)).delete(synchronize_session=False)
-        db.query(Finding).filter(Finding.policy_id == policy_id).delete(synchronize_session=False)
-        db.commit()
-
         # Load rules and objects
         rules_orm = (
             db.query(FirewallRule)
@@ -83,8 +76,6 @@ def run_analysis(policy_id: str, db: Session) -> str:
             rule_orm.risk_factors = factors
             rule["risk_score"] = score
             rule["risk_factors"] = factors
-        db.commit()
-
         findings = []
 
         # Safety net: a policy with objects but no rules almost always means the
@@ -284,6 +275,13 @@ def run_analysis(policy_id: str, db: Session) -> str:
         # all detectors benefit without each needing the vendor passed in.
         _enrich_evaluation_context(findings, rules, policy.vendor)
 
+        # Replace findings in the same transaction as scores and run completion.
+        # Any failure must leave the previous result and its review comments intact.
+        finding_ids = [row[0] for row in db.query(Finding.id).filter(Finding.policy_id == policy_id).all()]
+        if finding_ids:
+            db.query(FindingComment).filter(FindingComment.finding_id.in_(finding_ids)).delete(synchronize_session=False)
+        db.query(Finding).filter(Finding.policy_id == policy_id).delete(synchronize_session=False)
+
         # Save findings
         finding_count = 0
         high_count = 0
@@ -440,11 +438,13 @@ def run_analysis(policy_id: str, db: Session) -> str:
         return run.id
 
     except Exception as e:
+        db.rollback()
         safe_error = redact_secrets(e)
         logger.error("Analysis failed for policy %s: %s", policy_id, safe_error, exc_info=True)
         run.status = "failed"
+        run.completed_at = _utcnow_naive()
         run.error = safe_error
-        if 'policy' in dir():
+        if 'policy' in locals() and policy is not None:
             policy.analysis_status = "failed"
             policy.analysis_error = safe_error
         db.commit()

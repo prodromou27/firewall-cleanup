@@ -2026,23 +2026,41 @@ def _analyze_overlapping_objects(objects: List[dict]) -> List[dict]:
 
 def _analyze_duplicate_objects(objects: List[dict]) -> List[dict]:
     findings = []
-    # Group non-group objects by normalized value
-    value_map: Dict[str, List[dict]] = {}
+    # Equal display values alone do not establish equal object semantics.
+    value_map: Dict[tuple, List[dict]] = {}
     for obj in objects:
         if _is_group_object(obj):
             continue
         if _is_vendor_builtin_object(obj):
             continue
-        val = (obj.get("value") or "").strip().lower()
+        val = (obj.get("value") or "").strip()
         if not val or val in ("any", "all"):
             continue
-        if val not in value_map:
-            value_map[val] = []
-        value_map[val].append(obj)
+        kind = _object_type(obj)
+        if not kind:
+            continue
+        protocol = (obj.get("protocol") or "").strip().lower()
+        ports = (obj.get("port_start"), obj.get("port_end"))
+        if _is_service_object(obj):
+            # Missing ports/protocol must not silently become an any-service match.
+            if protocol not in ("tcp", "udp") or any(type(p) is not int for p in ports):
+                continue
+            if not 0 <= ports[0] <= ports[1] <= 65535:
+                continue
+        raw = obj.get("raw_data") or {}
+        # Source location identifies the record, not its firewall behavior. Retain
+        # every other raw field: source ports, ICMP types and vendor extensions
+        # are not all represented by the normalized columns yet.
+        if isinstance(raw, dict):
+            raw = {k: v for k, v in raw.items() if k != "source_ref"}
+        key = (obj.get("vendor"), kind, val, protocol, ports,
+               json.dumps(raw, sort_keys=True, default=str))
+        value_map.setdefault(key, []).append(obj)
 
-    for val, objs in value_map.items():
+    for key, objs in value_map.items():
         if len(objs) < 2:
             continue
+        val = key[2]
         names = [o.get("object_name") for o in objs]
         findings.append({
             "finding_type": "duplicate_object",
@@ -2060,6 +2078,10 @@ def _analyze_duplicate_objects(objects: List[dict]) -> List[dict]:
                 "value": val,
                 "object_names": names,
                 "object_types": [o.get("object_type") for o in objs],
+                "protocol": objs[0].get("protocol"),
+                "port_start": objs[0].get("port_start"),
+                "port_end": objs[0].get("port_end"),
+                "comparison": "Matching typed fields and retained vendor data; review before consolidation",
             },
             "recommendation": _RL.get("duplicate_object"),
         })

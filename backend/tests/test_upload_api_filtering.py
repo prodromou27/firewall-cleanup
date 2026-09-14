@@ -317,6 +317,23 @@ def test_scorecard_does_not_treat_keyword_substrings_as_temporary(db, user_and_c
     assert not any(i["metric"] == "temporary_rules" for i in result["improvements"])
 
 
+@pytest.mark.parametrize("second_protocol, expected", [("tcp", 1), ("udp", 0)])
+def test_scorecard_duplicate_services_respect_protocol(db, user_and_customer, second_protocol, expected):
+    from app.models.policy import FirewallObject
+    user, customer = user_and_customer
+    policy = _add_policy(db, customer.id, 1)
+    db.flush()
+    for index, protocol in enumerate(["tcp", second_protocol]):
+        db.add(FirewallObject(id=f"svc-{index}", policy_id=policy.id,
+                              vendor="FortiGate", object_name=f"dns-{index}",
+                              object_type="service", value="53", protocol=protocol,
+                              port_start=53, port_end=53))
+    db.commit()
+    result = policies.get_policy_scorecard(policy.id, db=db, user=user)
+    duplicates = [i for i in result["improvements"] if i["metric"] == "duplicate_objects"]
+    assert sum(i["count"] for i in duplicates) == expected
+
+
 def test_findings_api_filters_severity_status_search_and_paginates(db, user_and_customer):
     user, customer = user_and_customer
     policy = _add_policy(db, customer.id, 1)

@@ -627,7 +627,7 @@ def get_policy_scorecard(
 
     # 6. Object hygiene — unused objects
     from app.analysis.engine import (
-        _rule_to_dict, _obj_to_dict, _analyze_unused_objects,
+        _rule_to_dict, _obj_to_dict, _analyze_unused_objects, _analyze_duplicate_objects,
         _is_service_object, _is_vendor_builtin_object,
     )
     from app.analysis.normalizer import build_object_map
@@ -652,14 +652,10 @@ def get_policy_scorecard(
     )
 
     # 7. Duplicate objects
-    from collections import Counter
-    val_counts = Counter(
-        (o.value or "").strip().lower()
-        for o in objects
-        if o.object_type not in ("group", "service-group")
-        and (o.value or "").strip().lower() not in ("", "any", "all")
+    n_duplicate_obj = sum(
+        len(f["affected_objects"]) - 1
+        for f in _analyze_duplicate_objects(normalized_objects)
     )
-    n_duplicate_obj = sum(c - 1 for c in val_counts.values() if c > 1)
 
     # ── Dimension scores (0–100) ─────────────────────────────────────────────
     dim_logging   = logging_pct                          # 20 % weight

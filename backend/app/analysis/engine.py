@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models.policy import FirewallPolicy, FirewallRule, FirewallObject, ObjectMember, AnalysisRun
 from app.models.finding import Finding, FindingComment
+from app.analysis.usage_observation import verified_observation
 from app.analysis.normalizer import (
     build_object_map, expand_rule_sources, expand_rule_destinations,
     expand_rule_services, has_any_source, has_any_destination, has_any_service,
@@ -126,8 +127,8 @@ def run_analysis(policy_id: str, db: Session) -> str:
         # 1. Disabled rules
         findings.extend(_analyze_disabled(rules, obj_map))
 
-        # 2. Zero/low hit rules (suppressed if the policy is younger than the
-        #    minimum observation window — recently imported rules aren't "unused").
+        # 2. Zero/low hit rules require verified telemetry provenance. Policy
+        #    age is an additional conservative gate, never proof of observation.
         _policy_age_days = None
         if getattr(policy, "created_at", None):
             try:
@@ -478,6 +479,8 @@ def _rule_to_dict(r: FirewallRule) -> dict:
         "destinations": _json_list(r.destinations),
         "services": _json_list(r.services),
         "applications": _json_list(r.applications),
+        "users": _json_list(getattr(r, "users", None)),
+        "vpn": _json_list(getattr(r, "vpn", None)),
         "action": r.action,
         "schedule": r.schedule,
         "enabled": r.enabled,
@@ -487,6 +490,7 @@ def _rule_to_dict(r: FirewallRule) -> dict:
         "hit_count": r.hit_count,
         "last_hit": r.last_hit,
         "first_hit": r.first_hit,
+        "usage_observation": raw.get("usage_observation"),
         "security_profiles": profiles,
         # True only when raw_data looks like a parsed FortiGate CLI policy, so the
         # profile-gap detector never fires on a rule whose profiles weren't captured.
@@ -863,10 +867,8 @@ def _analyze_usage(rules: List[dict], obj_map: dict, policy_age_days: int = None
     findings = []
     now = _utcnow_naive()
 
-    # Phase 8: usage findings require a meaningful observation window. If the
-    # policy has been observed for less than the minimum age, hit/last-hit data
-    # cannot yet show a rule is unused — suppress usage findings rather than flag
-    # recently-imported rules as dead.
+    # Policy age is only an extra suppression gate. The verified per-rule
+    # observation below is required independently of this value.
     obs_days = settings.usage_observation_days
     if (settings.suppress_usage_findings_when_incomplete
             and policy_age_days is not None
@@ -881,6 +883,11 @@ def _analyze_usage(rules: List[dict], obj_map: dict, policy_age_days: int = None
 
         hit_count = rule.get("hit_count")
         last_hit = rule.get("last_hit")
+        # Policy age is not counter age. Only a complete, current counter window
+        # with no reset supports a usage finding.
+        observation = verified_observation(rule, obs_days, now)
+        if observation is None:
+            continue
         rule_id = rule.get("rule_id") or rule.get("rule_number", "?")
         rule_name = rule.get("rule_name") or f"Rule {rule_id}"
 
@@ -888,14 +895,16 @@ def _analyze_usage(rules: List[dict], obj_map: dict, policy_age_days: int = None
             findings.append({
                 "finding_type": "zero_hit_rule",
                 "severity": "Medium",
-                "confidence": "High",
+                "confidence": "Medium",
                 "title": f"Rule {rule_id} has zero hits",
                 "description": (
-                    f"{rule_name} has a recorded hit count of zero. This rule has never "
-                    "matched any traffic, which may indicate it is redundant or incorrectly configured."
+                    f"{rule_name} has zero recorded hits in a verified observation window. "
+                    "This warrants business validation; it does not prove the rule is unused."
                 ),
                 "affected_rules": [rule.get("id")],
-                "evidence": {"rule_id": rule_id, "hit_count": 0, "observation_days": obs_days},
+                "evidence": {"rule_id": rule_id, "hit_count": 0, "observation_days": obs_days,
+                             "usage_observation": observation, "classification": "Needs review",
+                             "false_positive_reason": "Rare or seasonal traffic may fall outside the window."},
                 "recommendation": _RL.get("zero_hit_rule"),
             })
         elif low_thr and isinstance(hit_count, int) and 0 < hit_count <= low_thr:
@@ -903,7 +912,7 @@ def _analyze_usage(rules: List[dict], obj_map: dict, policy_age_days: int = None
             findings.append({
                 "finding_type": "low_usage_rule",
                 "severity": "Low",
-                "confidence": "High",
+                "confidence": "Medium",
                 "title": f"Rule {rule_id} has very few hits ({hit_count})",
                 "description": (
                     f"{rule_name} has only {hit_count} recorded hit(s) "
@@ -912,12 +921,15 @@ def _analyze_usage(rules: List[dict], obj_map: dict, policy_age_days: int = None
                 ),
                 "affected_rules": [rule.get("id")],
                 "evidence": {"rule_id": rule_id, "hit_count": hit_count,
-                             "low_hit_threshold": low_thr, "observation_days": obs_days},
+                             "low_hit_threshold": low_thr, "observation_days": obs_days,
+                             "usage_observation": observation, "classification": "Needs review"},
                 "recommendation": _RL.get("low_usage_rule"),
             })
         elif last_hit:
             try:
-                lh = datetime.fromisoformat(str(last_hit).replace("Z", ""))
+                lh = datetime.fromisoformat(str(last_hit).replace("Z", "+00:00"))
+                if lh.tzinfo is not None:
+                    lh = lh.astimezone(UTC).replace(tzinfo=None)
                 days_inactive = (now - lh).days
                 threshold = None
                 if days_inactive >= settings.inactivity_threshold_high:
@@ -934,7 +946,7 @@ def _analyze_usage(rules: List[dict], obj_map: dict, policy_age_days: int = None
                     findings.append({
                         "finding_type": "low_usage_rule",
                         "severity": severity,
-                        "confidence": "High",
+                        "confidence": "Medium",
                         "title": f"Rule {rule_id} has not been used in {days_inactive} days",
                         "description": (
                             f"{rule_name} has not matched any traffic in {days_inactive} days "
@@ -947,6 +959,8 @@ def _analyze_usage(rules: List[dict], obj_map: dict, policy_age_days: int = None
                             "last_hit": str(last_hit),
                             "days_inactive": days_inactive,
                             "hit_count": hit_count,
+                            "usage_observation": observation,
+                            "classification": "Needs review",
                         },
                         "recommendation": _RL.get("low_usage_rule"),
                     })

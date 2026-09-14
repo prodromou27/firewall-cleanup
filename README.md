@@ -23,7 +23,7 @@ scoring, compliance checks, and professional multi-format reporting.
 ### Analysis
 - **Duplicate Rule Detection** — compares expanded, normalized objects, not just names
 - **Shadow Rule Detection** — full and partial shadowing with policy-order awareness
-- **Disabled / Inactive Rules** — disabled and zero-hit rules
+- **Disabled / Inactive Rules** — disabled rules; zero/low-hit review findings only with a verified, complete counter observation window
 - **Overly Permissive Rules** — any source / destination / service
 - **Risky Service Detection** — RDP, SSH, Telnet, SMB, SQL, VNC, and more
 - **Unused & Duplicate Object Detection** — unreferenced objects; same value, different names

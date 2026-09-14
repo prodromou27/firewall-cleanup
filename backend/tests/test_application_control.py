@@ -87,9 +87,9 @@ def test_zero_hit_finding_requires_hit_data():
     # Unknown hits (None) → NO zero-hit finding (the false positive we fixed)
     none_rule = _rule(hit_count=None, **constrained)
     assert not [f for f in _analyze_usage([none_rule], {}) if f["finding_type"] == "zero_hit_rule"]
-    # Real zero → flagged
+    # A real zero without counter provenance is still insufficient evidence.
     zero_rule = _rule(hit_count=0, **constrained)
-    assert [f for f in _analyze_usage([zero_rule], {}) if f["finding_type"] == "zero_hit_rule"]
+    assert not [f for f in _analyze_usage([zero_rule], {}) if f["finding_type"] == "zero_hit_rule"]
     # Positive hits → not flagged
     used_rule = _rule(hit_count=42, **constrained)
     assert not [f for f in _analyze_usage([used_rule], {}) if f["finding_type"] == "zero_hit_rule"]

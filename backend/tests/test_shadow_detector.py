@@ -46,23 +46,55 @@ def test_full_shadow(obj_map):
     assert "2" in findings[0]["title"]
 
 
+@pytest.mark.parametrize("field,left,right", [
+    ("applications", ["web-browsing"], ["ssh"]),
+    ("users", ["engineering"], ["finance"]),
+    ("vpn", ["remote-access"], ["site-to-site"]),
+    ("schedule", "business-hours", "always"),
+    ("logging_enabled", True, False),
+    ("security_profiles", {"ips-sensor": "strict"}, {"ips-sensor": "default"}),
+])
+def test_non_equivalent_match_or_inspection_context_never_claimed_redundant(obj_map, field, left, right):
+    first = make_rule(1, ["Net-16"], ["Server"], ["any-svc"])
+    second = make_rule(2, ["Host-5"], ["Server"], ["HTTPS-SVC"])
+    first[field], second[field] = left, right
+    assert not any(f["finding_type"] == "redundant_rule" for f in detect_shadows([first, second], obj_map))
+
+
 def test_partial_shadow_different_dest(obj_map):
     """Source + service overlap but destination differs -> partial shadow.
 
     Rule 2's source Host-5 (10.10.5.20) is contained by Rule 1's Net-16
     (10.10.0.0/16), and Rule 1's 'any' service contains HTTPS, but Rule 2's
-    destination Net-16 is broader than Rule 1's Server, so it is not fully
+    destination 172.16.1.0/24 is broader than Rule 1's Server, so it is not fully
     contained. Two of three dimensions overlap -> a partial-shadow finding.
     """
     rules = [
         make_rule(1, ["Net-16"], ["Server"], ["any-svc"]),
-        make_rule(2, ["Host-5"], ["Net-16"], ["HTTPS-SVC"]),
+        make_rule(2, ["Host-5"], ["172.16.1.0/24"], ["HTTPS-SVC"]),
     ]
     findings = detect_shadows(rules, obj_map)
     assert len(findings) == 1
     assert findings[0]["finding_type"] == "partial_shadowed_rule"
     assert findings[0]["evidence"]["conflict_type"] == "partial"
     assert "partially shadowed" in findings[0]["title"]
+
+
+def test_two_contained_dimensions_with_disjoint_destination_are_not_partial_shadow(obj_map):
+    rules = [
+        make_rule(1, ["Net-16"], ["Server"], ["any-svc"]),
+        make_rule(2, ["Host-5"], ["192.0.2.0/24"], ["HTTPS-SVC"]),
+    ]
+    assert detect_shadows(rules, obj_map) == []
+
+
+def test_tcp_only_service_cannot_shadow_any_protocol(obj_map):
+    obj_map["TCP-ALL"] = {"object_name": "TCP-ALL", "object_type": "service",
+                          "value": "tcp/0-65535", "protocol": "tcp",
+                          "port_start": 0, "port_end": 65535, "members": []}
+    first = make_rule(1, ["Net-16"], ["Server"], ["TCP-ALL"])
+    second = make_rule(2, ["Host-5"], ["Server"], ["any-svc"])
+    assert not any(f["finding_type"] == "redundant_rule" for f in detect_shadows([first, second], obj_map))
 
 
 def test_full_shadow_with_hits_reported_low_confidence(obj_map):

@@ -5,6 +5,7 @@ from app.analysis.normalizer import (
 )
 from app.analysis.ip_utils import networks_equal, is_any
 from app.analysis.service_utils import services_equal, service_is_any
+from app.analysis.rule_semantics import comparable_rule_semantics, expansion_complete
 
 
 def _addr_sets_equal(a: List[dict], b: List[dict]) -> bool:
@@ -55,13 +56,7 @@ def _svc_sets_equal(a: List[dict], b: List[dict]) -> bool:
 
 def _expansion_complete(entry: dict) -> bool:
     """True if the rule expanded with no unresolved (unknown) objects."""
-    if any(s.get("type") == "unknown" for s in entry["sources"]):
-        return False
-    if any(d.get("type") == "unknown" for d in entry["destinations"]):
-        return False
-    if any(s.get("unknown") for s in entry["services"]):
-        return False
-    return True
+    return expansion_complete(entry)
 
 
 def detect_duplicates(
@@ -120,6 +115,10 @@ def detect_duplicates(
             action1 = (r1["rule"].get("action") or "").lower()
             action2 = (r2["rule"].get("action") or "").lower()
             if action1 != action2:
+                continue
+            if not (expansion_complete(r1) and expansion_complete(r2)):
+                continue
+            if not comparable_rule_semantics(r1["rule"], r2["rule"]):
                 continue
             if (_addr_sets_equal(r1["sources"], r2["sources"])
                     and _addr_sets_equal(r1["destinations"], r2["destinations"])
@@ -185,7 +184,7 @@ def detect_duplicates(
             "description": description,
             "affected_rules": affected_rule_db_ids,
             "evidence": {
-                "matching_fields": "source, destination, service, action",
+                "matching_fields": "source, destination, service, application, user, VPN, schedule, action, logging, NAT and security profiles",
                 "rules_in_group": [f"Rule {first_id} ({first_name})"] + dup_labels,
                 "expanded_source": [s.get("value") for s in first["sources"]],
                 "expanded_destination": [d.get("value") for d in first["destinations"]],

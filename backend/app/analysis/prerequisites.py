@@ -22,7 +22,7 @@ from typing import Dict, List, Optional
 # Capability keys describing the data available for a policy.
 CAPABILITIES = (
     "rules", "objects", "group_graph", "nat", "interfaces",
-    "applications", "hit_counts", "last_hit", "layer_context",
+    "applications", "hit_counts", "last_hit", "layer_context", "verified_usage",
 )
 
 
@@ -32,11 +32,11 @@ CAPABILITIES = (
 # policy's vendor is silently skipped (not a data gap).
 DETECTOR_PREREQUISITES: Dict[str, dict] = {
     "zero_hit_rule": {
-        "label": "Zero-hit rules", "requires": {"rules", "hit_counts"},
+        "label": "Zero-hit rules", "requires": {"rules", "hit_counts", "verified_usage"},
         "missing": "skip", "vendors": None,
     },
     "low_usage_rule": {
-        "label": "Low-usage rules", "requires": {"rules", "last_hit"},
+        "label": "Low-usage rules", "requires": {"rules", "verified_usage"},
         "missing": "skip", "vendors": None,
     },
     "unattached_object": {
@@ -122,6 +122,10 @@ def assess(rules: List[dict], objects: List[dict], obj_map: dict,
            nat_rules, vendor: str, device_interfaces=None) -> Dict[str, bool]:
     """Return the capability availability map for a policy."""
     enabled = [r for r in rules if r.get("enabled", True)]
+    from datetime import datetime, UTC
+    from app.analysis.usage_observation import verified_observation
+    from app.config import settings
+    now = datetime.now(UTC).replace(tzinfo=None)
     has_vip = any((o.get("object_type") or "").lower() == "vip" for o in (objects or []))
     return {
         "rules": bool(rules),
@@ -133,6 +137,8 @@ def assess(rules: List[dict], objects: List[dict], obj_map: dict,
         "applications": _app_data_present(rules, vendor),
         "hit_counts": any(r.get("hit_count") is not None for r in enabled),
         "last_hit": any(r.get("last_hit") for r in rules),
+        "verified_usage": any(verified_observation(r, settings.usage_observation_days, now)
+                              is not None for r in enabled),
         "layer_context": any(r.get("section") or r.get("source_interfaces")
                              or r.get("install_on") for r in rules),
     }

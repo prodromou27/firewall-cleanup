@@ -142,5 +142,4 @@ def test_risky_permissive_and_zero_hit_detections_avoid_common_false_positives()
     assert _analyze_permissive([scoped_admin_rule], obj_map) == []
     assert _analyze_usage([_rule(2, hit_count=None)], obj_map) == []
     zero_hit = _analyze_usage([_rule(3, hit_count=0)], obj_map)
-    assert len(zero_hit) == 1
-    assert zero_hit[0]["finding_type"] == "zero_hit_rule"
+    assert zero_hit == []  # Missing counter provenance is insufficient evidence.

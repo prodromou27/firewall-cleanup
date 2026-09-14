@@ -11,9 +11,10 @@ from typing import List, Dict, Any, Tuple
 from app.analysis.normalizer import (
     expand_rule_sources, expand_rule_destinations, expand_rule_services
 )
-from app.analysis.ip_utils import network_contains, is_any
-from app.analysis.service_utils import service_contains, service_is_any
+from app.analysis.ip_utils import network_contains, networks_overlap, is_any
+from app.analysis.service_utils import service_contains, service_is_any, services_overlap
 from app.analysis.vendor_semantics import context_key, context_label
+from app.analysis.rule_semantics import comparable_rule_semantics, expansion_complete
 
 
 def _sources_contained(earlier_srcs: List[dict], later_srcs: List[dict]) -> Tuple[bool, str]:
@@ -66,16 +67,23 @@ def _services_contained(earlier_svcs: List[dict], later_svcs: List[dict]) -> Tup
     return True, "Earlier rule service contains later rule service"
 
 
+def _addresses_overlap(earlier: List[dict], later: List[dict]) -> bool:
+    return any(networks_overlap(a.get("value", ""), b.get("value", ""))
+               for a in earlier for b in later)
+
+
+def _traffic_overlaps(first: dict, second: dict) -> bool:
+    """A partial shadow needs intersection in every traffic dimension."""
+    return (_addresses_overlap(first["sources"], second["sources"])
+            and _addresses_overlap(first["destinations"], second["destinations"])
+            and any(services_overlap(a, b) for a in first["services"]
+                    for b in second["services"]))
+
+
 
 def _has_unknown(entry: dict) -> bool:
     """True if the rule references objects that could not be expanded."""
-    if any(s.get("type") == "unknown" for s in entry["sources"]):
-        return True
-    if any(d.get("type") == "unknown" for d in entry["destinations"]):
-        return True
-    if any(s.get("unknown") for s in entry["services"]):
-        return True
-    return False
+    return not expansion_complete(entry)
 
 
 def detect_shadows(
@@ -165,6 +173,8 @@ def _detect_within_context(expanded: List[dict], vendor: str, not_evaluated: lis
                 continue
             if earlier_rule.get("negated"):
                 continue
+            if not comparable_rule_semantics(earlier_rule, later_rule):
+                continue
 
             src_ok, src_rel = _sources_contained(earlier["sources"], later["sources"])
             dst_ok, dst_rel = _destinations_contained(earlier["destinations"], later["destinations"])
@@ -176,6 +186,8 @@ def _detect_within_context(expanded: List[dict], vendor: str, not_evaluated: lis
                 continue
 
             full = contained_count == 3
+            if not full and not _traffic_overlaps(earlier, later):
+                continue
 
             # Recorded hits on the later rule contradict a full-shadow claim:
             # the device's own counters show traffic matched it (commonly the

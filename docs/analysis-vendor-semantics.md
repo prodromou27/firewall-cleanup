@@ -132,7 +132,7 @@ and never assert a Critical exposure on NAT alone.
 | duplicate_rule | full expansion (no `unknown`), **same context key** | skip pair |
 | shadowed_rule (same/conflict/partial) | full expansion, rule order, **same context key**, schedule compat | `shadowing_not_evaluated` (Informational) |
 | risky/exposed/cleartext service | expanded services + source classification | reduce confidence |
-| zero_hit_rule | `hit_count==0` **and** hit-count source available | Informational import-quality note |
+| zero_hit_rule | `hit_count==0` **and** complete, current, reset-free observation provenance | Suppress finding and disclose telemetry gap |
 | low_usage_rule | `last_hit` present | skip |
 | unused_object | full group expansion (direct+indirect) | skip / reduce |
 | empty_group | customer (non-builtin) group, expansion complete | suppress builtins |

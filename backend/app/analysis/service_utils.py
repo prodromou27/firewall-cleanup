@@ -42,7 +42,6 @@ def service_contains(outer: dict, inner: dict) -> bool:
 
     proto_match = (
         outer["protocol"] == "any"
-        or inner["protocol"] == "any"
         or outer["protocol"] == inner["protocol"]
     )
     if not proto_match:

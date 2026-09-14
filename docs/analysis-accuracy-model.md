@@ -103,8 +103,8 @@ interface/direction; Huawei source/destination zone + sequence. See
 ## 7. Detector prerequisites
 Each detector declares required data and **missing-data behavior** (skip / reduce
 confidence / informational diagnostic). Implemented as a code matrix in
-`app/analysis/prerequisites.py` (see Phase 2). Examples: zero-hit ⇒ real hit-count
-source; low-usage ⇒ last-hit; duplicate/shadow ⇒ full expansion + comparable
+`app/analysis/prerequisites.py`. Examples: zero-hit and low-usage ⇒ verified,
+complete counter observation; duplicate/shadow ⇒ full expansion + comparable
 context; public exposure ⇒ public IP/interface/NAT + policy evidence; unattached
 object ⇒ complete reference graph; version EOL ⇒ version catalog; App-Control ⇒
 vendor-supported application data.

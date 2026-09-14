@@ -163,7 +163,7 @@ Confidence is **not** cosmetic — it encodes how much evidence backs a finding:
 ## 7. What deliberately does NOT happen
 
 - No write-back of any kind (rules, objects, NAT, interfaces, firmware).
-- No zero-hit findings without hit-count data.
+- No zero-hit findings without complete, current, reset-free counter provenance covering the configured observation window. A zero counter alone is insufficient.
 - No "unused"/"empty group" findings when rules failed to import.
 - No EOL/outdated-version findings without a Version Catalog entry.
 - No public-exposure findings from NAT alone without supporting evidence.

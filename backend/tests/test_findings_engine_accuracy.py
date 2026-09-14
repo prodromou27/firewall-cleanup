@@ -70,31 +70,57 @@ def test_zero_hit_requires_hit_count_data():
 
     findings = _analyze_usage([_rule(2, hit_count=0)], {})
 
+    assert findings == []  # A counter alone has no verified observation period.
+
+
+def _observed_rule(rule, days=100, complete=True, counter_reset=False, end_days_ago=0):
+    from datetime import UTC, datetime, timedelta
+    end = datetime.now(UTC) - timedelta(days=end_days_ago, minutes=1)
+    rule["usage_observation"] = {
+        "start": (end - timedelta(days=days)).isoformat(),
+        "end": end.isoformat(),
+        "complete": complete,
+        "counter_reset": counter_reset,
+        "source": "verified-device-counter-history",
+    }
+    return rule
+
+
+def test_verified_zero_hit_is_review_only():
+    findings = _analyze_usage([_observed_rule(_rule(2, hit_count=0))], {})
     assert len(findings) == 1
     assert findings[0]["finding_type"] == "zero_hit_rule"
     assert findings[0]["evidence"]["hit_count"] == 0
+    assert findings[0]["evidence"]["classification"] == "Needs review"
+    assert "never" not in findings[0]["description"]
     _assert_quality(findings)
 
 
 def test_usage_observation_window_recorded_in_evidence():
-    findings = _analyze_usage([_rule(2, hit_count=0)], {})
+    findings = _analyze_usage([_observed_rule(_rule(2, hit_count=0))], {})
     assert findings[0]["evidence"]["observation_days"]  # window surfaced
 
 
 def test_min_age_suppresses_usage_findings_for_new_policy():
     # A policy observed for fewer days than the minimum age → usage suppressed.
-    assert _analyze_usage([_rule(1, hit_count=0)], {}, policy_age_days=1) == []
+    assert _analyze_usage([_observed_rule(_rule(1, hit_count=0))], {}, policy_age_days=1) == []
     # An old-enough policy still produces the zero-hit finding.
-    assert _analyze_usage([_rule(1, hit_count=0)], {}, policy_age_days=400)
+    assert _analyze_usage([_observed_rule(_rule(1, hit_count=0))], {}, policy_age_days=400)
+
+
+def test_usage_suppressed_for_reset_stale_short_or_incomplete_counters():
+    for kwargs in ({"counter_reset": True}, {"complete": False},
+                   {"end_days_ago": 8}, {"days": 10}):
+        assert _analyze_usage([_observed_rule(_rule(1, hit_count=0), **kwargs)], {}) == []
 
 
 def test_low_hit_threshold_is_opt_in(monkeypatch):
     from app.config import settings
     # Disabled by default → a 3-hit rule is not flagged.
-    assert _analyze_usage([_rule(1, hit_count=3)], {}) == []
+    assert _analyze_usage([_observed_rule(_rule(1, hit_count=3))], {}) == []
     # Enable the threshold → 0 < hits <= threshold is a low-usage finding.
     monkeypatch.setattr(settings, "low_hit_threshold", 5)
-    findings = _analyze_usage([_rule(1, hit_count=3)], {})
+    findings = _analyze_usage([_observed_rule(_rule(1, hit_count=3))], {})
     assert len(findings) == 1
     assert findings[0]["finding_type"] == "low_usage_rule"
     assert findings[0]["evidence"]["hit_count"] == 3
@@ -138,7 +164,7 @@ def test_duplicate_rules_require_identical_effective_traffic():
 
     assert len(findings) == 1
     assert findings[0]["finding_type"] == "duplicate_rule"
-    assert findings[0]["evidence"]["matching_fields"] == "source, destination, service, action"
+    assert "application" in findings[0]["evidence"]["matching_fields"]
     _assert_quality(findings)
 
     no_match = detect_duplicates([_rule(1, services=["https"]), _rule(2, services=["ssh"])], {})

@@ -83,3 +83,25 @@ def test_three_rules_two_duplicates(obj_map):
     assert len(findings) == 1
     assert findings[0]["finding_type"] == "duplicate_rule"
     assert len(findings[0]["affected_rules"]) == 3
+
+
+@pytest.mark.parametrize("field,left,right", [
+    ("applications", ["web-browsing"], ["ssh"]),
+    ("users", ["engineering"], ["finance"]),
+    ("vpn", ["remote-access"], ["site-to-site"]),
+    ("schedule", "business-hours", "always"),
+    ("logging_enabled", True, False),
+    ("nat_enabled", True, False),
+    ("security_profiles", {"ips-sensor": "strict"}, {"ips-sensor": "default"}),
+])
+def test_different_match_or_inspection_semantics_are_not_duplicates(obj_map, field, left, right):
+    first = make_rule(1, ["Net-10"], ["Server_A"], ["HTTPS-SVC"])
+    second = make_rule(2, ["Net-10"], ["Server_A"], ["HTTPS-SVC"])
+    first[field], second[field] = left, right
+    assert detect_duplicates([first, second], obj_map) == []
+
+
+def test_unresolved_group_is_not_a_confirmed_duplicate(obj_map):
+    obj_map["Empty"] = {"object_name": "Empty", "object_type": "address_group", "members": []}
+    rules = [make_rule(n, ["Empty"], ["Server_A"], ["HTTPS-SVC"]) for n in (1, 2)]
+    assert detect_duplicates(rules, obj_map) == []

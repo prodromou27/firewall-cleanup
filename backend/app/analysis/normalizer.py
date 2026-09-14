@@ -57,7 +57,7 @@ def expand_address_object(
         return [{"type": "any", "value": "0.0.0.0/0", "name": name}]
 
     if name in visited:
-        return []
+        return [{"type": "unknown", "value": name, "name": name, "reason": "circular_group"}]
     visited = visited | {name}
 
     obj = obj_map.get(name)
@@ -212,7 +212,8 @@ def expand_service_object(
         return [{"protocol": "any", "port_start": 0, "port_end": 65535, "name": name}]
 
     if name in visited:
-        return []
+        return [{"protocol": "unknown", "port_start": None, "port_end": None,
+                 "name": name, "unknown": True, "reason": "circular_group"}]
     visited = visited | {name}
 
     obj = obj_map.get(name)
@@ -227,7 +228,8 @@ def expand_service_object(
         results = []
         for member in obj.get("members", []):
             results.extend(expand_service_object(_ref_name(member), obj_map, visited))
-        return results
+        return results or [{"protocol": "unknown", "port_start": None, "port_end": None,
+                            "name": name, "unknown": True, "empty_group": True}]
 
     return [{
         "protocol": obj.get("protocol", "any"),

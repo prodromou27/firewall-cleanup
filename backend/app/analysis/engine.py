@@ -1408,9 +1408,23 @@ def _analyze_rule_order(rules: List[dict]) -> List[dict]:
     rules. Read-only — recommends manual reordering. Skips entirely when hit
     data is not available.
     """
-    enabled = [r for r in rules if r.get("enabled", True) and r.get("hit_count") is not None]
+    now = _utcnow_naive()
+    enabled = [r for r in rules if r.get("enabled", True) and r.get("hit_count") is not None
+               and verified_observation(r, settings.usage_observation_days, now)]
     if len(enabled) < 5:
         return []  # too little hit data to draw a conclusion
+
+    # Counters from different windows or evaluation contexts are not comparable.
+    contexts = set()
+    for rule in enabled:
+        observation = verified_observation(rule, settings.usage_observation_days, now)
+        contexts.add(json.dumps([
+            observation["start"], observation["end"], observation["source"],
+            *[rule.get(field) for field in (
+                "vendor", "section", "source_interfaces", "destination_interfaces", "install_on")],
+        ], sort_keys=True, default=str))
+    if len(contexts) != 1:
+        return []
 
     ordered = sorted(enabled, key=lambda r: (r.get("rule_number") or 0))
     findings = []
@@ -1424,20 +1438,22 @@ def _analyze_rule_order(rules: List[dict]) -> List[dict]:
                 "finding_type": "rule_order_optimization",
                 "severity": "Low",
                 "confidence": "Medium",
-                "title": f"Rule {rule_id} is heavily used but sits below {zero_above} unused rules",
+                "title": f"Rule {rule_id} has high recorded usage below {zero_above} zero-hit rules",
                 "description": (
                     f"{rule_name} has {hits:,} hits but is positioned below {zero_above} "
-                    "enabled rules that currently receive no traffic. Because firewalls "
-                    "evaluate rules top-to-bottom, promoting frequently-matched rules above "
-                    "unused ones reduces per-packet evaluation overhead."
+                    "enabled rules with zero hits in the same verified observation window. "
+                    "This is a counter observation; it does not establish that moving this "
+                    "rule is safe or would improve device performance."
                 ),
                 "affected_rules": [r.get("id")],
                 "evidence": {
                     "rule_id": rule_id,
                     "hit_count": hits,
                     "zero_hit_rules_above": zero_above,
+                    "usage_observation": verified_observation(r, settings.usage_observation_days, now),
+                    "classification": "Needs review",
                 },
-                "recommendation": _RL.get("rule_order_optimization"),
+                "recommendation": "Validate match-order dependencies and device performance before proposing any reorder; counters alone do not justify moving a rule.",
             })
         if hits == 0:
             zero_above += 1

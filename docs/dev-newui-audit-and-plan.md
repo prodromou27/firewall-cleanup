@@ -59,6 +59,8 @@ Do not use the current findings as approved change instructions. No automatic fi
 
 ## Data, operations and validation notes
 
+Circular address expansion now retains an unknown marker rather than becoming an empty group. Empty or circular service groups retain an unknown marker rather than falling back to Any service. These markers suppress definitive duplicate/shadow comparisons, and cycles do not establish an inoperative rule. Truly empty address groups remain eligible for the existing inoperative check. Rule-order observations now require verified counters from a shared observation window and evaluation context; the text does not assert safe reordering or a performance benefit. Previously persisted findings are not rewritten by these code changes.
+
 Reanalysis now commits finding replacement, rule scores and completion metadata in one transaction. Detector or database failures roll back the replacement, preserving the previous findings, reviewer comments and scores, while recording the failed run separately. Successful reanalysis still replaces findings and comments: immutable review history and stable finding reconciliation remain phase 4 work.
 
 The scorecard uses the analysis reference graph for non-service object hygiene, including nested groups, relational membership and NAT references. Missing references, cycles, absent rules or no eligible objects make the dimension unavailable and remove its weight. Counts describe unattached objects in the imported configuration, not confirmed runtime non-use. Temporary-rule keywords use the same whole-token matching as analysis.

@@ -1,5 +1,11 @@
 """Unit tests for rule-order optimization and oversized-section detectors."""
 from app.analysis.engine import _analyze_rule_order, _analyze_section_size
+from datetime import UTC, datetime, timedelta
+
+_END = datetime.now(UTC) - timedelta(hours=1)
+_OBSERVATION = {"start": (_END - timedelta(days=180)).isoformat(),
+                "end": _END.isoformat(), "source": "test-collector",
+                "complete": True, "counter_reset": False}
 
 
 def _rule(num, hit_count=None, section=None, enabled=True):
@@ -7,6 +13,7 @@ def _rule(num, hit_count=None, section=None, enabled=True):
         "id": f"rule-{num}", "rule_id": str(num), "rule_number": num,
         "rule_name": f"Rule {num}", "hit_count": hit_count,
         "section": section, "enabled": enabled, "action": "accept",
+        "usage_observation": dict(_OBSERVATION),
     }
 
 
@@ -23,6 +30,22 @@ def test_busy_rule_below_many_zero_hit_flagged():
 
 def test_busy_rule_at_top_not_flagged():
     rules = [_rule(1, hit_count=50000)] + [_rule(i, hit_count=0) for i in range(2, 14)]
+    assert _analyze_rule_order(rules) == []
+
+
+def test_raw_counters_do_not_prove_rule_order_candidate():
+    rules = [_rule(i, hit_count=0) for i in range(1, 13)] + [_rule(13, hit_count=50000)]
+    for rule in rules:
+        rule.pop("usage_observation")
+    assert _analyze_rule_order(rules) == []
+
+
+def test_rule_order_does_not_compare_different_sections_or_windows():
+    rules = [_rule(i, hit_count=0) for i in range(1, 13)] + [_rule(13, hit_count=50000)]
+    rules[-1]["section"] = "different-layer"
+    assert _analyze_rule_order(rules) == []
+    rules[-1]["section"] = None
+    rules[-1]["usage_observation"]["start"] = (_END - timedelta(days=200)).isoformat()
     assert _analyze_rule_order(rules) == []
 
 

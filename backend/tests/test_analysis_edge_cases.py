@@ -2,6 +2,7 @@
 
 from app.analysis.duplicate_detector import detect_duplicates
 from app.analysis.engine import (
+    _analyze_inoperative_rules,
     _analyze_permissive,
     _analyze_risky_services,
     _analyze_unused_objects,
@@ -9,6 +10,37 @@ from app.analysis.engine import (
 )
 from app.analysis.normalizer import build_object_map, expand_rule_destinations, expand_rule_services, expand_rule_sources
 from app.analysis.shadow_detector import detect_shadows
+from app.analysis.normalizer import has_any_service
+
+
+def test_circular_address_groups_are_unknown_not_inoperative():
+    objects = [_object("A", "address_group", "", ["B"]),
+               _object("B", "address_group", "", ["A"])]
+    obj_map = build_object_map(objects)
+    rules = [_rule(i, sources=["A"]) for i in (1, 2)]
+    assert expand_rule_sources(rules[0], obj_map)[0]["type"] == "unknown"
+    assert _analyze_inoperative_rules(rules, obj_map) == []
+    assert detect_duplicates(rules, obj_map) == []
+    assert {f["finding_type"] for f in detect_shadows(rules, obj_map)} == {"shadowing_not_evaluated"}
+
+
+def test_empty_and_circular_service_groups_do_not_expand_to_any():
+    objects = [_object("Empty", "service_group", ""),
+               _object("Loop", "service_group", "", ["Loop"])]
+    obj_map = build_object_map(objects)
+    for name in ("Empty", "Loop"):
+        rules = [_rule(i, sources=["10.0.0.1"], destinations=["10.0.0.2"],
+                       services=[name]) for i in (1, 2)]
+        assert not has_any_service(rules[0], obj_map)
+        assert expand_rule_services(rules[0], obj_map)[0]["unknown"]
+        assert _analyze_permissive(rules, obj_map) == []
+        assert detect_duplicates(rules, obj_map) == []
+        assert {f["finding_type"] for f in detect_shadows(rules, obj_map)} == {"shadowing_not_evaluated"}
+
+
+def test_genuinely_empty_address_group_still_has_inoperative_finding():
+    obj_map = build_object_map([_object("Empty", "address_group", "")])
+    assert len(_analyze_inoperative_rules([_rule(1, sources=["Empty"])], obj_map)) == 1
 
 
 def _rule(n, sources=None, destinations=None, services=None, **overrides):

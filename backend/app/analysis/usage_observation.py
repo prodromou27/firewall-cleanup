@@ -3,7 +3,12 @@ from datetime import UTC, datetime
 
 
 def verified_observation(rule: dict, minimum_days: int, now: datetime) -> dict | None:
-    observation = rule.get("usage_observation")
+    if isinstance(rule, dict):
+        observation = rule.get("usage_observation")
+        if observation is None:
+            observation = (rule.get("raw_data") or {}).get("usage_observation")
+    else:
+        observation = (getattr(rule, "raw_data", None) or {}).get("usage_observation")
     if not isinstance(observation, dict) or observation.get("complete") is not True \
             or observation.get("counter_reset") is not False or not observation.get("source"):
         return None

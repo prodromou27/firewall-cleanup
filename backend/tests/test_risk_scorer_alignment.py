@@ -39,3 +39,13 @@ def test_any_to_any_specific_service_scores_critical():
     score, factors = score_rule(rule, objects)
     assert score_to_severity(score) == "Critical"
     assert "any_to_any" in factors
+
+
+def test_zero_counter_without_verified_window_does_not_increase_rule_risk():
+    rule = {
+        "sources": ["10.0.0.1"], "destinations": ["10.0.0.2"],
+        "services": ["https"], "action": "accept", "enabled": True,
+        "logging_enabled": True, "hit_count": 0,
+    }
+    _, factors = score_rule(rule, {})
+    assert "zero_hits" not in factors

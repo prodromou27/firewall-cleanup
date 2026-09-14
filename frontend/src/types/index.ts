@@ -322,7 +322,7 @@ export interface DeviceTrends {
 export interface ScorecardDimension {
   key: string
   label: string
-  score: number
+  score: number | null
   weight: number
   detail: string
 }

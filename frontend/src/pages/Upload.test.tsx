@@ -72,6 +72,7 @@ describe('upload workflow helpers', () => {
   it('extracts lower-case extensions and validates vendor-specific file types', () => {
     expect(uploadFileExtension('CONFIG.CONF')).toBe('.conf')
     expect(validateUploadFile({ name: 'policy.txt', size: 100 } as File, 'PaloAlto')).toContain('Unsupported file type .txt')
+    expect(validateUploadFile({ name: 'policy.json', size: 100 } as File, 'PaloAlto')).toContain('Unsupported file type .json')
     expect(validateUploadFile({ name: 'policy.xml', size: 0 } as File, 'PaloAlto')).toContain('selected file is empty')
     expect(validateUploadFile({ name: 'policy.xml', size: 100 } as File, 'PaloAlto')).toBeNull()
   })

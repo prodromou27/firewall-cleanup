@@ -34,7 +34,7 @@ The above fixes avoid unsafe assertions but are deliberately conservative: they 
 |---|---|---|---|
 | FortiGate | `.conf`, `.txt`, `.json`, `.cfg` | FortiGate connector | Central NAT, local-in, identity and profile coverage, VDOM and install target semantics. |
 | Check Point | `.json`, `.txt` | Check Point connector | Inline layers, access roles and URL category typing, install-target overlap, NAT ordering. |
-| Palo Alto | `.xml`, `.json`, `.conf` | Palo Alto connector | Local/pre/post scope, App-ID and `application-default`, User-ID, post-NAT zone. |
+| Palo Alto | `.xml` | Palo Alto connector | Local/pre/post scope, App-ID and `application-default`, User-ID, post-NAT zone. |
 | Cisco ASA | `.txt`, `.conf`, `.cfg` | Cisco ASA connector | ACL binding and direction, object/NAT order, inactive rules, implicit security levels. |
 | Huawei USG | `.txt`, `.cfg`, `.conf` | Huawei connector | Zone order, application/identity, destination NAT original-packet fields. |
 
@@ -60,7 +60,11 @@ Do not use the current findings as approved change instructions. No automatic fi
 
 The current relational model links `Finding` to `AnalysisRun` and policy, with JSON evidence and workflow status. It does not have a standalone recommendation classification or immutable report-source snapshot. Preserve all existing rows when extending the schema; add nullable columns or new tables first, backfill, validate, then tighten constraints. Keep customer scope on every query and report lookup.
 
-This phase needs no migration. A verified usage observation must contain `start`, `end`, `complete: true`, `counter_reset: false`, and a source, with at least `USAGE_OBSERVATION_DAYS` elapsed and an end within seven days. No importer currently generates such metadata; the code intentionally suppresses zero/low-hit findings until an authenticated collector can prove it. Policy age is not counter age.
+The first phase needed no migration. The subsequent import-lineage increment adds nullable `firewall_policies.source_sha256` and `parse_warnings` columns in revision `e7f9b2c4d6a8`. New file uploads store the SHA-256 of the exact raw bytes and a `source_ref` with checksum, collection and record index in each imported rule/object's `raw_data`. Older policies retain nulls; they are not silently assigned a checksum for a file that may have changed. Exact source line numbers and source checksums for live connectors remain future work. The source file remains in the existing upload volume.
+
+A verified usage observation must contain `start`, `end`, `complete: true`, `counter_reset: false`, and a source, with at least `USAGE_OBSERVATION_DAYS` elapsed and an end within seven days. No importer currently generates such metadata; zero/low-hit findings and usage-based risk scoring are suppressed until a collector can prove it. The scorecard labels usage as unavailable and excludes its weight when telemetry is unverified. Policy age is not counter age.
+
+Palo Alto file import now accepts XML only, matching the actual parser. JSON/CLI exports were previously offered in the upload UI but the parser rejected them. Unsupported formats are rejected before persistence. UTF-8 decoding is strict so damaged policy bytes are not replaced silently. Policy files cannot supply trusted usage-observation metadata: that field is stripped from imported rule data and a warning is retained. Parser warnings and the raw source checksum are available from the policy API; warning-specific suppression of every detector remains to be implemented.
 
 Local commands from repository root (Windows PowerShell):
 

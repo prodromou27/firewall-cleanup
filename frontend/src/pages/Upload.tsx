@@ -60,7 +60,7 @@ const VENDORS = [
 const FILE_HINT: Record<string, string> = {
   FortiGate: '.conf, .cfg, .txt, or .json FortiOS export',
   CheckPoint: '.json or .txt management API export',
-  PaloAlto: '.xml or .json Panorama/device config export',
+  PaloAlto: '.xml Panorama/device config export',
   CiscoASA: '.txt, .cfg, or .conf show running-config output',
   HuaweiUSG: '.txt, .cfg, or .conf display current-configuration output',
 }
@@ -68,7 +68,7 @@ const FILE_HINT: Record<string, string> = {
 const FILE_ACCEPT: Record<string, string> = {
   FortiGate: '.conf,.txt,.json,.cfg',
   CheckPoint: '.json,.txt',
-  PaloAlto: '.xml,.json',
+  PaloAlto: '.xml',
   CiscoASA: '.txt,.conf,.cfg',
   HuaweiUSG: '.txt,.cfg,.conf',
 }
@@ -76,7 +76,7 @@ const FILE_ACCEPT: Record<string, string> = {
 export const ALLOWED_UPLOAD_EXTENSIONS: Record<string, string[]> = {
   FortiGate: ['.conf', '.txt', '.json', '.cfg'],
   CheckPoint: ['.json', '.txt'],
-  PaloAlto: ['.xml', '.json'],
+  PaloAlto: ['.xml'],
   CiscoASA: ['.txt', '.conf', '.cfg'],
   HuaweiUSG: ['.txt', '.cfg', '.conf'],
 }

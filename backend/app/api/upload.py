@@ -2,6 +2,7 @@
 import os
 import re
 import uuid
+import hashlib
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -28,7 +29,7 @@ _ALLOWED_EXTENSIONS = {".conf", ".txt", ".json", ".csv", ".log", ".cfg", ".xml"}
 _VENDOR_EXTENSIONS = {
     "CheckPoint": {".json", ".txt"},
     "FortiGate":  {".conf", ".txt", ".json", ".cfg"},
-    "PaloAlto":   {".xml", ".json", ".conf"},
+    "PaloAlto":   {".xml"},
     "CiscoASA":   {".txt", ".conf", ".cfg"},
     "HuaweiUSG":  {".txt", ".cfg", ".conf"},
 }
@@ -155,7 +156,7 @@ async def upload_policy(
     # ── Parse ─────────────────────────────────────────────────────────────────
     try:
         parser = get_parser(vendor)
-        text_content = content.decode("utf-8", errors="replace")
+        text_content = content.decode("utf-8-sig", errors="strict")
         rules, objects, warnings = parser.parse(text_content)
     except Exception as e:
         try:
@@ -187,6 +188,11 @@ async def upload_policy(
         )
 
     # ── Persist ───────────────────────────────────────────────────────────────
+    # Usage provenance must come from a trusted collector, not an uploaded file.
+    if any(isinstance(r.get("raw_data"), dict) and
+           "usage_observation" in r["raw_data"] for r in rules):
+        warnings.append("Untrusted usage-observation metadata in the uploaded file was ignored.")
+
     policy = FirewallPolicy(
         id=str(uuid.uuid4()),
         customer_id=customer_id,
@@ -195,6 +201,8 @@ async def upload_policy(
         policy_package=policy_package or "",
         original_filename=safe_filename,   # store sanitised name, not raw user input
         file_path=file_path,
+        source_sha256=hashlib.sha256(content).hexdigest(),
+        parse_warnings=warnings,
         analysis_status="parsing",
         rule_count=len(rules),
         object_count=len(objects),
@@ -203,7 +211,14 @@ async def upload_policy(
     db.add(policy)
     db.flush()
 
-    for rule in rules:
+    for record_index, rule in enumerate(rules):
+        rule_raw = rule.get("raw_data") or {}
+        rule_raw = {k: v for k, v in rule_raw.items() if k != "usage_observation"}
+        rule_raw = {**rule_raw, "source_ref": {
+            "sha256": policy.source_sha256,
+            "collection": "rules",
+            "record_index": record_index,
+        }}
         rule_orm = FirewallRule(
             id=str(uuid.uuid4()),
             policy_id=policy.id,
@@ -233,11 +248,17 @@ async def upload_policy(
             last_hit=str(rule.get("last_hit")) if rule.get("last_hit") else None,
             first_hit=str(rule.get("first_hit")) if rule.get("first_hit") else None,
             install_on=rule.get("install_on", []),
-            raw_data=rule.get("raw_data", {}),
+            raw_data=rule_raw,
         )
         db.add(rule_orm)
 
-    for obj in objects:
+    for record_index, obj in enumerate(objects):
+        obj_raw = obj.get("raw_data") or {}
+        obj_raw = {**obj_raw, "source_ref": {
+            "sha256": policy.source_sha256,
+            "collection": "objects",
+            "record_index": record_index,
+        }}
         obj_orm = FirewallObject(
             id=str(uuid.uuid4()),
             policy_id=policy.id,
@@ -251,7 +272,7 @@ async def upload_policy(
             port_end=obj.get("port_end"),
             members=obj.get("members", []),
             comment=obj.get("comment", ""),
-            raw_data=obj.get("raw_data", {}),
+            raw_data=obj_raw,
         )
         db.add(obj_orm)
 
@@ -281,6 +302,7 @@ async def upload_policy(
         "firewall_name": firewall_name,
         "rules_parsed": len(rules),
         "objects_parsed": len(objects),
+        "source_sha256": policy.source_sha256,
         "warnings": warnings,
         "import_quality": quality,
         "message": "File uploaded and analysis started.",
@@ -323,10 +345,10 @@ def _import_quality(rules: list, objects: list, warnings: list) -> dict:
 
     if not has_hit_counts:
         quality_score -= 30
-        data_gaps.append("No hit count data — zero-hit and low-usage detection will be limited.")
+        data_gaps.append("No hit count data. Usage findings require a verified observation window and are unavailable without it.")
     elif hit_completeness < 50:
         quality_score -= 15
-        data_gaps.append(f"Only {hit_completeness:.0f}% of rules have hit count data — usage analysis may be incomplete.")
+        data_gaps.append(f"Only {hit_completeness:.0f}% of rules have hit count data. Usage findings also require verified observation windows.")
 
     if not has_last_hit:
         quality_score -= 15

@@ -75,9 +75,13 @@ def score_rule(rule: dict, obj_map: Dict[str, dict]) -> Tuple[int, Dict[str, int
     if not rule.get("enabled", True):
         add("disabled", settings.risk_disabled, "Rule is disabled")
 
-    # No hits in 180 days
+    # Counter age is not proven by last-hit or a zero alone. Require an
+    # independently verified collection period before usage affects risk.
+    from datetime import UTC
+    from app.analysis.usage_observation import verified_observation
+    observation = verified_observation(rule, 180, datetime.now(UTC).replace(tzinfo=None))
     last_hit = rule.get("last_hit")
-    if last_hit:
+    if last_hit and observation:
         try:
             if isinstance(last_hit, str):
                 last_hit_dt = datetime.fromisoformat(last_hit.replace("Z", "+00:00"))
@@ -88,7 +92,7 @@ def score_rule(rule: dict, obj_map: Dict[str, dict]) -> Tuple[int, Dict[str, int
                     "Rule has not been used in over 180 days")
         except (ValueError, TypeError):
             pass
-    elif rule.get("hit_count") == 0:
+    elif observation and rule.get("hit_count") == 0:
         add("zero_hits", settings.risk_no_hits_180d, "Rule has zero hit count")
 
     # Temporary keywords in name/comment

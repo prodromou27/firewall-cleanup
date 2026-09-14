@@ -1,4 +1,5 @@
 import io
+import hashlib
 
 import pytest
 from fastapi import BackgroundTasks, HTTPException, UploadFile
@@ -69,6 +70,18 @@ async def test_upload_rejects_vendor_specific_unsupported_file_type(db, user_and
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("filename", ["policy.json", "policy.conf"])
+async def test_palo_alto_upload_only_accepts_supported_xml_format(db, user_and_customer, filename):
+    user, customer = user_and_customer
+    with pytest.raises(HTTPException) as exc:
+        await upload.upload_policy(
+            BackgroundTasks(), customer_id=customer.id, vendor="PaloAlto",
+            firewall_name="PA-EDGE", file=_file(b"{}", filename), db=db, user=user,
+        )
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_upload_parse_exception_returns_generic_message(db, user_and_customer, monkeypatch):
     user, customer = user_and_customer
 
@@ -130,6 +143,70 @@ end
     assert quality["has_hit_counts"] is False
     assert any("No objects/groups imported" in gap for gap in quality["data_gaps"])
     assert any("No hit count data" in gap for gap in quality["data_gaps"])
+    policy = db.query(FirewallPolicy).filter(FirewallPolicy.id == result["policy_id"]).one()
+    assert policy.source_sha256 == hashlib.sha256(conf).hexdigest()
+    assert policy.parse_warnings == []
+    rule = db.query(FirewallRule).filter(FirewallRule.policy_id == policy.id).one()
+    assert rule.raw_data["source_ref"] == {
+        "sha256": policy.source_sha256, "collection": "rules", "record_index": 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_invalid_utf8_instead_of_replacing_policy_bytes(db, user_and_customer):
+    user, customer = user_and_customer
+    with pytest.raises(HTTPException) as exc:
+        await upload.upload_policy(
+            BackgroundTasks(), customer_id=customer.id, vendor="FortiGate",
+            firewall_name="FGT-EDGE", file=_file(b"config firewall policy\n\xff\nend", "bad.conf"),
+            db=db, user=user,
+        )
+    assert exc.value.status_code == 422
+    assert db.query(FirewallPolicy).count() == 0
+
+
+@pytest.mark.asyncio
+async def test_upload_persists_parser_warnings_for_later_review(db, user_and_customer):
+    user, customer = user_and_customer
+    conf = b'config firewall address\nedit "Host"\nset subnet 10.0.0.1 255.255.255.255\nnext\nend\n'
+    result = await upload.upload_policy(
+        BackgroundTasks(), customer_id=customer.id, vendor="FortiGate",
+        firewall_name="FGT-EDGE", policy_package=None, notes=None,
+        file=_file(conf, "objects.conf"), db=db, user=user,
+    )
+    policy = db.query(FirewallPolicy).filter(FirewallPolicy.id == result["policy_id"]).one()
+    assert policy.parse_warnings == result["warnings"]
+    assert any("No 'config firewall policy'" in warning for warning in policy.parse_warnings)
+    obj = policy.objects[0]
+    assert obj.raw_data["source_ref"]["sha256"] == policy.source_sha256
+    assert obj.raw_data["source_ref"]["record_index"] == 0
+
+
+@pytest.mark.asyncio
+async def test_uploaded_policy_cannot_assert_verified_counter_history(db, user_and_customer, monkeypatch):
+    user, customer = user_and_customer
+
+    class Parser:
+        def parse(self, content):
+            return ([{
+                "rule_id": "1", "rule_number": 1, "sources": ["any"],
+                "destinations": ["any"], "services": ["any"], "action": "accept",
+                "hit_count": 0,
+                "raw_data": {"usage_observation": {
+                    "start": "2025-01-01", "end": "2026-01-01", "complete": True,
+                    "counter_reset": False, "source": "verified-device-counter-history",
+                }},
+            }], [], [])
+
+    monkeypatch.setattr(upload, "get_parser", lambda vendor: Parser())
+    result = await upload.upload_policy(
+        BackgroundTasks(), customer_id=customer.id, vendor="FortiGate",
+        firewall_name="FGT-EDGE", policy_package=None, notes=None,
+        file=_file(b"untrusted policy", "policy.conf"), db=db, user=user,
+    )
+    rule = db.query(FirewallRule).filter(FirewallRule.policy_id == result["policy_id"]).one()
+    assert "usage_observation" not in rule.raw_data
+    assert any("Untrusted usage-observation" in warning for warning in result["warnings"])
 
 
 def _add_policy(db, customer_id: str, idx: int, vendor="FortiGate", status="completed") -> FirewallPolicy:
@@ -170,6 +247,25 @@ def test_policy_api_filtering_sorting_and_pagination(db, user_and_customer):
     assert page["page"] == 2
     assert page["page_size"] == 2
     assert [p["rule_count"] for p in page["policies"]] == [2, 1]
+
+
+def test_raw_zero_counter_is_excluded_from_risk_and_usage_score(db, user_and_customer):
+    user, customer = user_and_customer
+    policy = _add_policy(db, customer.id, 1)
+    db.flush()
+    db.add(FirewallRule(
+        id="zero-rule", policy_id=policy.id, vendor="FortiGate", rule_number=1,
+        sources=["10.0.0.1"], destinations=["10.0.0.2"], services=["https"],
+        action="accept", enabled=True, logging_enabled=True, hit_count=0,
+    ))
+    db.commit()
+    risk = policies.get_policy_risk_score(policy.id, db=db, user=user)
+    assert risk["breakdown"]["zero_hit_rule_count"] == 0
+    scorecard = policies.get_policy_scorecard(policy.id, db=db, user=user)
+    usage = next(d for d in scorecard["dimensions"] if d["key"] == "usage")
+    assert usage["score"] is None
+    assert usage["weight"] == 0
+    assert "Insufficient" in usage["detail"]
 
 
 def test_findings_api_filters_severity_status_search_and_paginates(db, user_and_customer):

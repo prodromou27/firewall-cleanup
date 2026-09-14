@@ -56,14 +56,16 @@ function GradeRing({ score, grade }: { score: number; grade: string }) {
 // ── Dimension bar ─────────────────────────────────────────────────────────────
 
 function DimensionBar({ label, score, weight, detail }: {
-  label: string; score: number; weight: number; detail: string
+  label: string; score: number | null; weight: number; detail: string
 }) {
   const color =
+    score === null ? 'bg-gray-200' :
     score >= 80 ? 'bg-emerald-500' :
     score >= 60 ? 'bg-amber-400'   :
     score >= 40 ? 'bg-orange-500'  : 'bg-red-500'
 
   const textColor =
+    score === null ? 'text-gray-500' :
     score >= 80 ? 'text-emerald-700' :
     score >= 60 ? 'text-amber-700'   :
     score >= 40 ? 'text-orange-700'  : 'text-red-700'
@@ -75,12 +77,12 @@ function DimensionBar({ label, score, weight, detail }: {
           <span className="font-semibold text-gray-800">{label}</span>
           <span className="text-[10px] text-gray-400 border border-gray-200 rounded px-1">×{weight}%</span>
         </div>
-        <span className={`font-bold text-sm ${textColor}`}>{score}</span>
+        <span className={`font-bold text-sm ${textColor}`}>{score ?? 'N/A'}</span>
       </div>
       <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
         <div
           className={`h-full rounded-full transition-all duration-700 ${color}`}
-          style={{ width: `${score}%` }}
+          style={{ width: `${score ?? 0}%` }}
         />
       </div>
       <p className="text-xs text-gray-400">{detail}</p>

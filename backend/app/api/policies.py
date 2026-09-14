@@ -2,6 +2,7 @@
 import csv
 import io
 import json
+from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, selectinload
@@ -11,6 +12,8 @@ from app.database import get_db
 from app.models.policy import FirewallPolicy, FirewallRule, FirewallObject, AnalysisRun
 from app.models.finding import Finding
 from app.analysis.engine import run_analysis
+from app.analysis.usage_observation import verified_observation
+from app.config import settings
 import logging
 
 router = APIRouter(prefix="/api/policies", tags=["policies"])
@@ -42,6 +45,16 @@ _ANY_VALUES = {"any", "all", "*", "0.0.0.0/0", "::/0"}
 def _is_any(values: list) -> bool:
     """Return True if the list contains a wildcard/any value."""
     return bool(values and any(str(v).lower().strip() in _ANY_VALUES for v in values))
+
+
+def _verified_counter(rule: FirewallRule) -> bool:
+    return verified_observation(
+        rule, settings.usage_observation_days, datetime.now(UTC).replace(tzinfo=None)
+    ) is not None
+
+
+def _verified_zero_hit(rule: FirewallRule) -> bool:
+    return rule.hit_count == 0 and _verified_counter(rule)
 
 
 def _policy_risk_score(p: FirewallPolicy, db: Session,
@@ -90,7 +103,7 @@ def _policy_risk_score(p: FirewallPolicy, db: Session,
     # Zero-hit score (0–20)
     zero_hit = sum(
         1 for r in enabled
-        if r.hit_count is not None and r.hit_count == 0
+        if _verified_zero_hit(r)
     )
     zero_pct = zero_hit / len(enabled)
     zero_score = zero_pct * 20
@@ -325,7 +338,7 @@ def get_dashboard_stats(
             if _is_any(r.sources or []) or _is_any(r.destinations or []) or _is_any(r.services or [])
         )
         perm_score = (permissive / len(enabled)) * 30
-        zero_hit = sum(1 for r in enabled if r.hit_count is not None and r.hit_count == 0)
+        zero_hit = sum(1 for r in enabled if _verified_zero_hit(r))
         zero_score = (zero_hit / len(enabled)) * 20
         return min(100, round(finding_score + perm_score + zero_score))
 
@@ -508,7 +521,7 @@ def get_policy_risk_score(
         r for r in enabled
         if _is_any(r.sources or []) or _is_any(r.destinations or []) or _is_any(r.services or [])
     ]
-    zero_hit = [r for r in enabled if r.hit_count is not None and r.hit_count == 0]
+    zero_hit = [r for r in enabled if _verified_zero_hit(r)]
 
     return {
         "policy_id": policy_id,
@@ -594,11 +607,11 @@ def get_policy_scorecard(
     n_perm            = len(permissive_rules)
     perm_pct          = round(n_perm / max(n_allow, 1) * 100, 1)
 
-    # 4. Usage (zero-hit among enabled rules that have hit data)
-    rules_with_data = [r for r in enabled if r.hit_count is not None]
+    # 4. Usage requires a verified observation period, not a raw counter.
+    rules_with_data = [r for r in enabled if r.hit_count is not None and _verified_counter(r)]
     zero_hit        = [r for r in rules_with_data if r.hit_count == 0]
     n_zero_hit      = len(zero_hit)
-    usage_score_pct = round((1 - n_zero_hit / max(len(rules_with_data), 1)) * 100, 1)
+    usage_score_pct = round((1 - n_zero_hit / len(rules_with_data)) * 100, 1) if rules_with_data else None
 
     # 5. Temporary rules
     from app.config import settings as cfg
@@ -636,12 +649,12 @@ def get_policy_scorecard(
     dim_logging   = logging_pct                          # 20 % weight
     dim_doc       = doc_pct                              # 20 % weight
     dim_perm      = max(0, 100 - perm_pct)               # 25 % weight
-    dim_usage     = usage_score_pct                      # 20 % weight
+    dim_usage     = usage_score_pct                      # excluded if telemetry unavailable
     dim_obj       = obj_hygiene_pct                      # 15 % weight
 
-    weights       = [0.20, 0.20, 0.25, 0.20, 0.15]
+    weights       = [0.20, 0.20, 0.25, 0.20 if rules_with_data else 0, 0.15]
     dim_scores    = [dim_logging, dim_doc, dim_perm, dim_usage, dim_obj]
-    total_score   = round(sum(w * s for w, s in zip(weights, dim_scores)))
+    total_score   = round(sum(w * (s or 0) for w, s in zip(weights, dim_scores)) / sum(weights))
 
     # ── Strengths (dimension ≥ 80 %) ─────────────────────────────────────────
     strengths = []
@@ -651,7 +664,7 @@ def get_policy_scorecard(
         strengths.append(f"Documentation present on {doc_pct:.0f}% of allow rules")
     if dim_perm >= 80:
         strengths.append(f"Only {n_perm} permissive rule{'s' if n_perm != 1 else ''} — good least-privilege posture")
-    if dim_usage >= 80 and rules_with_data:
+    if dim_usage is not None and dim_usage >= 80:
         strengths.append(f"Hit-count data available for {len(rules_with_data)}/{len(enabled)} enabled rules")
     if n_zero_hit == 0 and rules_with_data:
         strengths.append("No zero-hit rules detected")
@@ -744,7 +757,9 @@ def get_policy_scorecard(
             {"key": "logging",       "label": "Logging Coverage",    "score": round(dim_logging),  "weight": 20, "detail": f"{logging_ok}/{n_allow} allow rules log traffic"},
             {"key": "documentation", "label": "Documentation",       "score": round(dim_doc),      "weight": 20, "detail": f"{documented}/{n_allow} rules have comments"},
             {"key": "permissiveness","label": "Least Privilege",     "score": round(dim_perm),     "weight": 25, "detail": f"{n_perm} permissive rules out of {n_allow}"},
-            {"key": "usage",         "label": "Rule Usage",          "score": round(dim_usage),    "weight": 20, "detail": f"{n_zero_hit} zero-hit rules detected"},
+            {"key": "usage",         "label": "Rule Usage",          "score": round(dim_usage) if dim_usage is not None else None,
+             "weight": 20 if rules_with_data else 0,
+             "detail": f"{n_zero_hit} zero-hit rules in verified windows" if rules_with_data else "Insufficient verified counter history"},
             {"key": "objects",       "label": "Object Hygiene",      "score": round(dim_obj),      "weight": 15, "detail": f"{n_unused_obj} unused objects out of {total_objects}"},
         ],
         "strengths": strengths,
@@ -918,7 +933,7 @@ def get_permissive_analysis(
         if r.hit_count is not None and r.hit_count > 0 and r.last_hit:
             hit_note = f"Last hit: {r.last_hit} · Total hits: {r.hit_count}"
         elif r.hit_count == 0:
-            hit_note = "Zero hits — rule may be unused or unreachable"
+            hit_note = "Zero recorded hits; observation window may be incomplete"
 
         suggestions.append({
             "rule_id":      r.id,
@@ -1166,6 +1181,7 @@ def _policy_summary(p: FirewallPolicy) -> dict:
         "policy_package": p.policy_package,
         "upload_date": p.upload_date.isoformat() if p.upload_date else None,
         "original_filename": p.original_filename,
+        "source_sha256": p.source_sha256,
         "rule_count": p.rule_count,
         "object_count": p.object_count,
         "finding_count": p.finding_count,
@@ -1201,6 +1217,7 @@ def _policy_detail(p: FirewallPolicy, db: Session) -> dict:
         "health_score": p.health_score,
         "import_quality_score": p.import_quality_score,
         "import_quality": p.import_quality or {},
+        "parse_warnings": p.parse_warnings or [],
         "top_risk_drivers": p.top_risk_drivers or [],
     }
 

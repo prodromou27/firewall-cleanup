@@ -32,6 +32,8 @@ class FirewallPolicy(Base):
     upload_date = Column(DateTime, server_default=func.now())
     original_filename = Column(String, nullable=True)
     file_path = Column(String, nullable=True)
+    source_sha256 = Column(String(64), nullable=True)
+    parse_warnings = Column(JSON, nullable=True)
     analysis_status = Column(String, nullable=False, default="pending")  # pending|running|completed|failed
     analysis_error = Column(Text, nullable=True)
     rule_count = Column(Integer, nullable=False, default=0)

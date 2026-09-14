@@ -34,6 +34,18 @@ def expansion_complete(entry: dict) -> bool:
         if not entry[field] or any(
                 item.get("type") in {"unknown", "empty_group"} for item in entry[field]):
             return False
+        # The current normalizer maps any4 and any6 to the same IPv4 wildcard,
+        # while IPv6 network containment is not implemented. Suppress definitive
+        # comparisons until address families have a typed canonical model.
+        if any(
+                ":" in str(item.get("value") or "")
+                or str(item.get("name") or "").strip().lower() in {"any4", "any6"}
+                for item in entry[field]):
+            return False
+        if any(
+                ":" in str(ref) or str(ref).strip().lower() in {"any4", "any6"}
+                for ref in entry["rule"].get(field, []) or []):
+            return False
     return bool(entry["services"]) and not any(
         item.get("unknown") or item.get("empty_group") for item in entry["services"]
     )

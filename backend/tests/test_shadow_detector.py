@@ -97,6 +97,13 @@ def test_tcp_only_service_cannot_shadow_any_protocol(obj_map):
     assert not any(f["finding_type"] == "redundant_rule" for f in detect_shadows([first, second], obj_map))
 
 
+def test_any4_cannot_shadow_any6(obj_map):
+    first = make_rule(1, ["any4"], ["Server"], ["any-svc"])
+    second = make_rule(2, ["any6"], ["Server"], ["any-svc"])
+    assert not any(f["finding_type"] in {"redundant_rule", "shadowed_rule"}
+                   for f in detect_shadows([first, second], obj_map))
+
+
 def test_full_shadow_with_hits_reported_low_confidence(obj_map):
     """A 'fully shadowed' rule with recorded hits is contradicted by the
     device's own counters — keep the finding but at Low confidence."""

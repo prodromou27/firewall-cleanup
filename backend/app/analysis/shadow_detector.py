@@ -125,16 +125,16 @@ def detect_shadows(
             "confidence": "High",
             "title": f"Shadowing not evaluated for {len(not_evaluated)} rule(s)",
             "description": (
-                "These rules reference objects that could not be fully expanded "
-                "(e.g. unresolved members, missing object definitions), so shadowing "
-                "could not be determined for them. Re-import with complete object data "
-                "to enable shadowing analysis on these rules."
+                "These rules could not be compared safely because object expansion "
+                "was incomplete or address-family semantics are unsupported. Review "
+                "the source configuration before drawing a shadowing conclusion."
             ),
             "affected_rules": [r for r in not_evaluated],
-            "evidence": {"count": len(not_evaluated), "reason": "incomplete object expansion"},
+            "evidence": {"count": len(not_evaluated),
+                         "reason": "incomplete object expansion or unsupported address-family semantics"},
             "recommendation": (
-                "Read-only note. Confirm the object database imported completely; no "
-                "action is implied for the rules themselves."
+                "Read-only note. Confirm object and address-family coverage before "
+                "reassessing; no action is implied for the rules themselves."
             ),
         })
 

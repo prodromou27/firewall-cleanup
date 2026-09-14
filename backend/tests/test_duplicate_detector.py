@@ -105,3 +105,9 @@ def test_unresolved_group_is_not_a_confirmed_duplicate(obj_map):
     obj_map["Empty"] = {"object_name": "Empty", "object_type": "address_group", "members": []}
     rules = [make_rule(n, ["Empty"], ["Server_A"], ["HTTPS-SVC"]) for n in (1, 2)]
     assert detect_duplicates(rules, obj_map) == []
+
+
+def test_any4_and_any6_are_not_equivalent_address_families(obj_map):
+    first = make_rule(1, ["any4"], ["Server_A"], ["HTTPS-SVC"])
+    second = make_rule(2, ["any6"], ["Server_A"], ["HTTPS-SVC"])
+    assert detect_duplicates([first, second], obj_map) == []

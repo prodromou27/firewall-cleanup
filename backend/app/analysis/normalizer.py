@@ -231,6 +231,12 @@ def expand_service_object(
         return results or [{"protocol": "unknown", "port_start": None, "port_end": None,
                             "name": name, "unknown": True, "empty_group": True}]
 
+    from app.analysis.service_ports import fortigate_service_terms
+    raw = obj.get("raw_data") or {}
+    if isinstance(raw, dict):
+        terms = fortigate_service_terms(raw, name)
+        if terms is not None:
+            return terms
     return [{
         "protocol": obj.get("protocol", "any"),
         "port_start": obj.get("port_start", 0),

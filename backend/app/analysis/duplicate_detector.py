@@ -19,7 +19,8 @@ def _service_key(items: List[dict]) -> tuple:
         return (("any", 0, 65535),)
     return tuple(sorted({
         ("opaque", (item.get("name") or "").lower()) if item.get("opaque")
-        else (item["protocol"].lower(), item["port_start"], item["port_end"])
+        else (item["protocol"].lower(), item["port_start"], item["port_end"],
+              item.get("source_port_start", 0), item.get("source_port_end", 65535))
         for item in items
     }, key=repr))
 

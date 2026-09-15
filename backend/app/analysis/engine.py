@@ -505,6 +505,7 @@ def _rule_to_dict(r: FirewallRule) -> dict:
         "first_hit": r.first_hit,
         "usage_observation": raw.get("usage_observation"),
         "security_profiles": profiles,
+        "source_port_constraint": raw.get("src_port"),
         # True only when raw_data looks like a parsed FortiGate CLI policy, so the
         # profile-gap detector never fires on a rule whose profiles weren't captured.
         "_cli_parsed": bool(raw) and any(k in raw for k in ("_raw_lines", "srcintf", "dstintf")),
@@ -1530,7 +1531,7 @@ def _analyze_mergeable_rules(rules: List[dict]) -> List[dict]:
         semantics = json.dumps(_stable({field: rule.get(field) for field in (
             "vendor", "section", "source_interfaces", "destination_interfaces", "install_on",
             "applications", "users", "vpn", "schedule", "nat_enabled", "logging_enabled",
-            "security_profiles",
+            "security_profiles", "source_port_constraint",
         )}), sort_keys=True, default=str)
         groups.setdefault((action, src_key, dst_key, semantics), []).append(rule)
 

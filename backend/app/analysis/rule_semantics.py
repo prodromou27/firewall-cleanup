@@ -20,7 +20,7 @@ def rule_semantics_key(rule: dict) -> str:
     """Stable comparison key, computed once per rule by indexed detectors."""
     return json.dumps(_stable({field: rule.get(field) for field in (
         "applications", "users", "vpn", "schedule", "nat_enabled",
-        "logging_enabled", "security_profiles",
+        "logging_enabled", "security_profiles", "source_port_constraint",
     )}), sort_keys=True, default=str)
 
 
@@ -69,5 +69,8 @@ def expansion_complete(entry: dict) -> bool:
             return False
         start, end = item.get("port_start"), item.get("port_end")
         if type(start) is not int or type(end) is not int or not 0 <= start <= end <= 65535:
+            return False
+        source_start, source_end = item.get("source_port_start", 0), item.get("source_port_end", 65535)
+        if type(source_start) is not int or type(source_end) is not int or not 0 <= source_start <= source_end <= 65535:
             return False
     return True

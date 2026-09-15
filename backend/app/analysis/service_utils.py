@@ -16,6 +16,8 @@ def normalize_service(svc: dict) -> dict:
         "protocol": (svc.get("protocol") or "any").lower(),
         "port_start": int(svc.get("port_start") if svc.get("port_start") is not None else 0),
         "port_end": int(svc.get("port_end") if svc.get("port_end") is not None else 65535),
+        "source_port_start": int(svc.get("source_port_start", 0)),
+        "source_port_end": int(svc.get("source_port_end", 65535)),
     }
 
 
@@ -26,11 +28,14 @@ def service_is_any(svc: dict) -> bool:
     proto = (svc.get("protocol") or "").lower()
     ps = int(svc.get("port_start") if svc.get("port_start") is not None else 0)
     pe = int(svc.get("port_end") if svc.get("port_end") is not None else 65535)
-    return proto in ("any", "") and ps == 0 and pe == 65535
+    return (proto in ("any", "") and ps == 0 and pe == 65535
+            and svc.get("source_port_start", 0) == 0 and svc.get("source_port_end", 65535) == 65535)
 
 
 def service_contains(outer: dict, inner: dict) -> bool:
     """True if outer service range contains inner service range."""
+    if outer.get("unknown") or inner.get("unknown"):
+        return False
     if outer.get("opaque") or inner.get("opaque"):
         return services_equal(outer, inner)
 
@@ -47,11 +52,15 @@ def service_contains(outer: dict, inner: dict) -> bool:
     if not proto_match:
         return False
 
-    return outer["port_start"] <= inner["port_start"] and outer["port_end"] >= inner["port_end"]
+    return (outer["port_start"] <= inner["port_start"] and outer["port_end"] >= inner["port_end"]
+            and outer["source_port_start"] <= inner["source_port_start"]
+            and outer["source_port_end"] >= inner["source_port_end"])
 
 
 def services_overlap(a: dict, b: dict) -> bool:
     """True if two service ranges overlap."""
+    if a.get("unknown") or b.get("unknown"):
+        return False
     if a.get("opaque") or b.get("opaque"):
         return services_equal(a, b)
 
@@ -69,10 +78,14 @@ def services_overlap(a: dict, b: dict) -> bool:
     if not proto_match:
         return False
 
-    return a["port_start"] <= b["port_end"] and b["port_start"] <= a["port_end"]
+    return (a["port_start"] <= b["port_end"] and b["port_start"] <= a["port_end"]
+            and a["source_port_start"] <= b["source_port_end"]
+            and b["source_port_start"] <= a["source_port_end"])
 
 
 def services_equal(a: dict, b: dict) -> bool:
+    if a.get("unknown") or b.get("unknown"):
+        return False
     if a.get("opaque") or b.get("opaque"):
         return (
             bool(a.get("opaque")) == bool(b.get("opaque"))
@@ -84,12 +97,14 @@ def services_equal(a: dict, b: dict) -> bool:
         a["protocol"] == b["protocol"]
         and a["port_start"] == b["port_start"]
         and a["port_end"] == b["port_end"]
+        and a["source_port_start"] == b["source_port_start"]
+        and a["source_port_end"] == b["source_port_end"]
     )
 
 
 def is_wide_port_range(svc: dict, threshold: int = 1024) -> bool:
     """True if service covers a wide port range."""
-    if svc.get("opaque"):
+    if svc.get("opaque") or svc.get("unknown"):
         return False
     svc = normalize_service(svc)
     return (svc["port_end"] - svc["port_start"]) >= threshold
@@ -120,7 +135,7 @@ RISKY_UDP_PORT_MAP = {
 
 def identify_risky_service(svc: dict) -> Optional[str]:
     """Return a risky service label if the service is considered risky."""
-    if svc.get("opaque"):
+    if svc.get("opaque") or svc.get("unknown"):
         return None
     svc = normalize_service(svc)
     if service_is_any(svc):

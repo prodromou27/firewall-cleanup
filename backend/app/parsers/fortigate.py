@@ -538,7 +538,7 @@ class FortiGateParser(BaseParser):
     def _parse_portrange(self, portrange: str) -> Tuple[int, int]:
         """Parse FortiGate port range like '80', '80-443', '80:443'."""
         portrange = portrange.strip().split()[0]  # Take first range if multiple
-        portrange = portrange.replace(":", "-")
+        portrange = portrange.split(":", 1)[0]  # Source ports are not destination bounds.
         if "-" in portrange:
             parts = portrange.split("-")
             try:

@@ -334,6 +334,24 @@ def test_scorecard_duplicate_services_respect_protocol(db, user_and_customer, se
     assert sum(i["count"] for i in duplicates) == expected
 
 
+def test_review_history_is_readable_only_for_owning_customer(db, user_and_customer):
+    from app.models.policy import AnalysisRun
+    user, customer = user_and_customer
+    policy = _add_policy(db, customer.id, 1)
+    other = Customer(id="other-customer", name="Other")
+    db.add(other)
+    other_policy = _add_policy(db, other.id, 2)
+    db.flush()
+    db.add(AnalysisRun(id="history-run", policy_id=policy.id, status="completed",
+                       replaced_findings=[{"id": "old", "status": "False Positive"}]))
+    db.commit()
+    result = policies.get_review_history(policy.id, page=1, page_size=10, db=db, user=user)
+    assert result["runs"][0]["replaced_findings"][0]["status"] == "False Positive"
+    with pytest.raises(HTTPException) as exc:
+        policies.get_review_history(other_policy.id, page=1, page_size=10, db=db, user=user)
+    assert exc.value.status_code == 403
+
+
 def test_findings_api_filters_severity_status_search_and_paginates(db, user_and_customer):
     user, customer = user_and_customer
     policy = _add_policy(db, customer.id, 1)

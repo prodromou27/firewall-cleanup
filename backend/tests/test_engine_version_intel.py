@@ -78,6 +78,36 @@ def db():
         Base.metadata.drop_all(engine)
 
 
+def test_successful_reanalysis_archives_review_even_when_finding_disappears(db, monkeypatch):
+    from app.analysis import engine as analysis_engine
+    from app.models.finding import FindingComment
+    from app.models.policy import AnalysisRun
+    pid = _seed(db)
+    run_analysis(pid, db)
+    finding = db.query(Finding).filter_by(policy_id=pid).first()
+    finding.status = "False Positive"
+    finding.engineer_comment = "Validated with firewall owner"
+    finding.assigned_to = "reviewer"
+    finding.risk_acceptance_ref = "CHG-123"
+    original_id = finding.id
+    db.add(FindingComment(id="history-comment", finding_id=finding.id,
+                          author="reviewer", comment="This exception is intentional",
+                          old_status="Review Required", new_status="False Positive"))
+    db.commit()
+    monkeypatch.setattr(analysis_engine, "_consolidate_findings", lambda findings: [])
+    run_id = run_analysis(pid, db)
+    snapshot = db.get(AnalysisRun, run_id).replaced_findings
+    archived = next(f for f in snapshot if f["id"] == original_id)
+    assert archived["status"] == "False Positive"
+    assert archived["engineer_comment"] == "Validated with firewall owner"
+    assert archived["assigned_to"] == "reviewer"
+    assert archived["risk_acceptance_ref"] == "CHG-123"
+    assert archived["comments"][0]["comment"] == "This exception is intentional"
+    assert db.query(Finding).filter_by(policy_id=pid).count() == 0
+    run_analysis(pid, db)
+    assert db.get(AnalysisRun, run_id).replaced_findings == snapshot
+
+
 def _seed(db, *, vendor="FortiGate", os_version="7.2.5", ha_peer="",
           catalog_recommended="7.2.10", catalog_eol=None,
           catalog_support_status="supported"):

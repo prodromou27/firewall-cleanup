@@ -1,6 +1,7 @@
 """Unit tests for the consolidation and cleanup-rule detectors."""
 from app.analysis.engine import _analyze_mergeable_rules, _analyze_cleanup_rule
 from app.analysis.normalizer import build_object_map
+import pytest
 
 
 def _rule(rid, sources, dests, services, action="accept", enabled=True, logging_enabled=False):
@@ -66,7 +67,8 @@ def test_missing_cleanup_rule_flagged():
     rules = [_rule(1, ["WebSrv"], ["DB"], ["MySQL"])]
     findings = _analyze_cleanup_rule(rules, OBJ_MAP)
     assert len(findings) == 1
-    assert findings[0]["severity"] == "Medium"
+    assert findings[0]["severity"] == "Informational"
+    assert findings[0]["evidence"]["implicit_default_logging"] == "unknown"
     assert findings[0]["evidence"]["explicit_cleanup_rule"] is False
 
 
@@ -87,3 +89,27 @@ def test_unlogged_cleanup_rule_flagged_low():
     assert len(findings) == 1
     assert findings[0]["severity"] == "Low"
     assert findings[0]["evidence"]["logging_enabled"] is False
+
+
+@pytest.mark.parametrize("field, value", [
+    ("schedule", "weekends"), ("users", ["admins"]), ("applications", ["web"]),
+    ("vpn", ["vpn-a"]), ("section", "layer-b"), ("source_interfaces", ["zone-b"]),
+    ("logging_enabled", True), ("nat_enabled", True), ("negated", True),
+    ("security_profiles", {"ips-sensor": "strict"}),
+])
+def test_merge_candidates_require_matching_restrictions(field, value):
+    rules = [_rule(1, ["Web"], ["DB"], ["HTTPS"]), _rule(2, ["Web"], ["DB"], ["SSH"])]
+    rules[1][field] = value
+    assert _analyze_mergeable_rules(rules) == []
+
+
+def test_merge_candidates_cannot_cross_intervening_deny():
+    rules = [_rule(1, ["Web"], ["DB"], ["HTTPS"]),
+             _rule(2, ["any"], ["DB"], ["SSH"], action="deny"),
+             _rule(3, ["Web"], ["DB"], ["SSH"])]
+    assert _analyze_mergeable_rules(rules) == []
+
+
+def test_unknown_cleanup_logging_is_not_reported_as_disabled():
+    rule = _rule(1, ["any"], ["any"], ["any"], action="deny", logging_enabled=None)
+    assert _analyze_cleanup_rule([rule], OBJ_MAP) == []

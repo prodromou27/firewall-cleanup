@@ -187,6 +187,8 @@ class AnalysisRun(Base):
     finding_type_snapshot = Column(Text, nullable=True)
     # JSON-encoded import-quality breakdown captured at completion (score + caps).
     import_quality = Column(Text, nullable=True)
+    # Findings and reviewer history replaced by this successful run.
+    replaced_findings = Column(JSON, nullable=True)
     error = Column(Text, nullable=True)
     run_by = Column(String, nullable=False, default="engineer")
 

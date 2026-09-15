@@ -38,6 +38,29 @@ def _authz_policy(policy_id: str, db: Session, user: User) -> FirewallPolicy:
     require_customer_access(db, user, policy.customer_id)
     return policy
 
+
+@router.get("/{policy_id}/review-history")
+def get_review_history(
+    policy_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=50),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Read-only review snapshots captured before successful finding replacement."""
+    _authz_policy(policy_id, db, user)
+    query = db.query(AnalysisRun).filter(
+        AnalysisRun.policy_id == policy_id, AnalysisRun.status == "completed")
+    total = query.count()
+    runs = query.order_by(AnalysisRun.started_at.desc(), AnalysisRun.id.desc()).offset(
+        (page - 1) * page_size).limit(page_size).all()
+    return {"total": total, "page": page, "page_size": page_size, "runs": [
+        {"run_id": run.id, "completed_at": run.completed_at,
+         "replaced_findings": run.replaced_findings,
+         "history_available": run.replaced_findings is not None}
+        for run in runs
+    ]}
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 _ANY_VALUES = {"any", "all", "*", "0.0.0.0/0", "::/0"}

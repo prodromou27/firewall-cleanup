@@ -97,8 +97,15 @@ def is_public_network(value: str) -> bool:
     net = parse_ip_network(value)
     if net is None:
         return False
-    # is_private is True only when the entire network is within private space.
-    return not net.is_private
+    return (net.is_global and not net.is_multicast and not net.is_reserved
+            and not net.is_loopback and not net.is_link_local and not net.is_unspecified)
+
+
+def is_private_network(value: str) -> bool:
+    """Require concrete RFC1918 space; unknown and special-use space is not internal evidence."""
+    net = parse_ip_network(value)
+    return net is not None and any(net.subnet_of(ipaddress.IPv4Network(block))
+                                   for block in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"))
 
 
 def classify_ip(value: str) -> str:

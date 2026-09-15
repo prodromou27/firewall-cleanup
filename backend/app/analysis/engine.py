@@ -15,7 +15,7 @@ from app.analysis.duplicate_detector import detect_duplicates
 from app.analysis.shadow_detector import detect_shadows
 from app.analysis.risk_scorer import score_rule, score_to_severity
 from app.analysis.service_utils import identify_risky_service, normalize_service
-from app.analysis.ip_utils import is_public_network, is_broad_network
+from app.analysis.ip_utils import is_public_network, is_broad_network, is_private_network
 from app.analysis.context import build_context, unresolved_group_member_references
 from app.analysis import recommendation_library as _RL
 from app.config import settings
@@ -277,7 +277,20 @@ def run_analysis(policy_id: str, db: Session) -> str:
 
         # Replace findings in the same transaction as scores and run completion.
         # Any failure must leave the previous result and its review comments intact.
-        finding_ids = [row[0] for row in db.query(Finding.id).filter(Finding.policy_id == policy_id).all()]
+        previous = db.query(Finding).options(selectinload(Finding.comments)).filter(
+            Finding.policy_id == policy_id).all()
+        # Archive the complete review state atomically. New findings deliberately
+        # require review: an old approval must not apply to changed evidence.
+        snapshot = []
+        for finding in previous:
+            row = {column.name: getattr(finding, column.name) for column in Finding.__table__.columns}
+            row["comments"] = [
+                {column.name: getattr(comment, column.name) for column in FindingComment.__table__.columns}
+                for comment in sorted(finding.comments, key=lambda c: (str(c.created_at), c.id))
+            ]
+            snapshot.append(row)
+        run.replaced_findings = json.loads(json.dumps(snapshot, default=str))
+        finding_ids = [f.id for f in previous]
         if finding_ids:
             db.query(FindingComment).filter(FindingComment.finding_id.in_(finding_ids)).delete(synchronize_session=False)
         db.query(Finding).filter(Finding.policy_id == policy_id).delete(synchronize_session=False)
@@ -1338,7 +1351,7 @@ def _broad_internal_addrs(expanded: List[dict]) -> List[str]:
         if a.get("type") in ("any", "unknown", "empty_group"):
             continue
         v = a.get("value", "")
-        if not v or is_public_network(v):
+        if not is_private_network(v):
             continue
         if is_broad_network(v, _BROAD_INTERNAL_PREFIX):
             out.append(v)
@@ -1500,37 +1513,49 @@ def _analyze_mergeable_rules(rules: List[dict]) -> List[dict]:
     """
     findings = []
     groups: Dict[tuple, List[dict]] = {}
-    for rule in rules:
-        if not rule.get("enabled", True):
+    ordered = sorted(rules, key=lambda r: r.get("rule_number") or 0)
+    positions = {id(r): i for i, r in enumerate(ordered)}
+    from app.analysis.rule_semantics import _stable
+    for rule in ordered:
+        if not rule.get("enabled", True) or rule.get("negated") or rule.get("negate_fields"):
             continue
         action = (rule.get("action") or "").lower()
-        src_key = tuple(sorted(rule.get("sources", []) or []))
-        dst_key = tuple(sorted(rule.get("destinations", []) or []))
+        src_key = tuple(sorted(_ref_name(r) for r in rule.get("sources", []) or []))
+        dst_key = tuple(sorted(_ref_name(r) for r in rule.get("destinations", []) or []))
         # Skip rules with no addressing info to avoid grouping empties together.
         if not src_key and not dst_key:
             continue
-        groups.setdefault((action, src_key, dst_key), []).append(rule)
+        if not action or not rule.get("services"):
+            continue
+        semantics = json.dumps(_stable({field: rule.get(field) for field in (
+            "vendor", "section", "source_interfaces", "destination_interfaces", "install_on",
+            "applications", "users", "vpn", "schedule", "nat_enabled", "logging_enabled",
+            "security_profiles",
+        )}), sort_keys=True, default=str)
+        groups.setdefault((action, src_key, dst_key, semantics), []).append(rule)
 
-    for (action, src_key, dst_key), members in groups.items():
+    for (action, src_key, dst_key, semantics), members in groups.items():
         if len(members) < 2:
             continue
+        if positions[id(members[-1])] - positions[id(members[0])] != len(members) - 1:
+            continue  # Moving services across an intervening rule can change behavior.
         # Require genuine service variety (otherwise it's a pure duplicate set).
-        svc_sets = {tuple(sorted(m.get("services", []) or [])) for m in members}
+        svc_sets = {tuple(sorted(_ref_name(s) for s in m.get("services", []) or [])) for m in members}
         if len(svc_sets) < 2:
             continue
 
         rule_ids = [m.get("rule_id") or m.get("rule_number", "?") for m in members]
-        all_services = sorted({s for m in members for s in (m.get("services", []) or [])})
+        all_services = sorted({_ref_name(s) for m in members for s in (m.get("services", []) or [])})
         findings.append({
             "finding_type": "mergeable_rules",
             "severity": "Low",
-            "confidence": "High",
-            "title": f"{len(members)} rules can likely be consolidated (Rules {', '.join(str(r) for r in rule_ids)})",
+            "confidence": "Medium",
+            "title": f"{len(members)} adjacent rules are consolidation review candidates (Rules {', '.join(str(r) for r in rule_ids)})",
             "description": (
                 f"Rules {', '.join(str(r) for r in rule_ids)} share the same action "
                 f"('{action or 'n/a'}'), source, and destination but use different "
-                "services. They can typically be merged into a single rule using a "
-                "service group, reducing policy size and maintenance overhead."
+                "services. Their modeled restrictions match and they are adjacent. "
+                "Vendor behavior and unmodeled restrictions still require validation before merging."
             ),
             "affected_rules": [m.get("id") for m in members],
             "evidence": {
@@ -1539,6 +1564,7 @@ def _analyze_mergeable_rules(rules: List[dict]) -> List[dict]:
                 "shared_sources": list(src_key),
                 "shared_destinations": list(dst_key),
                 "combined_services": all_services,
+                "classification": "Needs review",
             },
             "recommendation": _RL.get("mergeable_rules"),
         })
@@ -1557,6 +1583,8 @@ def _analyze_cleanup_rule(rules: List[dict], obj_map: dict) -> List[dict]:
         return []
 
     def _is_deny_all(rule: dict) -> bool:
+        if rule.get("negated") or rule.get("negate_fields"):
+            return False
         action = (rule.get("action") or "").lower()
         if action not in _DENY_ACTIONS:
             return False
@@ -1571,7 +1599,10 @@ def _analyze_cleanup_rule(rules: List[dict], obj_map: dict) -> List[dict]:
         # An explicit cleanup rule exists. If none of them log, recommend logging.
         if any(r.get("logging_enabled", False) for r in cleanup_rules):
             return []
-        cr = cleanup_rules[-1]
+        known_unlogged = [r for r in cleanup_rules if r.get("logging_enabled") is False]
+        if not known_unlogged:
+            return []
+        cr = known_unlogged[-1]
         rid = cr.get("rule_id") or cr.get("rule_number", "?")
         return [{
             "finding_type": "no_cleanup_rule",
@@ -1590,18 +1621,18 @@ def _analyze_cleanup_rule(rules: List[dict], obj_map: dict) -> List[dict]:
 
     return [{
         "finding_type": "no_cleanup_rule",
-        "severity": "Medium",
-        "confidence": "High",
+        "severity": "Informational",
+        "confidence": "Medium",
         "title": "Policy has no explicit cleanup (deny-all) rule",
         "description": (
-            "This policy contains no explicit final deny-all rule. Denied traffic relies "
-            "on the implicit default-deny, which on most platforms is not logged — leaving "
-            "no record of blocked connection attempts for security monitoring or incident "
-            "response."
+            "No explicit deny-all rule was identified in the imported rules. "
+            "Implicit policy behavior and default-rule logging were not established; "
+            "this observation does not prove a traffic or logging gap."
         ),
         "affected_rules": [],
-        "evidence": {"enabled_rule_count": len(enabled), "explicit_cleanup_rule": False},
-        "recommendation": _RL.get("no_cleanup_rule"),
+        "evidence": {"enabled_rule_count": len(enabled), "explicit_cleanup_rule": False,
+                     "implicit_default_logging": "unknown", "classification": "Needs review"},
+        "recommendation": "Verify the vendor's effective default policy and logging configuration before proposing an explicit cleanup rule.",
     }]
 
 
@@ -1612,7 +1643,7 @@ def _internal_dest_addrs(expanded: List[dict]) -> List[str]:
         if a.get("type") in ("any", "unknown", "empty_group"):
             continue
         v = a.get("value", "")
-        if not v or is_public_network(v):
+        if not is_private_network(v):
             continue
         out.append(v)
     return out
@@ -1681,7 +1712,7 @@ def _analyze_no_logging(rules: List[dict], obj_map: dict) -> List[dict]:
         action = (rule.get("action") or "").lower()
         if action not in ("accept", "allow", "permit"):
             continue
-        if not rule.get("logging_enabled", True):
+        if rule.get("enabled", True) and rule.get("logging_enabled") is False:
             rule_id = rule.get("rule_id") or rule.get("rule_number", "?")
             rule_name = rule.get("rule_name") or f"Rule {rule_id}"
             findings.append({
@@ -2199,45 +2230,13 @@ def _analyze_naming_quality(rules: List[dict]) -> List[dict]:
     return findings
 
 
-_SCHEDULE_EXPIRED_KEYWORDS = {
-    "expired", "expire", "end", "past", "old", "archive", "2020", "2021",
-    "2022", "2019", "2018", "2017",
-}
-
-
 def _analyze_expired_rules(rules: List[dict]) -> List[dict]:
-    """Detect rules with schedules that appear expired or time-limited."""
-    findings = []
-    for rule in rules:
-        schedule = (rule.get("schedule") or "").strip()
-        if not schedule:
-            continue
-        schedule_lower = schedule.lower()
-        matched = next(
-            (kw for kw in _SCHEDULE_EXPIRED_KEYWORDS if kw in schedule_lower), None
-        )
-        if matched:
-            rule_id = rule.get("rule_id") or rule.get("rule_number", "?")
-            rule_name = rule.get("rule_name") or f"Rule {rule_id}"
-            findings.append({
-                "finding_type": "expired_rule",
-                "severity": "Medium",
-                "confidence": "Medium",
-                "title": f"Rule {rule_id} may have an expired schedule",
-                "description": (
-                    f"{rule_name} references a schedule ('{schedule}') that may be expired "
-                    "or time-limited. Scheduled rules that remain enabled past their intended "
-                    "period can allow unintended access."
-                ),
-                "affected_rules": [rule.get("id")],
-                "evidence": {
-                    "rule_id": rule_id,
-                    "schedule": schedule,
-                    "matched_keyword": matched,
-                },
-                "recommendation": _RL.get("expired_rule"),
-            })
-    return findings
+    """Schedule names cannot prove expiration.
+
+    Importers retain names, not resolved validity dates, recurrence and timezone.
+    Suppress expiration claims until those semantics are available.
+    """
+    return []
 
 
 def _analyze_nat_rules(rules: List[dict]) -> List[dict]:

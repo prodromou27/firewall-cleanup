@@ -11,6 +11,38 @@ from app.analysis.engine import (
 from app.analysis.normalizer import build_object_map, expand_rule_destinations, expand_rule_services, expand_rule_sources
 from app.analysis.shadow_detector import detect_shadows
 from app.analysis.normalizer import has_any_service
+import pytest
+
+
+@pytest.mark.parametrize("value", ["example.com", "unknown-host", "127.0.0.1",
+                                   "169.254.1.1", "192.0.2.1", "224.0.0.1"])
+def test_non_private_destinations_are_not_internal_evidence(value):
+    from app.analysis.engine import _internal_dest_addrs
+    assert _internal_dest_addrs([{"type": "host", "value": value}]) == []
+
+
+def test_private_destination_requires_concrete_address():
+    from app.analysis.engine import _internal_dest_addrs
+    assert _internal_dest_addrs([{"type": "host", "value": "10.0.0.1"}]) == ["10.0.0.1"]
+
+
+@pytest.mark.parametrize("value", ["224.0.0.1", "100.64.0.1", "127.0.0.1", "169.254.1.1"])
+def test_special_use_addresses_do_not_prove_public_exposure(value):
+    from app.analysis.ip_utils import is_public_network
+    assert not is_public_network(value)
+
+
+@pytest.mark.parametrize("schedule", ["temporary", "expired", "old", "not-expired", "weekends"])
+def test_schedule_name_alone_cannot_prove_expiration(schedule):
+    from app.analysis.engine import _analyze_expired_rules
+    assert _analyze_expired_rules([_rule(1, schedule=schedule)]) == []
+
+
+@pytest.mark.parametrize("enabled, logging, expected", [(False, False, 0), (True, None, 0),
+                                                       (True, True, 0), (True, False, 1)])
+def test_logging_findings_require_active_rule_and_explicit_disabled_setting(enabled, logging, expected):
+    from app.analysis.engine import _analyze_no_logging
+    assert len(_analyze_no_logging([_rule(1, enabled=enabled, logging_enabled=logging)], {})) == expected
 
 
 def test_circular_address_groups_are_unknown_not_inoperative():

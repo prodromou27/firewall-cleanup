@@ -6,6 +6,7 @@ import json
 import re
 from typing import List, Dict, Tuple, Any, Optional
 from app.parsers.base import BaseParser
+from app.parsers.checkpoint_semantics import reference_name, normalize_action, negated_fields
 
 
 class CheckPointParser(BaseParser):
@@ -29,6 +30,9 @@ class CheckPointParser(BaseParser):
     def _parse_json(self, data: Any, warnings: List[str]) -> Tuple[List[dict], List[dict], List[str]]:
         rules = []
         objects = []
+        dictionary = data.get("objects-dictionary", data.get("objects", [])) if isinstance(data, dict) else []
+        entries = list(dictionary.values()) if isinstance(dictionary, dict) else dictionary
+        self._references = {o["uid"]: o for o in entries if isinstance(o, dict) and o.get("uid")}
 
         if isinstance(data, list):
             # Assume list of rules
@@ -39,7 +43,7 @@ class CheckPointParser(BaseParser):
             # Check for management API structure
             if "rulebase" in data:
                 rb = data["rulebase"]
-                rules, objects = self._parse_rulebase(rb, data.get("objects", {}), warnings)
+                rules, objects = self._parse_rulebase(rb, dictionary, warnings)
             elif "data" in data and isinstance(data["data"], list):
                 for idx, item in enumerate(data["data"]):
                     rules.append(self._normalize_rule(item, idx))
@@ -51,6 +55,10 @@ class CheckPointParser(BaseParser):
             else:
                 rules.append(self._normalize_rule(data, 0))
 
+        if isinstance(data, dict) and "rulebase" in data:
+            layer = data.get("uid") or data.get("name") or data.get("_layer")
+            for rule in rules:
+                rule["raw_data"] = {**rule["raw_data"], "_layer": rule["raw_data"].get("_layer") or layer or ""}
         if not rules and not objects:
             warnings.append("No rules or objects were found in the Check Point export.")
 
@@ -74,19 +82,22 @@ class CheckPointParser(BaseParser):
                     objects.append(parsed_obj)
 
         if isinstance(rulebase, list):
-            rule_num = 1
-            for item in rulebase:
-                if isinstance(item, dict):
-                    if item.get("type") == "access-section":
-                        section_name = item.get("name", "")
-                        for rule in item.get("rulebase", []):
-                            r = self._normalize_rule(rule, rule_num - 1, section=section_name)
-                            rules.append(r)
-                            rule_num += 1
-                    else:
-                        r = self._normalize_rule(item, rule_num - 1)
-                        rules.append(r)
-                        rule_num += 1
+            pending = [(item, "", False) for item in reversed(rulebase)]
+            while pending:
+                item, section, inline = pending.pop()
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") == "access-section":
+                    pending.extend((child, item.get("name", section), inline)
+                                   for child in reversed(item.get("rulebase") or []))
+                    continue
+                rule = self._normalize_rule(item, len(rules), section=section)
+                if inline:
+                    rule["raw_data"]["_inline_parent_unmodeled"] = True
+                rules.append(rule)
+                if isinstance(item.get("rulebase"), list):
+                    warnings.append("Inline-layer parent scope is not modeled; child traffic comparisons are suppressed.")
+                    pending.extend((child, section, True) for child in reversed(item["rulebase"]))
 
         return rules, objects
 
@@ -108,33 +119,20 @@ class CheckPointParser(BaseParser):
         """Normalize a Check Point rule to common format."""
         def get_names(field) -> List[str]:
             if field is None:
-                return ["any"]
+                return []
             if isinstance(field, str):
-                return [field]
+                return [reference_name(getattr(self, "_references", {}).get(field, field))]
             if isinstance(field, list):
                 result = []
                 for x in field:
                     if isinstance(x, dict):
-                        result.append(x.get("name", x.get("uid", str(x))))
+                        result.extend(get_names(reference_name(x)))
                     else:
-                        result.append(str(x))
-                return result or ["any"]
+                        result.extend(get_names(str(x)))
+                return result
             if isinstance(field, dict):
-                return [field.get("name", field.get("uid", "any"))]
-            return ["any"]
-
-        def get_action(field) -> str:
-            if isinstance(field, dict):
-                name = field.get("name", "").lower()
-            elif isinstance(field, str):
-                name = field.lower()
-            else:
-                return "unknown"
-            if name in ("accept", "allow"):
-                return "accept"
-            if name in ("drop", "deny", "reject"):
-                return "deny"
-            return name
+                return get_names(reference_name(field))
+            return []
 
         def get_bool(field, default=True) -> bool:
             if isinstance(field, bool):
@@ -172,7 +170,8 @@ class CheckPointParser(BaseParser):
             "vendor": "CheckPoint",
             "rule_id": str(item.get("rule-number", item.get("rule_number", idx + 1))),
             "rule_uid": item.get("uid", ""),
-            "rule_number": int(item.get("rule-number", item.get("rule_number", idx + 1))),
+            "rule_number": int(str(item.get("rule-number", item.get("rule_number", idx + 1))))
+                if str(item.get("rule-number", item.get("rule_number", idx + 1))).isdigit() else idx + 1,
             "rule_name": item.get("name", f"Rule {idx + 1}"),
             "section": section or item.get("section", ""),
             "source_interfaces": [],
@@ -181,10 +180,11 @@ class CheckPointParser(BaseParser):
             "destinations": get_names(item.get("destination")),
             "services": get_names(item.get("service")),
             "applications": get_names(item.get("application")),
-            "users": get_names(item.get("content-match", {}).get("users", [])),
+            "users": get_names(item.get("users") or (item.get("content-match") or {}).get("users", []))
+                if isinstance(item.get("content-match") or {}, dict) else get_names(item.get("users")),
             "vpn": get_names(item.get("vpn")),
-            "action": get_action(item.get("action")),
-            "schedule": self._get_name(item.get("time")),
+            "action": "inline-layer" if item.get("inline-layer") else normalize_action((get_names(item.get("action")) or ["unknown"])[0]),
+            "schedule": ", ".join(get_names(item.get("time"))),
             "enabled": get_bool(item.get("enabled"), True),
             "logging_enabled": logging_enabled,
             "nat_enabled": False,
@@ -193,7 +193,9 @@ class CheckPointParser(BaseParser):
             "last_hit": last_hit,
             "first_hit": None,
             "install_on": get_names(item.get("install-on")),
-            "raw_data": item,
+            "raw_data": {**item, "negated": bool(negated_fields(item)), "negate_fields": negated_fields(item)},
+            "negated": bool(negated_fields(item)),
+            "negate_fields": negated_fields(item),
         }
 
     def _normalize_object(self, obj: dict) -> Optional[dict]:
@@ -225,7 +227,7 @@ class CheckPointParser(BaseParser):
         if obj_type in ("network", "subnet"):
             subnet = obj.get("subnet4", obj.get("subnet", ""))
             mask = obj.get("mask-length4", obj.get("mask-length", ""))
-            value = f"{subnet}/{mask}" if subnet and mask else subnet
+            value = f"{subnet}/{mask}" if subnet and mask != "" and mask is not None else subnet
             return {
                 "object_name": name,
                 "object_uid": uid,
@@ -239,7 +241,7 @@ class CheckPointParser(BaseParser):
                 "raw_data": obj,
             }
 
-        if obj_type == "address-range":
+        if obj_type in ("address-range", "multicast-address-range"):
             return {
                 "object_name": name,
                 "object_uid": uid,
@@ -253,17 +255,18 @@ class CheckPointParser(BaseParser):
                 "raw_data": obj,
             }
 
-        if obj_type in ("group", "multicast-address-range"):
+        if obj_type in ("group", "group-with-exclusion"):
             members = []
-            for m in obj.get("members", []):
+            refs = ([obj.get("include"), obj.get("except")] if obj_type == "group-with-exclusion" else obj.get("members", []))
+            for m in refs:
                 if isinstance(m, dict):
-                    members.append(m.get("name", ""))
+                    members.append(reference_name(m))
                 elif isinstance(m, str):
                     members.append(m)
             return {
                 "object_name": name,
                 "object_uid": uid,
-                "object_type": "group",
+                "object_type": obj_type,
                 "value": None,
                 "protocol": None,
                 "port_start": None,
@@ -274,7 +277,7 @@ class CheckPointParser(BaseParser):
             }
 
         if obj_type in ("service-tcp", "tcp"):
-            port = str(obj.get("port", "0-65535"))
+            port = str(obj.get("port", ""))
             ps, pe = self._parse_port(port)
             return {
                 "object_name": name,
@@ -290,7 +293,7 @@ class CheckPointParser(BaseParser):
             }
 
         if obj_type in ("service-udp", "udp"):
-            port = str(obj.get("port", "0-65535"))
+            port = str(obj.get("port", ""))
             ps, pe = self._parse_port(port)
             return {
                 "object_name": name,
@@ -305,11 +308,11 @@ class CheckPointParser(BaseParser):
                 "raw_data": obj,
             }
 
-        if obj_type in ("service-group", "group-with-exclusion"):
+        if obj_type == "service-group":
             members = []
             for m in obj.get("members", []):
                 if isinstance(m, dict):
-                    members.append(m.get("name", ""))
+                    members.append(reference_name(m))
                 elif isinstance(m, str):
                     members.append(m)
             return {
@@ -334,16 +337,8 @@ class CheckPointParser(BaseParser):
             return field
         return ""
 
-    def _parse_port(self, port_str: str) -> Tuple[int, int]:
-        port_str = str(port_str).strip()
-        if "-" in port_str:
-            parts = port_str.split("-")
-            try:
-                return int(parts[0]), int(parts[1])
-            except (ValueError, IndexError):
-                return 0, 65535
-        try:
-            p = int(port_str)
-            return p, p
-        except ValueError:
-            return 0, 65535
+    def _parse_port(self, port_str: str) -> Tuple[Optional[int], Optional[int]]:
+        from app.analysis.service_ports import checkpoint_service_terms
+        terms = checkpoint_service_terms({"type": "service-tcp", "port": port_str}, "")
+        first = terms[0]
+        return first["port_start"], first["port_end"]

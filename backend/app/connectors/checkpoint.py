@@ -496,6 +496,7 @@ class CheckPointConnector:
         payload_variants.append({"details-level": "standard"})   # standard detail, no hits
 
         inline_objects: list[dict] = []
+        known_uids: set[str] = set()
         all_rules: list[dict] = []
         inline_layer_names: set[str] = set()
 
@@ -521,9 +522,11 @@ class CheckPointConnector:
         while True:
             data = first_data if offset == 0 else self._get_rulebase_page(layer_name, offset, payload_extra)
 
-            # Collect inline object dictionary (present on every page — just use first)
-            if not inline_objects:
-                inline_objects = data.get("objects-dictionary", [])
+            # Each page can introduce objects referenced only by that page.
+            for obj in data.get("objects-dictionary", []):
+                if obj.get("uid") not in known_uids:
+                    inline_objects.append(obj)
+                    known_uids.add(obj.get("uid"))
 
             # Flatten batch
             batch = data.get("rulebase", [])
@@ -558,6 +561,13 @@ class CheckPointConnector:
             if offset >= total:
                 break
 
+        # Inline parents can also occur inside display sections.
+        for rule in all_rules:
+            ref = rule.get("inline-layer")
+            if ref:
+                il_name = ref.get("name") or ref.get("uid") if isinstance(ref, dict) else ref
+                if il_name:
+                    inline_layer_names.add(il_name)
         # Recursively fetch inline layers
         if fetch_inline_layers and inline_layer_names:
             for il_name in inline_layer_names:
@@ -569,6 +579,8 @@ class CheckPointConnector:
                         include_hits=include_hits,
                         fetch_inline_layers=False,  # don't recurse infinitely
                     )
+                    for child in il_rules:
+                        child["_inline_parent_unmodeled"] = True
                     all_rules.extend(il_rules)
                     inline_objects.extend(il_objects)
                 except Exception as e:

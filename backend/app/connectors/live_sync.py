@@ -428,6 +428,8 @@ def _cp_translate(raw: dict) -> dict:
       application_objects — from show-application-site-categories/groups
       vpn_communities  — from show-vpn-communities-star/meshed
     """
+    from app.parsers.checkpoint_semantics import negated_fields as cp_negated_fields
+    from app.analysis.service_ports import checkpoint_service_terms
     rules_raw           = raw.get("rules", [])
     nat_rules_raw       = raw.get("nat_rules", [])
     objects_raw         = raw.get("objects", [])
@@ -466,7 +468,7 @@ def _cp_translate(raw: dict) -> dict:
     def resolve_list(lst) -> list[str]:
         if not lst:
             return []
-        if isinstance(lst, str):
+        if isinstance(lst, (str, dict)):
             return [resolve(lst)]
         return [resolve(item) for item in lst if item]
 
@@ -498,7 +500,9 @@ def _cp_translate(raw: dict) -> dict:
             return True
         return False
 
-    all_objects = objects_raw + [o for o in inline_objects if o not in objects_raw]
+    # Maps below already handle duplicates; list membership compared entire
+    # dictionaries quadratically on large Check Point object collections.
+    all_objects = objects_raw + inline_objects
     for obj in all_objects:
         if not isinstance(obj, dict):
             continue
@@ -510,7 +514,7 @@ def _cp_translate(raw: dict) -> dict:
         # and must not appear as "unused objects" in the analysis results.
         if _is_cp_predefined(obj):
             cp_predefined_names.add(name)
-            continue
+            # Keep definitions for expansion; cleanup detectors exclude built-ins.
 
         t = obj.get("type", "")
         comment = obj.get("comments", obj.get("comment", ""))
@@ -532,6 +536,11 @@ def _cp_translate(raw: dict) -> dict:
         elif t == "multicast-address-range":
             value = f"{obj.get('ipv4-address-first', '')}-{obj.get('ipv4-address-last', '')}"
             obj_map[name] = {"type": "range", "value": value, "members": [], "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
+
+        elif t == "group-with-exclusion":
+            obj_map[name] = {"type": "group-with-exclusion", "value": None,
+                             "members": [resolve(obj.get(k)) for k in ("include", "except") if obj.get(k)],
+                             "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
 
         elif t in ("group", "address-range-group"):
             # Member lists vary by CP version/detail-level: list of full objects,
@@ -564,11 +573,13 @@ def _cp_translate(raw: dict) -> dict:
             obj_map[name] = {"type": "fqdn", "value": obj.get("domains-attribute", ""), "members": [], "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
 
         elif t == "service-tcp":
-            lo, hi = _parse_port_range(str(obj.get("port", "0")))
+            term = checkpoint_service_terms(obj, name)[0]
+            lo, hi = term["port_start"], term["port_end"]
             obj_map[name] = {"type": "service", "protocol": "TCP", "port_start": lo, "port_end": hi, "members": [], "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
 
         elif t == "service-udp":
-            lo, hi = _parse_port_range(str(obj.get("port", "0")))
+            term = checkpoint_service_terms(obj, name)[0]
+            lo, hi = term["port_start"], term["port_end"]
             obj_map[name] = {"type": "service", "protocol": "UDP", "port_start": lo, "port_end": hi, "members": [], "comment": comment, "uid": obj.get("uid"), "raw_data": obj}
 
         elif t == "service-icmp":
@@ -666,10 +677,7 @@ def _cp_translate(raw: dict) -> dict:
         rtype = r.get("type", "")
         if rtype in ("access-section",):
             continue
-        # Skip inline-layer marker rules (they're just pointers to sub-policies;
-        # the sub-policy rules are already fetched and present in the flat list)
-        if rtype == "access-rule" and _cp_action(r.get("action", {})) == "inline-layer":
-            continue
+        # Keep inline-layer parents as non-terminal rules; dropping them loses scope.
 
         hits = r.get("hits", {}) or {}
 
@@ -683,7 +691,7 @@ def _cp_translate(raw: dict) -> dict:
         section = r.get("_section", r.get("section", r.get("_layer", "")))
 
         rule = {
-            "rule_id":               str(r.get("rule-number", r.get("uid", i + 1))),
+            "rule_id":               str(r.get("uid") or f"{r.get('_layer', '')}:{r.get('rule-number', i + 1)}"),
             "rule_name":             r.get("name", f"rule_{i + 1}"),
             "section":               section,
             "sources":               resolve_list(r.get("source", [])),
@@ -692,15 +700,19 @@ def _cp_translate(raw: dict) -> dict:
             # Negated cells ("Any except X"). Containment math is inverted for
             # these, so analysis excludes them from shadow/duplicate comparison.
             # Defaults to False when the (possibly degraded) payload omits them.
-            "negated":               bool(r.get("source-negate") or r.get("destination-negate")
-                                          or r.get("service-negate")),
+            "negated":               bool(cp_negated_fields(r)),
             "negate_fields":         [f for f, k in (("source", "source-negate"),
                                                      ("destination", "destination-negate"),
-                                                     ("service", "service-negate")) if r.get(k)],
+                                                     ("service", "service-negate")) if f in cp_negated_fields(r)],
             "source_interfaces":     [],   # CP uses src/dst objects, not interface refs in rules
             "destination_interfaces": [],
             "applications":          resolve_list(r.get("content", [])),
-            "action":                _cp_action_norm(r.get("action", {})),
+            "users":                 resolve_list(r.get("users", [])),
+            "vpn":                   resolve_list(r.get("vpn", [])),
+            "install_on":            resolve_list(r.get("install-on", [])),
+            "rule_uid":              r.get("uid", ""),
+            "raw_data":              r,
+            "action":                "inline-layer" if r.get("inline-layer") else _cp_action_norm(resolve(r.get("action", {}))),
             "enabled":               r.get("enabled", True),
             "logging_enabled":       _cp_logging(r.get("track", {})),
             "nat_enabled":           False,
@@ -785,12 +797,8 @@ def _cp_action(action) -> str:
 
 def _cp_action_norm(action) -> str:
     """Normalise CP action to 'accept' / 'deny'."""
-    name = _cp_action(action)
-    if any(x in name for x in ("drop", "reject", "deny", "block")):
-        return "deny"
-    if name in ("inline-layer",):
-        return "accept"   # inline layer = sub-policy, treated as accept
-    return "accept"
+    from app.parsers.checkpoint_semantics import normalize_action
+    return normalize_action(action)
 
 
 def _cp_logging(track) -> bool:
@@ -900,6 +908,7 @@ def _write_to_db(parsed: dict, policy: FirewallPolicy, db: Session):
             policy_id=policy.id,
             vendor=vendor,
             rule_id=r.get("rule_id", str(seq + 1)),
+            rule_uid=r.get("rule_uid", ""),
             rule_name=r.get("rule_name", ""),
             section=r.get("section", ""),
             rule_number=seq + 1,
@@ -909,6 +918,9 @@ def _write_to_db(parsed: dict, policy: FirewallPolicy, db: Session):
             destinations=r.get("destinations", []),
             services=r.get("services", []),
             applications=r.get("applications", []),
+            users=r.get("users", []),
+            vpn=r.get("vpn", []),
+            install_on=r.get("install_on", []),
             action=r.get("action", "accept"),
             schedule=r.get("schedule", "always"),
             enabled=r.get("enabled", True),
@@ -918,7 +930,8 @@ def _write_to_db(parsed: dict, policy: FirewallPolicy, db: Session):
             hit_count=r.get("hit_count"),
             last_hit=r.get("last_hit"),
             first_hit=r.get("first_hit"),
-            raw_data={"negated": bool(r.get("negated")),
+            raw_data={**(r.get("raw_data") or {}), "_layer": r.get("_layer", ""),
+                      "negated": bool(r.get("negated")),
                       "negate_fields": r.get("negate_fields", [])},
         )
         db.add(db_rule)

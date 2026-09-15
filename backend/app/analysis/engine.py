@@ -497,7 +497,7 @@ def _rule_to_dict(r: FirewallRule) -> dict:
         "action": r.action,
         "schedule": r.schedule,
         "enabled": r.enabled,
-        "logging_enabled": r.logging_enabled,
+        "logging_enabled": None if (getattr(r, "vendor", "") or "").replace(" ", "").lower() == "checkpoint" and not raw.get("track") else r.logging_enabled,
         "nat_enabled": r.nat_enabled,
         "comments": r.comments,
         "hit_count": r.hit_count,
@@ -506,6 +506,8 @@ def _rule_to_dict(r: FirewallRule) -> dict:
         "usage_observation": raw.get("usage_observation"),
         "security_profiles": profiles,
         "source_port_constraint": raw.get("src_port"),
+        "evaluation_layer": raw.get("_layer"),
+        "scope_unresolved": bool(raw.get("_inline_parent_unmodeled")),
         # True only when raw_data looks like a parsed FortiGate CLI policy, so the
         # profile-gap detector never fires on a rule whose profiles weren't captured.
         "_cli_parsed": bool(raw) and any(k in raw for k in ("_raw_lines", "srcintf", "dstintf")),
@@ -1518,7 +1520,7 @@ def _analyze_mergeable_rules(rules: List[dict]) -> List[dict]:
     positions = {id(r): i for i, r in enumerate(ordered)}
     from app.analysis.rule_semantics import _stable
     for rule in ordered:
-        if not rule.get("enabled", True) or rule.get("negated") or rule.get("negate_fields"):
+        if not rule.get("enabled", True) or rule.get("negated") or rule.get("negate_fields") or rule.get("scope_unresolved"):
             continue
         action = (rule.get("action") or "").lower()
         src_key = tuple(sorted(_ref_name(r) for r in rule.get("sources", []) or []))
@@ -1531,7 +1533,7 @@ def _analyze_mergeable_rules(rules: List[dict]) -> List[dict]:
         semantics = json.dumps(_stable({field: rule.get(field) for field in (
             "vendor", "section", "source_interfaces", "destination_interfaces", "install_on",
             "applications", "users", "vpn", "schedule", "nat_enabled", "logging_enabled",
-            "security_profiles", "source_port_constraint",
+            "security_profiles", "source_port_constraint", "evaluation_layer", "scope_unresolved",
         )}), sort_keys=True, default=str)
         groups.setdefault((action, src_key, dst_key, semantics), []).append(rule)
 
@@ -2556,7 +2558,8 @@ def _is_vendor_builtin_object(obj: dict) -> bool:
                 return True
 
         domain = raw.get("domain")
-        if isinstance(domain, dict) and (domain.get("name") or "").lower() == "check point data":
+        if isinstance(domain, dict) and ((domain.get("name") or "").lower() in {"check point", "checkpoint", "check point data"}
+                                        or domain.get("domain-type") in {"cpms-domain", "cpms domain"}):
             return True
         if isinstance(domain, str) and domain.lower() == "check point data":
             return True

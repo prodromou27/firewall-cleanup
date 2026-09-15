@@ -75,6 +75,8 @@ def expand_address_object(
         return [{"type": "unknown", "value": name, "name": name}]
 
     obj_type = (obj.get("object_type") or "").lower()
+    if obj_type == "group-with-exclusion" or (obj.get("raw_data") or {}).get("type") == "group-with-exclusion":
+        return [{"type": "unknown", "value": name, "name": name, "reason": "group_exclusion"}]
     if "group" in obj_type:
         results = []
         for member in obj.get("members", []):
@@ -231,9 +233,12 @@ def expand_service_object(
         return results or [{"protocol": "unknown", "port_start": None, "port_end": None,
                             "name": name, "unknown": True, "empty_group": True}]
 
-    from app.analysis.service_ports import fortigate_service_terms
+    from app.analysis.service_ports import fortigate_service_terms, checkpoint_service_terms
     raw = obj.get("raw_data") or {}
     if isinstance(raw, dict):
+        terms = checkpoint_service_terms(raw, name)
+        if terms is not None:
+            return terms
         terms = fortigate_service_terms(raw, name)
         if terms is not None:
             return terms
@@ -245,7 +250,15 @@ def expand_service_object(
     }]
 
 
+def _unresolved_rule_field(rule: dict, field: str) -> bool:
+    negation = rule.get("negate_fields") or []
+    return bool(rule.get("scope_unresolved") or field in negation
+                or (rule.get("negated") and not negation))
+
+
 def expand_rule_sources(rule: dict, obj_map: Dict[str, dict]) -> List[dict]:
+    if _unresolved_rule_field(rule, "source"):
+        return [{"type": "unknown", "value": "", "name": "unresolved scope or negation"}]
     results = []
     for src in rule.get("sources", []):
         results.extend(expand_address_object(src, obj_map))
@@ -253,6 +266,8 @@ def expand_rule_sources(rule: dict, obj_map: Dict[str, dict]) -> List[dict]:
 
 
 def expand_rule_destinations(rule: dict, obj_map: Dict[str, dict]) -> List[dict]:
+    if _unresolved_rule_field(rule, "destination"):
+        return [{"type": "unknown", "value": "", "name": "unresolved scope or negation"}]
     results = []
     for dst in rule.get("destinations", []):
         results.extend(expand_address_object(dst, obj_map))
@@ -260,6 +275,9 @@ def expand_rule_destinations(rule: dict, obj_map: Dict[str, dict]) -> List[dict]
 
 
 def expand_rule_services(rule: dict, obj_map: Dict[str, dict]) -> List[dict]:
+    if _unresolved_rule_field(rule, "service"):
+        return [{"protocol": "unknown", "port_start": None, "port_end": None,
+                 "unknown": True, "name": "unresolved scope or negation"}]
     results = []
     for svc in rule.get("services", []):
         results.extend(expand_service_object(svc, obj_map))

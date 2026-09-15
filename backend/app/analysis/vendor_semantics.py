@@ -32,7 +32,8 @@ def context_key(rule: dict, vendor: str) -> Tuple[Any, ...]:
     install = _fz(rule.get("install_on"))
 
     if "check" in v:           # Check Point: ordered/inline layer + install-on target
-        return ("checkpoint", section, install)
+        layer = str(rule.get("evaluation_layer") or section).strip()
+        return ("checkpoint", layer, install)
     if "palo" in v:            # Palo Alto: Pre/Local/Post scope + zone pair
         return ("paloalto", section, src_if, dst_if)
     if "huawei" in v:          # Huawei USG: source-zone / destination-zone
@@ -52,7 +53,7 @@ def context_label(rule: dict, vendor: str) -> str:
     dst = ", ".join(rule.get("destination_interfaces") or []) or "any"
     if "check" in v:
         inst = ", ".join(rule.get("install_on") or []) or "all gateways"
-        return f"layer '{section or 'Network'}', install-on {inst}"
+        return f"layer '{rule.get('evaluation_layer') or section or 'Network'}', install-on {inst}"
     if "palo" in v:
         return f"{section or 'rulebase'} ({src} → {dst})"
     if "huawei" in v:

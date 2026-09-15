@@ -14,7 +14,7 @@ from app.analysis.normalizer import (
 from app.analysis.ip_utils import network_contains, networks_overlap, is_any
 from app.analysis.service_utils import service_contains, service_is_any, services_overlap
 from app.analysis.vendor_semantics import context_key, context_label
-from app.analysis.rule_semantics import comparable_rule_semantics, expansion_complete
+from app.analysis.rule_semantics import rule_semantics_key, expansion_complete
 
 
 def _sources_contained(earlier_srcs: List[dict], later_srcs: List[dict]) -> Tuple[bool, str]:
@@ -83,7 +83,7 @@ def _traffic_overlaps(first: dict, second: dict) -> bool:
 
 def _has_unknown(entry: dict) -> bool:
     """True if the rule references objects that could not be expanded."""
-    return not expansion_complete(entry)
+    return not entry["complete"] if "complete" in entry else not expansion_complete(entry)
 
 
 def detect_shadows(
@@ -105,12 +105,19 @@ def detect_shadows(
     contexts: "OrderedDict[Any, list]" = OrderedDict()
     not_evaluated: list = []
     for rule in rules:
+        if not rule.get("enabled", True):
+            continue
         entry = {
             "rule": rule,
             "sources": expand_rule_sources(rule, obj_map),
             "destinations": expand_rule_destinations(rule, obj_map),
             "services": expand_rule_services(rule, obj_map),
         }
+        entry["complete"] = expansion_complete(entry)
+        entry["semantics"] = rule_semantics_key(rule)
+        if not entry["complete"]:
+            not_evaluated.append(rule.get("id"))
+            continue
         contexts.setdefault(context_key(rule, vendor), []).append(entry)
 
     for expanded in contexts.values():
@@ -125,13 +132,13 @@ def detect_shadows(
             "confidence": "High",
             "title": f"Shadowing not evaluated for {len(not_evaluated)} rule(s)",
             "description": (
-                "These rules could not be compared safely because object expansion "
-                "was incomplete or address-family semantics are unsupported. Review "
+                "These rules could not be compared safely because match fields, object expansion, "
+                "service bounds, actions or address-family semantics are incomplete or unsupported. Review "
                 "the source configuration before drawing a shadowing conclusion."
             ),
             "affected_rules": [r for r in not_evaluated],
             "evidence": {"count": len(not_evaluated),
-                         "reason": "incomplete object expansion or unsupported address-family semantics"},
+                         "reason": "incomplete or unsupported match semantics"},
             "recommendation": (
                 "Read-only note. Confirm object and address-family coverage before "
                 "reassessing; no action is implied for the rules themselves."
@@ -173,7 +180,7 @@ def _detect_within_context(expanded: List[dict], vendor: str, not_evaluated: lis
                 continue
             if earlier_rule.get("negated"):
                 continue
-            if not comparable_rule_semantics(earlier_rule, later_rule):
+            if earlier["semantics"] != later["semantics"]:
                 continue
 
             src_ok, src_rel = _sources_contained(earlier["sources"], later["sources"])

@@ -1,62 +1,27 @@
 """Detect duplicate firewall rules using expanded normalized objects."""
-from typing import List, Dict, Tuple, Any
+from typing import List, Dict
 from app.analysis.normalizer import (
     expand_rule_sources, expand_rule_destinations, expand_rule_services
 )
-from app.analysis.ip_utils import networks_equal, is_any
-from app.analysis.service_utils import services_equal, service_is_any
-from app.analysis.rule_semantics import comparable_rule_semantics, expansion_complete
+from app.analysis.ip_utils import is_any, parse_ip_network
+from app.analysis.service_utils import service_is_any
+from app.analysis.rule_semantics import rule_semantics_key, expansion_complete
 
 
-def _addr_sets_equal(a: List[dict], b: List[dict]) -> bool:
-    """True if two expanded address lists are semantically equal."""
-    # If either side has unresolvable objects, we cannot confirm equality
-    if any(s.get("type") == "unknown" for s in a) or any(s.get("type") == "unknown" for s in b):
-        return False
-
-    # Check if either is 'any'
-    a_any = any(s.get("type") == "any" or is_any(s.get("value", "")) for s in a)
-    b_any = any(s.get("type") == "any" or is_any(s.get("value", "")) for s in b)
-    if a_any and b_any:
-        return True
-    if a_any != b_any:
-        return False
-
-    # Compare by expanded IP values
-    a_values = sorted(s.get("value", "") for s in a)
-    b_values = sorted(s.get("value", "") for s in b)
-
-    if len(a_values) != len(b_values):
-        return False
-
-    return all(networks_equal(av, bv) for av, bv in zip(a_values, b_values))
+def _address_key(items: List[dict]) -> tuple:
+    if any(item.get("type") == "any" or is_any(item.get("value", "")) for item in items):
+        return ("any",)
+    return tuple(sorted({str(parse_ip_network(item["value"])) for item in items}))
 
 
-def _svc_sets_equal(a: List[dict], b: List[dict]) -> bool:
-    """True if two expanded service lists are semantically equal."""
-    # If either side has unresolvable objects, we cannot confirm equality
-    if any(s.get("unknown") for s in a) or any(s.get("unknown") for s in b):
-        return False
-
-    a_any = any(service_is_any(s) for s in a)
-    b_any = any(service_is_any(s) for s in b)
-    if a_any and b_any:
-        return True
-    if a_any != b_any:
-        return False
-
-    a_sorted = sorted(a, key=lambda s: (s.get("protocol", ""), s.get("port_start", 0)))
-    b_sorted = sorted(b, key=lambda s: (s.get("protocol", ""), s.get("port_start", 0)))
-
-    if len(a_sorted) != len(b_sorted):
-        return False
-
-    return all(services_equal(av, bv) for av, bv in zip(a_sorted, b_sorted))
-
-
-def _expansion_complete(entry: dict) -> bool:
-    """True if the rule expanded with no unresolved (unknown) objects."""
-    return expansion_complete(entry)
+def _service_key(items: List[dict]) -> tuple:
+    if any(service_is_any(item) for item in items):
+        return (("any", 0, 65535),)
+    return tuple(sorted({
+        ("opaque", (item.get("name") or "").lower()) if item.get("opaque")
+        else (item["protocol"].lower(), item["port_start"], item["port_end"])
+        for item in items
+    }, key=repr))
 
 
 def detect_duplicates(
@@ -91,40 +56,19 @@ def detect_duplicates(
             "services": expand_rule_services(rule, obj_map),
         })
 
-    # Group rules into equivalence sets via transitive matching.
-    n = len(expanded)
-    group_of = [-1] * n  # index -> group id
-    groups: List[List[int]] = []
-
-    for i in range(n):
-        if group_of[i] != -1:
+    # Hash complete traffic signatures instead of comparing every rule pair.
+    # Restriction/context keys are part of the signature, never a post-filter.
+    buckets = {}
+    for index, entry in enumerate(expanded):
+        if not expansion_complete(entry):
             continue
-        # Start a new group with rule i
-        gid = len(groups)
-        groups.append([i])
-        group_of[i] = gid
-
-        for j in range(i + 1, n):
-            if group_of[j] != -1:
-                continue
-            r1 = expanded[i]
-            r2 = expanded[j]
-            # Only compare rules in the same vendor evaluation context.
-            if r1["context"] != r2["context"]:
-                continue
-            action1 = (r1["rule"].get("action") or "").lower()
-            action2 = (r2["rule"].get("action") or "").lower()
-            if action1 != action2:
-                continue
-            if not (expansion_complete(r1) and expansion_complete(r2)):
-                continue
-            if not comparable_rule_semantics(r1["rule"], r2["rule"]):
-                continue
-            if (_addr_sets_equal(r1["sources"], r2["sources"])
-                    and _addr_sets_equal(r1["destinations"], r2["destinations"])
-                    and _svc_sets_equal(r1["services"], r2["services"])):
-                groups[gid].append(j)
-                group_of[j] = gid
+        action = (entry["rule"].get("action") or "").lower()
+        if not action:
+            continue
+        key = (entry["context"], action, rule_semantics_key(entry["rule"]),
+               _address_key(entry["sources"]), _address_key(entry["destinations"]), _service_key(entry["services"]))
+        buckets.setdefault(key, []).append(index)
+    groups = buckets.values()
 
     for member_idxs in groups:
         if len(member_idxs) < 2:
@@ -135,9 +79,7 @@ def detect_duplicates(
         first_rule = first["rule"]
         action = (first_rule.get("action") or "").lower()
 
-        # Confidence reflects how completely objects expanded across the set.
-        all_complete = all(_expansion_complete(m) for m in members)
-        confidence = "High" if all_complete else "Medium"
+        all_complete = True  # Incomplete expansions never enter the index.
 
         def _label(entry):
             r = entry["rule"]
@@ -155,7 +97,7 @@ def detect_duplicates(
             title = f"Rule {dup_ids[0]} appears to duplicate Rule {first_id}"
             description = (
                 f"Rule {dup_ids[0]} matches the same traffic as Rule {first_id}. "
-                "Both rules permit the same source, destination, and service using "
+                "Both rules match the same source, destination, and service using "
                 "equivalent expanded objects. Maintaining duplicate rules increases "
                 "policy complexity and may cause confusion during troubleshooting or "
                 "future firewall changes."
@@ -169,17 +111,10 @@ def detect_duplicates(
                 "objects. Consolidating duplicate rules reduces policy complexity and "
                 "the risk of inconsistent future changes."
             )
-        if not all_complete:
-            description += (
-                " Note: some referenced objects could not be fully expanded, so this "
-                "match is reported with reduced confidence and should be validated "
-                "against the effective object definitions."
-            )
-
         findings.append({
             "finding_type": "duplicate_rule",
             "severity": "Medium",
-            "confidence": confidence,
+            "confidence": "High",
             "title": title,
             "description": description,
             "affected_rules": affected_rule_db_ids,

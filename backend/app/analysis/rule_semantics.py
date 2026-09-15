@@ -16,24 +16,36 @@ def _stable(value):
     return value
 
 
+def rule_semantics_key(rule: dict) -> str:
+    """Stable comparison key, computed once per rule by indexed detectors."""
+    return json.dumps(_stable({field: rule.get(field) for field in (
+        "applications", "users", "vpn", "schedule", "nat_enabled",
+        "logging_enabled", "security_profiles",
+    )}), sort_keys=True, default=str)
+
+
 def comparable_rule_semantics(first: dict, second: dict) -> bool:
     """Require equivalent known match and inspection behavior before comparison."""
-    for field in ("applications", "users", "vpn", "schedule", "nat_enabled",
-                  "logging_enabled", "security_profiles"):
-        left = first.get(field)
-        right = second.get(field)
-        if json.dumps(_stable(left), sort_keys=True, default=str) != json.dumps(
-                _stable(right), sort_keys=True, default=str):
-            return False
-    return True
+    return rule_semantics_key(first) == rule_semantics_key(second)
 
 
 def expansion_complete(entry: dict) -> bool:
     """Unknown and empty groups cannot prove a traffic-set relationship."""
+    from app.analysis.ip_utils import parse_ip_network
+    if entry["rule"].get("negated") or entry["rule"].get("negate_fields"):
+        return False
+    if (entry["rule"].get("action") or "").lower() not in (
+            "accept", "allow", "permit", "deny", "drop", "reject", "block"):
+        return False  # Jump/continue/inspection actions do not prove first-match termination.
+    if any(not entry["rule"].get(field) for field in ("sources", "destinations", "services")):
+        return False  # Missing match fields are not evidence of an explicit wildcard.
     for field in ("sources", "destinations"):
         if not entry[field] or any(
                 item.get("type") in {"unknown", "empty_group"} for item in entry[field]):
             return False
+        if any(item.get("type") != "any" and parse_ip_network(item.get("value", "")) is None
+               for item in entry[field]):
+            return False  # Dynamic names, ranges and unsupported types need typed semantics.
         # The current normalizer maps any4 and any6 to the same IPv4 wildcard,
         # while IPv6 network containment is not implemented. Suppress definitive
         # comparisons until address families have a typed canonical model.
@@ -46,6 +58,16 @@ def expansion_complete(entry: dict) -> bool:
                 ":" in str(ref) or str(ref).strip().lower() in {"any4", "any6"}
                 for ref in entry["rule"].get(field, []) or []):
             return False
-    return bool(entry["services"]) and not any(
-        item.get("unknown") or item.get("empty_group") for item in entry["services"]
-    )
+    if not entry["services"]:
+        return False
+    for item in entry["services"]:
+        if item.get("unknown") or item.get("empty_group"):
+            return False
+        if item.get("opaque"):
+            continue
+        if (item.get("protocol") or "").lower() not in ("any", "tcp", "udp"):
+            return False
+        start, end = item.get("port_start"), item.get("port_end")
+        if type(start) is not int or type(end) is not int or not 0 <= start <= end <= 65535:
+            return False
+    return True
